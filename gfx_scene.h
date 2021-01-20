@@ -102,6 +102,41 @@ GfxConstRef<TYPE> gfxSceneFindObjectByAssetFile(GfxScene scene, char const *asse
 }
 
 //!
+//! Camera object.
+//!
+
+struct GfxCamera
+{
+    enum
+    {
+        kType_Perspective = 0,
+
+        kType_Count
+    } type;
+
+    glm::vec3 eye;
+    glm::vec3 center;
+    glm::vec3 up;
+
+    float aspect;
+    float fovY;
+    float nearZ;
+    float farZ;
+};
+
+GfxRef<GfxCamera> gfxSceneCreateCamera(GfxScene scene);
+GfxResult gfxSceneDestroyCamera(GfxScene scene, uint64_t camera_handle);
+
+GfxResult gfxSceneSetActiveCamera(GfxScene scene, uint64_t camera_handle);
+GfxConstRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene);
+
+uint32_t gfxSceneGetCameraCount(GfxScene scene);
+GfxCamera const *gfxSceneGetCameras(GfxScene scene);
+GfxCamera *gfxSceneGetCamera(GfxScene scene, uint64_t camera_handle);
+GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle);
+GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index);
+
+//!
 //! Texture map object.
 //!
 
@@ -197,6 +232,12 @@ GfxConstRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t inst
 //! Template specializations.
 //!
 
+template<> inline uint32_t gfxSceneGetObjectCount<GfxCamera>(GfxScene scene) { return gfxSceneGetCameraCount(scene); }
+template<> inline GfxCamera const *gfxSceneGetObjects<GfxCamera>(GfxScene scene) { return gfxSceneGetCameras(scene); }
+template<> inline GfxCamera *gfxSceneGetObject<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCamera(scene, object_handle); }
+template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
+template<> inline GfxConstRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene scene, uint32_t object_index) { return gfxSceneGetCameraHandle(scene, object_index); }
+
 template<> inline uint32_t gfxSceneGetObjectCount<GfxTextureMap>(GfxScene scene) { return gfxSceneGetTextureMapCount(scene); }
 template<> inline GfxTextureMap const *gfxSceneGetObjects<GfxTextureMap>(GfxScene scene) { return gfxSceneGetTextureMaps(scene); }
 template<> inline GfxTextureMap *gfxSceneGetObject<GfxTextureMap>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetTextureMap(scene, object_handle); }
@@ -236,12 +277,19 @@ template<typename TYPE> GfxConstRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYGLTF_NO_STB_IMAGE_WRITE
+#include <map>                  // std::map
 #include "tiny_gltf.h"          // glTF loader
 #include "tiny_obj_loader.cc"   // obj loader
 
 class GfxSceneInternal
 {
     GFX_NON_COPYABLE(GfxSceneInternal);
+
+    GfxArray<GfxCamera> cameras_;
+    GfxArray<uint64_t> camera_refs_;
+    GfxArray<GfxMetadata> camera_metadata_;
+    GfxConstRef<GfxCamera> active_camera_;
+    GfxHandles camera_handles_;
 
     GfxArray<GfxTextureMap> texture_maps_;
     GfxArray<uint64_t> texture_map_refs_;
@@ -271,6 +319,11 @@ class GfxSceneInternal
     template<typename TYPE> GfxArray<GfxMetadata> &object_metadata_();
     template<typename TYPE> GfxHandles &object_handles_();
 
+    template<> inline GfxArray<GfxCamera> &objects_<GfxCamera>() { return cameras_; }
+    template<> inline GfxArray<uint64_t> &object_refs_<GfxCamera>() { return camera_refs_; }
+    template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxCamera>() { return camera_metadata_; }
+    template<> inline GfxHandles &object_handles_<GfxCamera>() { return camera_handles_; }
+
     template<> inline GfxArray<GfxTextureMap> &objects_<GfxTextureMap>() { return texture_maps_; }
     template<> inline GfxArray<uint64_t> &object_refs_<GfxTextureMap>() { return texture_map_refs_; }
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxTextureMap>() { return texture_map_metadata_; }
@@ -292,7 +345,8 @@ class GfxSceneInternal
     template<> inline GfxHandles &object_handles_<GfxInstance>() { return instance_handles_; }
 
 public:
-    GfxSceneInternal(GfxScene &scene) : texture_map_handles_("texture map"), material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
+    GfxSceneInternal(GfxScene &scene) : camera_handles_("camera"), texture_map_handles_("texture map")
+                                      , material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
                                       { scene.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxSceneInternal() { terminate(); }
 
@@ -323,11 +377,24 @@ public:
 
     GfxResult clear()
     {
+        clearObjects<GfxCamera>();
         clearObjects<GfxTextureMap>();
         clearObjects<GfxMaterial>();
         clearObjects<GfxMesh>();
         clearObjects<GfxInstance>();
         return kGfxResult_NoError;
+    }
+
+    GfxResult setActiveCamera(GfxScene const &scene, uint64_t camera_handle)
+    {
+        active_camera_.handle = camera_handle;
+        active_camera_.scene = scene;
+        return kGfxResult_NoError;
+    }
+
+    GfxConstRef<GfxCamera> getActiveCamera()
+    {
+        return active_camera_;
     }
 
     template<typename TYPE>
@@ -336,7 +403,7 @@ public:
         GfxRef<TYPE> object_ref = {};
         object_ref.handle = object_handles_<TYPE>().allocate_handle();
         object_refs_<TYPE>().insert(GetObjectIndex(object_ref.handle), object_ref.handle);
-        object_metadata_<TYPE>().insert(GetObjectIndex(object_ref.handle)) = {};
+        object_metadata_<TYPE>().insert(GetObjectIndex(object_ref.handle)).is_valid = true;
         objects_<TYPE>().insert(GetObjectIndex(object_ref.handle)) = {};
         object_ref.scene = scene;
         return object_ref;
@@ -360,7 +427,7 @@ public:
     GfxResult clearObjects()
     {
         while(getObjectCount<TYPE>() > 0)
-            GFX_TRY(destroyObject<TYPE>(object_refs_<TYPE>()[0]));
+            GFX_TRY(destroyObject<TYPE>(object_refs_<TYPE>().data()[0]));
         return kGfxResult_NoError;
     }
 
@@ -574,6 +641,73 @@ GfxResult gfxSceneClear(GfxScene scene)
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
     return gfx_scene->clear();
+}
+
+GfxRef<GfxCamera> gfxSceneCreateCamera(GfxScene scene)
+{
+    GfxRef<GfxCamera> const camera_ref = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return camera_ref;   // invalid parameter
+    return gfx_scene->createObject<GfxCamera>(scene);
+}
+
+GfxResult gfxSceneDestroyCamera(GfxScene scene, uint64_t camera_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->destroyObject<GfxCamera>(camera_handle);
+}
+
+GfxResult gfxSceneSetActiveCamera(GfxScene scene, uint64_t camera_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->setActiveCamera(scene, camera_handle);
+}
+
+GfxConstRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene)
+{
+    GfxConstRef<GfxCamera> const camera_ref = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return camera_ref;   // invalid parameter
+    return gfx_scene->getActiveCamera();
+}
+
+uint32_t gfxSceneGetCameraCount(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return 0;    // invalid parameter
+    return gfx_scene->getObjectCount<GfxCamera>();
+}
+
+GfxCamera const *gfxSceneGetCameras(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObjects<GfxCamera>();
+}
+
+GfxCamera *gfxSceneGetCamera(GfxScene scene, uint64_t camera_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObject<GfxCamera>(camera_handle);
+}
+
+GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle)
+{
+    GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxCamera>(camera_handle);
+}
+
+GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index)
+{
+    GfxConstRef<GfxCamera> const camera_ref = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return camera_ref;   // invalid parameter
+    return gfx_scene->getObjectHandle<GfxCamera>(scene, camera_index);
 }
 
 GfxRef<GfxTextureMap> gfxSceneCreateTextureMap(GfxScene scene)

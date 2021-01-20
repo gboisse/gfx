@@ -26,7 +26,9 @@ SOFTWARE.
 #include <cstdio>   // vprintf, etc.
 #include <cstdarg>  // va_list, etc.
 #include <cstdint>  // uint32_t, etc.
+#include <string>   // std::string
 #include <utility>  // std::swap(), std::move()
+#include <vector>   // std::vector
 
 //!
 //! Constants.

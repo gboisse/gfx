@@ -291,7 +291,6 @@ GfxResult gfxFinish(GfxContext context);
 
 #include <map>              // std::map
 #include <deque>            // std::deque
-#include <vector>           // std::vector
 #include "dxcapi.h"         // shader compiler
 #include "d3d12shader.h"    // shader reflection
 
@@ -567,6 +566,8 @@ class GfxInternal
     {
         inline Texture()
         {
+            for(uint32_t i = 0; i < ARRAYSIZE(dsv_descriptor_slots_); ++i)
+                dsv_descriptor_slots_[i] = 0xFFFFFFFFu;
             for(uint32_t i = 0; i < ARRAYSIZE(rtv_descriptor_slots_); ++i)
                 rtv_descriptor_slots_[i] = 0xFFFFFFFFu;
         }
@@ -579,6 +580,7 @@ class GfxInternal
         uint32_t flags_;
         ID3D12Resource *resource_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
+        uint32_t dsv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         uint32_t rtv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         D3D12_RESOURCE_STATES resource_state_ = D3D12_RESOURCE_STATE_COMMON;
     };
@@ -2032,19 +2034,37 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear an invalid texture object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear non-existing mip level %u", mip_level);
-        float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
         Texture &gfx_texture = textures_[texture];
         SetObjectName(gfx_texture, texture.name);
-        GFX_TRY(ensureTextureHasRenderTargetView(gfx_texture, mip_level));
-        GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[mip_level] != 0xFFFFFFFFu);
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-        D3D12_RECT
-        rect        = {};
-        rect.right  = (uint32_t)resource_desc.Width;
-        rect.bottom = (uint32_t)resource_desc.Height;
-        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
-        submitPipelineBarriers();   // transition our resources if needed
-        command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level]), clear_color, 1, &rect);
+        if(IsDepthStencilFormat(texture.format))
+        {
+            D3D12_CLEAR_FLAGS clear_flags = D3D12_CLEAR_FLAG_DEPTH;
+            if(HasStencilBits(texture.format)) clear_flags |= D3D12_CLEAR_FLAG_STENCIL;
+            GFX_TRY(ensureTextureHasDepthStencilView(gfx_texture, mip_level));
+            GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[mip_level] != 0xFFFFFFFFu);
+            D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+            D3D12_RECT
+            rect        = {};
+            rect.right  = (uint32_t)resource_desc.Width;
+            rect.bottom = (uint32_t)resource_desc.Height;
+            transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
+            submitPipelineBarriers();   // transition our resources if needed
+            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level]), clear_flags, 1.0f, 0, 1, &rect);
+        }
+        else
+        {
+            float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            GFX_TRY(ensureTextureHasRenderTargetView(gfx_texture, mip_level));
+            GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[mip_level] != 0xFFFFFFFFu);
+            D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+            D3D12_RECT
+            rect        = {};
+            rect.right  = (uint32_t)resource_desc.Width;
+            rect.bottom = (uint32_t)resource_desc.Height;
+            transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            submitPipelineBarriers();   // transition our resources if needed
+            command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level]), clear_color, 1, &rect);
+        }
         return kGfxResult_NoError;
     }
 
@@ -2633,6 +2653,34 @@ private:
         return 0;
     }
 
+    static inline bool IsDepthStencilFormat(DXGI_FORMAT format)
+    {
+        switch(format)
+        {
+        case DXGI_FORMAT_D32_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+            return true;
+        default:
+            break;
+        }
+        return false;
+    }
+
+    static inline bool HasStencilBits(DXGI_FORMAT format)
+    {
+        switch(format)
+        {
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+            return true;
+        default:
+            break;
+        }
+        return false;
+    }
+
     uint64_t getDescriptorHeapId() const
     {
         return (static_cast<uint64_t>(descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0) << 32);
@@ -2666,6 +2714,8 @@ private:
     {
         collect(texture.resource_);
         collect(texture.allocation_);
+        for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
+            freeDSVDescriptor(texture.dsv_descriptor_slots_[i]);
         for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
             freeRTVDescriptor(texture.rtv_descriptor_slots_[i]);
     }
@@ -3258,11 +3308,11 @@ private:
                 if(!texture_handles_.has_handle(texture.handle))
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at depth/stencil target");
                 Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
-                GFX_TRY(ensureTextureHasRenderTargetView(gfx_texture, kernel.draw_state_.depth_stencil_target_.mip_level));
-                GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level] != 0xFFFFFFFFu);
-                depth_stencil_target = rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level]);
+                GFX_TRY(ensureTextureHasDepthStencilView(gfx_texture, kernel.draw_state_.depth_stencil_target_.mip_level));
+                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level] != 0xFFFFFFFFu);
+                depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level]);
                 render_width = min(render_width, texture.width); render_height = min(render_height, texture.height);
-                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
+                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             }
             if(color_target_count == 0 && depth_stencil_target.ptr == 0)    // special case - if no color target is supplied, draw to back buffer
             {
@@ -3814,17 +3864,35 @@ private:
                     resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                     command_list_->ResourceBarrier(1, &resource_barrier);
                 }
-                collect(texture.resource_);
-                collect(texture.allocation_);
-                for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
-                    freeRTVDescriptor(texture.rtv_descriptor_slots_[i]);
+                collect(texture);   // release previous texture
                 command_list_->CopyResource(resource, texture.resource_);
                 texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+                for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
+                    texture.dsv_descriptor_slots_[i] = 0xFFFFFFFFu;
                 for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
                     texture.rtv_descriptor_slots_[i] = 0xFFFFFFFFu;
                 texture.allocation_ = allocation;
                 texture.resource_ = resource;
             }
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult ensureTextureHasDepthStencilView(Texture &texture, uint32_t mip_level)
+    {
+        GFX_TRY(ensureTextureHasUsageFlag(texture, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL));
+        GFX_ASSERT(mip_level < ARRAYSIZE(texture.dsv_descriptor_slots_));
+        if(texture.dsv_descriptor_slots_[mip_level] == 0xFFFFFFFFu)
+        {
+            texture.dsv_descriptor_slots_[mip_level] = allocateDSVDescriptor();
+            if(texture.dsv_descriptor_slots_[mip_level] == 0xFFFFFFFFu)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate DSV descriptor");
+            D3D12_RESOURCE_DESC const resource_desc = texture.resource_->GetDesc();
+            D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {};
+            dsv_desc.Format = resource_desc.Format;
+            dsv_desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
+            dsv_desc.Texture2D.MipSlice = mip_level;
+            device_->CreateDepthStencilView(texture.resource_, &dsv_desc, dsv_descriptors_.getCPUHandle(texture.dsv_descriptor_slots_[mip_level]));
         }
         return kGfxResult_NoError;
     }
@@ -4291,12 +4359,11 @@ private:
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to auto-resize texture object(s) to %ux%u", window_width, window_height);
                 break;  // out of memory
             }
-            collect(texture.resource_);
-            collect(texture.allocation_);
-            for(uint32_t j = 0; j < ARRAYSIZE(texture.rtv_descriptor_slots_); ++j)
-                freeRTVDescriptor(texture.rtv_descriptor_slots_[j]);
+            collect(texture);   // release previous texture
             texture.resource_ = resource;
             texture.allocation_ = allocation;
+            for(uint32_t j = 0; j < ARRAYSIZE(texture.dsv_descriptor_slots_); ++j)
+                texture.dsv_descriptor_slots_[j] = 0xFFFFFFFFu;
             for(uint32_t j = 0; j < ARRAYSIZE(texture.rtv_descriptor_slots_); ++j)
                 texture.rtv_descriptor_slots_[j] = 0xFFFFFFFFu;
             texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;

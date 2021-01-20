@@ -5,7 +5,7 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader-2.0-rc1)
 
 add_library(gfx STATIC gfx.cpp)
 
-target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_imgui.h gfx_window.h)
+target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_imgui.h gfx_scene.h gfx_window.h)
 
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.79)
