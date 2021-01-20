@@ -188,7 +188,7 @@ public:
             if(index_buffer_size > index_buffer.getSize())
             {
                 gfxDestroyBuffer(gfx_, index_buffer);   // release previous index memory
-                index_buffer = gfxCreateBuffer(gfx_, index_buffer_size + ((index_buffer_size + 2) >> 1), nullptr, kGfxCpuAccess_Write);
+                index_buffer = gfxCreateBuffer(gfx_, GFX_ALIGN(index_buffer_size + ((index_buffer_size + 2) >> 1), 65536), nullptr, kGfxCpuAccess_Write);
                 if(!index_buffer)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate buffer of %d indices to draw ImGui", draw_data->TotalIdxCount);
                 index_buffer.setStride((uint32_t)sizeof(ImDrawIdx));
@@ -200,7 +200,7 @@ public:
             if(vertex_buffer_size > vertex_buffer.getSize())
             {
                 gfxDestroyBuffer(gfx_, vertex_buffer);  // release previous vertex memory
-                vertex_buffer = gfxCreateBuffer(gfx_, vertex_buffer_size + ((vertex_buffer_size + 2) >> 1), nullptr, kGfxCpuAccess_Write);
+                vertex_buffer = gfxCreateBuffer(gfx_, GFX_ALIGN(vertex_buffer_size + ((vertex_buffer_size + 2) >> 1), 65536), nullptr, kGfxCpuAccess_Write);
                 if(!vertex_buffer)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate buffer of %d vertices to draw ImGui", draw_data->TotalVtxCount);
                 vertex_buffer.setStride((uint32_t)sizeof(ImDrawVert));
