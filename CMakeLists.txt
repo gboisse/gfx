@@ -1,8 +1,7 @@
 cmake_minimum_required(VERSION 3.10.0)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm-0.9.9.8)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinygltf-2.5.0)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader-1.0.6)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader-2.0-rc1)
 
 add_library(gfx STATIC gfx.cpp)
 
