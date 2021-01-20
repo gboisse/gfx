@@ -10,3 +10,6 @@
 [submodule "third_party/tinyobjloader-2.0-rc1"]
 	path = third_party/tinyobjloader-2.0-rc1
 	url = https://github.com/tinyobjloader/tinyobjloader.git
+[submodule "third_party/tinygltf-2.5.0"]
+	path = third_party/tinygltf-2.5.0
+	url = https://github.com/syoyo/tinygltf.git
