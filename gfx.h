@@ -541,8 +541,21 @@ class GfxInternal
             } raster_state_;
         };
 
-        DrawState() : reference_count_(1) {}
+        DrawState() : reference_count_(0) {}
+        DrawState(DrawState &&other) : draw_state_(other.draw_state_), reference_count_(other.reference_count_) { other.reference_count_ = 0; }
         ~DrawState() { GFX_ASSERT(reference_count_ == 0); }
+
+        inline DrawState &operator =(DrawState &&other)
+        {
+            if(this != &other)
+            {
+                GFX_ASSERT(reference_count_ == 0);
+                draw_state_ = other.draw_state_;
+                reference_count_ = other.reference_count_;
+                other.reference_count_ = 0;
+            }
+            return *this;
+        }
 
         Data draw_state_;
         uint32_t reference_count_;
@@ -2447,7 +2460,7 @@ public:
         draw_state.handle = draw_state_handles_.allocate_handle();
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
         GFX_ASSERT(!draw_states_.has(draw_state_index));    // should never happen
-        draw_states_.insert(draw_state_index);
+        draw_states_.insert(draw_state_index).reference_count_ = 1;
     }
 
     static void RetainDrawState(GfxDrawState const &draw_state)
@@ -2455,6 +2468,7 @@ public:
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
         DrawState *gfx_draw_state = draw_states_.at(draw_state_index);  // look up draw state
         GFX_ASSERT(gfx_draw_state != nullptr); if(!gfx_draw_state) return;
+        GFX_ASSERT(gfx_draw_state->reference_count_ > 0);
         ++gfx_draw_state->reference_count_;
     }
 
@@ -2463,6 +2477,7 @@ public:
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
         DrawState *gfx_draw_state = draw_states_.at(draw_state_index);  // look up draw state
         GFX_ASSERT(gfx_draw_state != nullptr); if(!gfx_draw_state) return;
+        GFX_ASSERT(gfx_draw_state->reference_count_ > 0);
         if(--gfx_draw_state->reference_count_ == 0)
         {
             draw_states_.erase(draw_state_index);
@@ -3551,6 +3566,13 @@ private:
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
                             break;  // invalid buffer stride
                         }
+                        if(buffer.size < buffer.stride)
+                        {
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // invalid buffer size
+                        }
                         Buffer &gfx_buffer = buffers_[buffer];
                         SetObjectName(gfx_buffer, buffer.name);
                         if(buffer.cpu_access == kGfxCpuAccess_None)
@@ -3601,6 +3623,13 @@ private:
                             freeDescriptor(parameter.descriptor_slot_);
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
                             break;  // invalid buffer stride
+                        }
+                        if(buffer.size < buffer.stride)
+                        {
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // invalid buffer size
                         }
                         Buffer &gfx_buffer = buffers_[buffer];
                         SetObjectName(gfx_buffer, buffer.name);
