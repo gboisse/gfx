@@ -95,7 +95,7 @@ GfxConstRef<TYPE> gfxSceneFindObjectByAssetFile(GfxScene scene, char const *asse
     for(uint32_t i = 0; i < object_count; ++i)
     {
         GfxConstRef<TYPE> const object_handle = gfxSceneGetObjectHandle<TYPE>(scene, i);
-        if(gfxSceneGetObjectMetadata(scene, object_handle).asset_file == asset_file)
+        if(!strcmp(gfxSceneGetObjectMetadata<TYPE>(scene, object_handle).getAssetFile(), asset_file))
             return object_handle;   // found
     }
     return object_ref;  // not found
@@ -105,23 +105,25 @@ GfxConstRef<TYPE> gfxSceneFindObjectByAssetFile(GfxScene scene, char const *asse
 //! Camera object.
 //!
 
+enum GfxCameraType
+{
+    kGfxCameraType_Perspective = 0,
+
+    kGfxCameraType_Count
+};
+
 struct GfxCamera
 {
-    enum
-    {
-        kType_Perspective = 0,
+    GfxCameraType type = kGfxCameraType_Perspective;
 
-        kType_Count
-    } type;
+    glm::vec3 eye    = glm::vec3(0.0f, 0.0f, 1.0f);
+    glm::vec3 center = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec3 up     = glm::vec3(0.0f, 1.0f, 0.0f);
 
-    glm::vec3 eye;
-    glm::vec3 center;
-    glm::vec3 up;
-
-    float aspect;
-    float fovY;
-    float nearZ;
-    float farZ;
+    float aspect = 16.0f / 9.0f;
+    float fovY   = 1.05f;
+    float nearZ  = 0.1f;
+    float farZ   = 1e4f;
 };
 
 GfxRef<GfxCamera> gfxSceneCreateCamera(GfxScene scene);
@@ -137,24 +139,26 @@ GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle);
 GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index);
 
 //!
-//! Texture map object.
+//! Image object.
 //!
 
-struct GfxTextureMap
+struct GfxImage
 {
-    uint32_t width;
-    uint32_t height;
+    uint32_t width         = 0;
+    uint32_t height        = 0;
+    uint32_t channel_count = 0;
+
     std::vector<uint8_t> data;
 };
 
-GfxRef<GfxTextureMap> gfxSceneCreateTextureMap(GfxScene scene);
-GfxResult gfxSceneDestroyTextureMap(GfxScene scene, uint64_t texture_map_handle);
+GfxRef<GfxImage> gfxSceneCreateImage(GfxScene scene);
+GfxResult gfxSceneDestroyImage(GfxScene scene, uint64_t image_handle);
 
-uint32_t gfxSceneGetTextureMapCount(GfxScene scene);
-GfxTextureMap const *gfxSceneGetTextureMaps(GfxScene scene);
-GfxTextureMap *gfxSceneGetTextureMap(GfxScene scene, uint64_t texture_map_handle);
-GfxMetadata gfxSceneGetTextureMapMetadata(GfxScene scene, uint64_t texture_map_handle);
-GfxConstRef<GfxTextureMap> gfxSceneGetTextureMapHandle(GfxScene scene, uint32_t texture_map_index);
+uint32_t gfxSceneGetImageCount(GfxScene scene);
+GfxImage const *gfxSceneGetImages(GfxScene scene);
+GfxImage *gfxSceneGetImage(GfxScene scene, uint64_t image_handle);
+GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle);
+GfxConstRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index);
 
 //!
 //! Material object.
@@ -162,15 +166,15 @@ GfxConstRef<GfxTextureMap> gfxSceneGetTextureMapHandle(GfxScene scene, uint32_t 
 
 struct GfxMaterial
 {
-    glm::vec3 albedo;
-    float roughness;
-    float metallicity;
-    glm::vec3 emissivity;
+    glm::vec3 albedo      = glm::vec3(0.7f);
+    float     roughness   = 1.0f;
+    float     metallicity = 0.0f;
+    glm::vec3 emissivity  = glm::vec3(0.0f);
 
-    GfxConstRef<GfxTextureMap> albedo_map;
-    GfxConstRef<GfxTextureMap> roughness_map;
-    GfxConstRef<GfxTextureMap> metallicity_map;
-    GfxConstRef<GfxTextureMap> emissivity_map;
+    GfxConstRef<GfxImage> albedo_map;
+    GfxConstRef<GfxImage> roughness_map;
+    GfxConstRef<GfxImage> metallicity_map;
+    GfxConstRef<GfxImage> emissivity_map;
 };
 
 GfxRef<GfxMaterial> gfxSceneCreateMaterial(GfxScene scene);
@@ -188,16 +192,20 @@ GfxConstRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t mate
 
 struct GfxVertex
 {
-    glm::vec4 position;
-    glm::vec4 normal;
+    glm::vec3 position;
+    glm::vec3 normal;
     glm::vec2 uv;
 };
 
 struct GfxMesh
 {
     GfxConstRef<GfxMaterial> material;
+
+    glm::vec3 bounds_min = glm::vec3(0.0f);
+    glm::vec3 bounds_max = glm::vec3(0.0f);
+
     std::vector<GfxVertex> vertices;
-    std::vector<uint32_t> indices;
+    std::vector<uint32_t>  indices;
 };
 
 GfxRef<GfxMesh> gfxSceneCreateMesh(GfxScene scene);
@@ -216,7 +224,8 @@ GfxConstRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index);
 struct GfxInstance
 {
     GfxConstRef<GfxMesh> mesh;
-    glm::mat4 transform;
+
+    glm::mat4 transform = glm::mat4(1.0f);
 };
 
 GfxRef<GfxInstance> gfxSceneCreateInstance(GfxScene scene);
@@ -238,11 +247,11 @@ template<> inline GfxCamera *gfxSceneGetObject<GfxCamera>(GfxScene scene, uint64
 template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
 template<> inline GfxConstRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene scene, uint32_t object_index) { return gfxSceneGetCameraHandle(scene, object_index); }
 
-template<> inline uint32_t gfxSceneGetObjectCount<GfxTextureMap>(GfxScene scene) { return gfxSceneGetTextureMapCount(scene); }
-template<> inline GfxTextureMap const *gfxSceneGetObjects<GfxTextureMap>(GfxScene scene) { return gfxSceneGetTextureMaps(scene); }
-template<> inline GfxTextureMap *gfxSceneGetObject<GfxTextureMap>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetTextureMap(scene, object_handle); }
-template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxTextureMap>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetTextureMapMetadata(scene, object_handle); }
-template<> inline GfxConstRef<GfxTextureMap> gfxSceneGetObjectHandle<GfxTextureMap>(GfxScene scene, uint32_t object_index) { return gfxSceneGetTextureMapHandle(scene, object_index); }
+template<> inline uint32_t gfxSceneGetObjectCount<GfxImage>(GfxScene scene) { return gfxSceneGetImageCount(scene); }
+template<> inline GfxImage const *gfxSceneGetObjects<GfxImage>(GfxScene scene) { return gfxSceneGetImages(scene); }
+template<> inline GfxImage *gfxSceneGetObject<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImage(scene, object_handle); }
+template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImageMetadata(scene, object_handle); }
+template<> inline GfxConstRef<GfxImage> gfxSceneGetObjectHandle<GfxImage>(GfxScene scene, uint32_t object_index) { return gfxSceneGetImageHandle(scene, object_index); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxMaterial>(GfxScene scene) { return gfxSceneGetMaterialCount(scene); }
 template<> inline GfxMaterial const *gfxSceneGetObjects<GfxMaterial>(GfxScene scene) { return gfxSceneGetMaterials(scene); }
@@ -291,10 +300,10 @@ class GfxSceneInternal
     GfxConstRef<GfxCamera> active_camera_;
     GfxHandles camera_handles_;
 
-    GfxArray<GfxTextureMap> texture_maps_;
-    GfxArray<uint64_t> texture_map_refs_;
-    GfxArray<GfxMetadata> texture_map_metadata_;
-    GfxHandles texture_map_handles_;
+    GfxArray<GfxImage> images_;
+    GfxArray<uint64_t> image_refs_;
+    GfxArray<GfxMetadata> image_metadata_;
+    GfxHandles image_handles_;
 
     GfxArray<GfxMaterial> materials_;
     GfxArray<uint64_t> material_refs_;
@@ -324,10 +333,10 @@ class GfxSceneInternal
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxCamera>() { return camera_metadata_; }
     template<> inline GfxHandles &object_handles_<GfxCamera>() { return camera_handles_; }
 
-    template<> inline GfxArray<GfxTextureMap> &objects_<GfxTextureMap>() { return texture_maps_; }
-    template<> inline GfxArray<uint64_t> &object_refs_<GfxTextureMap>() { return texture_map_refs_; }
-    template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxTextureMap>() { return texture_map_metadata_; }
-    template<> inline GfxHandles &object_handles_<GfxTextureMap>() { return texture_map_handles_; }
+    template<> inline GfxArray<GfxImage> &objects_<GfxImage>() { return images_; }
+    template<> inline GfxArray<uint64_t> &object_refs_<GfxImage>() { return image_refs_; }
+    template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxImage>() { return image_metadata_; }
+    template<> inline GfxHandles &object_handles_<GfxImage>() { return image_handles_; }
 
     template<> inline GfxArray<GfxMaterial> &objects_<GfxMaterial>() { return materials_; }
     template<> inline GfxArray<uint64_t> &object_refs_<GfxMaterial>() { return material_refs_; }
@@ -345,7 +354,7 @@ class GfxSceneInternal
     template<> inline GfxHandles &object_handles_<GfxInstance>() { return instance_handles_; }
 
 public:
-    GfxSceneInternal(GfxScene &scene) : camera_handles_("camera"), texture_map_handles_("texture map")
+    GfxSceneInternal(GfxScene &scene) : camera_handles_("camera"), image_handles_("image")
                                       , material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
                                       { scene.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxSceneInternal() { terminate(); }
@@ -370,6 +379,11 @@ public:
         if(CaseInsensitiveCompare(asset_extension, ".obj") ||
            CaseInsensitiveCompare(asset_extension, ".objm"))
             GFX_TRY(importObj(scene, asset_file));
+        else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||
+                CaseInsensitiveCompare(asset_extension, ".png") ||
+                CaseInsensitiveCompare(asset_extension, ".jpg") ||
+                CaseInsensitiveCompare(asset_extension, ".jpeg"))
+            GFX_TRY(importImage(scene, asset_file));
         else
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot import unsupported asset type `%s'", asset_extension);
         return kGfxResult_NoError;
@@ -378,10 +392,11 @@ public:
     GfxResult clear()
     {
         clearObjects<GfxCamera>();
-        clearObjects<GfxTextureMap>();
+        clearObjects<GfxImage>();
         clearObjects<GfxMaterial>();
         clearObjects<GfxMesh>();
         clearObjects<GfxInstance>();
+
         return kGfxResult_NoError;
     }
 
@@ -389,6 +404,7 @@ public:
     {
         active_camera_.handle = camera_handle;
         active_camera_.scene = scene;
+
         return kGfxResult_NoError;
     }
 
@@ -500,6 +516,16 @@ private:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to load obj file `%s'", obj_reader.Error().c_str());
         if(!obj_reader.Warning().empty())
             GFX_PRINTLN("Parse obj file `%s' with warnings:\r\n%s", asset_file, obj_reader.Warning().c_str());
+        char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));    // retrieve file name
+        std::string const texture_path = (file == nullptr ? "./" : std::string(asset_file, file - asset_file + 1));
+        auto const LoadImage = [&](std::string const &texname, GfxConstRef<GfxImage> &image)
+        {
+            if(texname.empty()) return; // no image to be loaded
+            std::string const texture_file = texture_path + texname;
+            if(gfxSceneImport(scene, texture_file.c_str()) != kGfxResult_NoError)
+                return; // unable to load image file
+            image = gfxSceneFindObjectByAssetFile<GfxImage>(scene, texture_file.c_str());
+        };
         std::vector<GfxConstRef<GfxMaterial>> materials(obj_reader.GetMaterials().size());
         for(size_t i = 0; i < obj_reader.GetMaterials().size(); ++i)
         {
@@ -512,8 +538,11 @@ private:
             material_ref->roughness = obj_material.roughness;
             material_ref->metallicity = obj_material.metallic;
             material_ref->emissivity = glm::vec3(obj_material.emission[0], obj_material.emission[1], obj_material.emission[2]);
-            // TODO: load the texture maps (gboisse)
-            materials[i] = material_ref;
+            LoadImage(obj_material.diffuse_texname, material_ref->albedo_map);
+            LoadImage(obj_material.roughness_texname, material_ref->roughness_map);
+            LoadImage(obj_material.metallic_texname, material_ref->metallicity_map);
+            LoadImage(obj_material.emissive_texname, material_ref->emissivity_map);
+            materials[i] = material_ref;    // append the new material
         }
         for(size_t i = 0; i < obj_reader.GetShapes().size(); ++i)
         {
@@ -547,14 +576,12 @@ private:
                             vertex.position.x = obj_reader.GetAttrib().vertices[3 * std::get<0>(key) + 0];
                             vertex.position.y = obj_reader.GetAttrib().vertices[3 * std::get<0>(key) + 1];
                             vertex.position.z = obj_reader.GetAttrib().vertices[3 * std::get<0>(key) + 2];
-                            vertex.position.w = 1.0f;
                         }
                         if(std::get<1>(key) >= 0)
                         {
                             vertex.normal.x = obj_reader.GetAttrib().normals[3 * std::get<1>(key) + 0];
                             vertex.normal.y = obj_reader.GetAttrib().normals[3 * std::get<1>(key) + 1];
                             vertex.normal.z = obj_reader.GetAttrib().normals[3 * std::get<1>(key) + 2];
-                            vertex.normal.w = 0.0f;
                         }
                         if(std::get<2>(key) >= 0)
                         {
@@ -586,8 +613,17 @@ private:
                 }
                 if((*it).first < materials.size())
                     mesh_ref->material = materials[(*it).first];
+                glm::vec3 bounds_min(FLT_MAX), bounds_max(-FLT_MAX);
                 for(VertexMap::const_iterator it2 = vertices.begin(); it2 != vertices.end(); ++it2)
-                    mesh_ref->vertices[(*it2).second.first] = (*it2).second.second;
+                {
+                    uint32_t const index = (*it2).second.first;
+                    GfxVertex const &vertex = (*it2).second.second;
+                    bounds_min = glm::min(bounds_min, vertex.position);
+                    bounds_max = glm::max(bounds_max, vertex.position);
+                    mesh_ref->vertices[index] = vertex; // append vertex
+                }
+                mesh_ref->bounds_min = bounds_min;
+                mesh_ref->bounds_max = bounds_max;
                 GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
                 instance_ref->mesh = mesh_ref;  // .obj does not support instancing, so simply create one instance per mesh
                 GfxMetadata &instance_metadata = instance_metadata_[instance_ref];
@@ -600,6 +636,31 @@ private:
                 }
             }
         }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult importImage(GfxScene const &scene, char const *asset_file)
+    {
+        GFX_ASSERT(asset_file != nullptr);
+        int32_t image_width, image_height, channel_count;
+        if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
+            return kGfxResult_NoError;  // image was already imported
+        stbi_uc *image_data = stbi_load(asset_file, &image_width, &image_height, &channel_count, 0);
+        if(image_data == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, stbi_failure_reason());
+        char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
+        file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
+        size_t const image_data_size = (size_t)image_width * image_height * channel_count;
+        GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
+        image_ref->data.resize(image_data_size);
+        image_ref->width = (uint32_t)image_width;
+        image_ref->height = (uint32_t)image_height;
+        image_ref->channel_count = (uint32_t)channel_count;
+        memcpy(image_ref->data.data(), image_data, image_data_size);
+        GfxMetadata &image_metadata = image_metadata_[image_ref];
+        image_metadata.asset_file = asset_file; // set up metadata
+        image_metadata.object_name = file;
+        stbi_image_free(image_data);
         return kGfxResult_NoError;
     }
 };
@@ -710,56 +771,56 @@ GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_i
     return gfx_scene->getObjectHandle<GfxCamera>(scene, camera_index);
 }
 
-GfxRef<GfxTextureMap> gfxSceneCreateTextureMap(GfxScene scene)
+GfxRef<GfxImage> gfxSceneCreateImage(GfxScene scene)
 {
-    GfxRef<GfxTextureMap> const texture_map_ref = {};
+    GfxRef<GfxImage> const image_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return texture_map_ref;  // invalid parameter
-    return gfx_scene->createObject<GfxTextureMap>(scene);
+    if(!gfx_scene) return image_ref;    // invalid parameter
+    return gfx_scene->createObject<GfxImage>(scene);
 }
 
-GfxResult gfxSceneDestroyTextureMap(GfxScene scene, uint64_t texture_map_handle)
+GfxResult gfxSceneDestroyImage(GfxScene scene, uint64_t image_handle)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
-    return gfx_scene->destroyObject<GfxTextureMap>(texture_map_handle);
+    return gfx_scene->destroyObject<GfxImage>(image_handle);
 }
 
-uint32_t gfxSceneGetTextureMapCount(GfxScene scene)
+uint32_t gfxSceneGetImageCount(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return 0;    // invalid parameter
-    return gfx_scene->getObjectCount<GfxTextureMap>();
+    return gfx_scene->getObjectCount<GfxImage>();
 }
 
-GfxTextureMap const *gfxSceneGetTextureMaps(GfxScene scene)
+GfxImage const *gfxSceneGetImages(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return nullptr;  // invalid parameter
-    return gfx_scene->getObjects<GfxTextureMap>();
+    return gfx_scene->getObjects<GfxImage>();
 }
 
-GfxTextureMap *gfxSceneGetTextureMap(GfxScene scene, uint64_t texture_map_handle)
+GfxImage *gfxSceneGetImage(GfxScene scene, uint64_t image_handle)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return nullptr;  // invalid parameter
-    return gfx_scene->getObject<GfxTextureMap>(texture_map_handle);
+    return gfx_scene->getObject<GfxImage>(image_handle);
 }
 
-GfxMetadata gfxSceneGetTextureMapMetadata(GfxScene scene, uint64_t texture_map_handle)
+GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle)
 {
     GfxMetadata const metadata = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxTextureMap>(texture_map_handle);
+    return gfx_scene->getObjectMetadata<GfxImage>(image_handle);
 }
 
-GfxConstRef<GfxTextureMap> gfxSceneGetTextureMapHandle(GfxScene scene, uint32_t texture_map_index)
+GfxConstRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index)
 {
-    GfxConstRef<GfxTextureMap> const texture_map_ref = {};
+    GfxConstRef<GfxImage> const image_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return texture_map_ref;  // invalid parameter
-    return gfx_scene->getObjectHandle<GfxTextureMap>(scene, texture_map_index);
+    if(!gfx_scene) return image_ref;    // invalid parameter
+    return gfx_scene->getObjectHandle<GfxImage>(scene, image_index);
 }
 
 GfxRef<GfxMaterial> gfxSceneCreateMaterial(GfxScene scene)

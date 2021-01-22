@@ -23,12 +23,13 @@ SOFTWARE.
 ****************************************************************************/
 #pragma once
 
-#include <cstdio>   // vprintf, etc.
-#include <cstdarg>  // va_list, etc.
-#include <cstdint>  // uint32_t, etc.
-#include <string>   // std::string
-#include <utility>  // std::swap(), std::move()
-#include <vector>   // std::vector
+#include <cstdio>       // vprintf, etc.
+#include <cstdarg>      // va_list, etc.
+#include <cstdint>      // uint32_t, etc.
+#include <algorithm>    // std::min(), std::max()
+#include <string>       // std::string
+#include <utility>      // std::swap(), std::move()
+#include <vector>       // std::vector
 
 //!
 //! Constants.
@@ -61,6 +62,10 @@ enum GfxConstant
 #define GFX_ASSERT(X)   // skip it
 
 #define GFX_ASSERTMSG(X, ...)
+
+#define GFX_MIN(X, Y)   ((std::min)(X, Y))
+
+#define GFX_MAX(X, Y)   ((std::max)(X, Y))
 
 #define GFX_SNPRINTF(BUFFER, SIZE, FORMAT, ...) \
     _snprintf_s(BUFFER, SIZE, _TRUNCATE, FORMAT, __VA_ARGS__)
@@ -458,7 +463,7 @@ uint32_t GfxArray<TYPE>::get_packed_index(uint32_t index) const
 template<typename TYPE>
 void GfxArray<TYPE>::reserve(uint32_t capacity)
 {
-    uint32_t const new_capacity = max(capacity_ + ((capacity_ + 2) >> 1), capacity);
+    uint32_t const new_capacity = GFX_MAX(capacity_ + ((capacity_ + 2) >> 1), capacity);
     TYPE *data = (TYPE *)malloc(new_capacity * sizeof(TYPE));
     uint32_t *indices = (uint32_t *)malloc(new_capacity * sizeof(uint32_t));
     uint32_t *packed_indices = (uint32_t *)malloc(new_capacity * sizeof(uint32_t));

@@ -92,6 +92,7 @@ public:
             gfxDestroyBuffer(gfx_, font_buffer);
             return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
         }
+        font_buffer_.setName("gfx_ImGuiFontBuffer");
         io.Fonts->TexID = (ImTextureID)&font_buffer_;
         gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
         GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
@@ -177,6 +178,7 @@ public:
     {
         ImGui::Render();
 
+        char buffer[256];
         ImGuiIO &io = ImGui::GetIO();
         ImDrawData const *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
@@ -191,7 +193,9 @@ public:
                 index_buffer = gfxCreateBuffer(gfx_, GFX_ALIGN(index_buffer_size + ((index_buffer_size + 2) >> 1), 65536), nullptr, kGfxCpuAccess_Write);
                 if(!index_buffer)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate buffer of %d indices to draw ImGui", draw_data->TotalIdxCount);
+                GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_ImGuiIndexBuffer%u", buffer_index);
                 index_buffer.setStride((uint32_t)sizeof(ImDrawIdx));
+                index_buffer.setName(buffer);
             }
             ImDrawIdx *draw_idx = (ImDrawIdx *)gfxBufferGetData(gfx_, index_buffer);
 
@@ -203,7 +207,9 @@ public:
                 vertex_buffer = gfxCreateBuffer(gfx_, GFX_ALIGN(vertex_buffer_size + ((vertex_buffer_size + 2) >> 1), 65536), nullptr, kGfxCpuAccess_Write);
                 if(!vertex_buffer)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate buffer of %d vertices to draw ImGui", draw_data->TotalVtxCount);
+                GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_ImGuiVertexBuffer%u", buffer_index);
                 vertex_buffer.setStride((uint32_t)sizeof(ImDrawVert));
+                vertex_buffer.setName(buffer);
             }
             ImDrawVert *draw_vtx = (ImDrawVert *)gfxBufferGetData(gfx_, vertex_buffer);
 

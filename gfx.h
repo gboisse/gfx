@@ -80,11 +80,19 @@ void *gfxBufferGetData(GfxContext context, GfxBuffer buffer);
 //!
 
 template<typename TYPE>
-GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data = nullptr, GfxCpuAccess cpu_access = kGfxCpuAccess_None)
+GfxBuffer gfxCreateBuffer(GfxContext context, uint32_t element_count, void const *data = nullptr, GfxCpuAccess cpu_access = kGfxCpuAccess_None)
 {
-    GfxBuffer buffer = gfxCreateBuffer(context, size, data, cpu_access);
+    GfxBuffer buffer = gfxCreateBuffer(context, element_count * sizeof(TYPE), data, cpu_access);
     if(buffer) buffer.setStride((uint32_t)sizeof(TYPE));
     return buffer;
+}
+
+template<typename TYPE>
+GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t element_offset, uint32_t element_count)
+{
+    GfxBuffer buffer_range = gfxCreateBufferRange(context, buffer, element_offset * sizeof(TYPE), element_count * sizeof(TYPE));
+    if(buffer_range) buffer_range.setStride((uint32_t)sizeof(TYPE));
+    return buffer_range;
 }
 
 //!
@@ -109,7 +117,7 @@ GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 inline uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height = 0, uint32_t depth = 0)
 {
     uint32_t mip_count = 0;
-    uint32_t mip_size = max(width, max(height, depth));
+    uint32_t mip_size = GFX_MAX(width, GFX_MAX(height, depth));
     while(mip_size >= 1) { mip_size >>= 1; ++mip_count; }
     return mip_count;
 }
@@ -271,10 +279,10 @@ GfxResult gfxCommandSetScissorRect(GfxContext context, int32_t x = 0, int32_t y 
 
 GfxResult gfxCommandDraw(GfxContext context, uint32_t vertex_count, uint32_t instance_count = 1, uint32_t base_vertex = 0, uint32_t base_instance = 0);
 GfxResult gfxCommandDrawIndexed(GfxContext context, uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, uint32_t base_vertex = 0, uint32_t base_instance = 0);
-GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer multi_draw_args);   // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DRAW elements
-GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer multi_draw_indexed_args);    // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED elements
+GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);          // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DRAW elements
+GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);   // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED elements
 GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
-GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer indirect_args);
+GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);    // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH elements
 
 //!
 //! Frame processing.
@@ -338,6 +346,7 @@ class GfxInternal
     uint32_t back_buffer_rtvs_[kGfxConstant_BackBufferCount] = {};
 
     GfxKernel bound_kernel_ = {};
+    GfxBuffer draw_id_buffer_ = {};
     uint64_t descriptor_heap_id_ = 0;
     GfxBuffer bound_index_buffer_ = {};
     GfxBuffer bound_vertex_buffer_ = {};
@@ -1024,6 +1033,8 @@ public:
         populateDummyDescriptors();
 
         GFX_TRY(acquireSwapChainBuffers());
+        GFX_TRY(populateDrawIdBuffer(1024));
+
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         resource_barrier.Transition.pResource = back_buffers_[fence_index_];
@@ -1113,6 +1124,7 @@ public:
 
     GfxResult terminate()
     {
+        destroyBuffer(draw_id_buffer_);
         destroyKernel(clear_buffer_kernel_);
         destroyProgram(clear_buffer_program_);
         destroyKernel(generate_mips_kernel_);
@@ -1212,7 +1224,7 @@ public:
         D3D12_RESOURCE_DESC
         resource_desc                  = {};
         resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
-        resource_desc.Width            = max(GFX_ALIGN(size, alignment), alignment);
+        resource_desc.Width            = GFX_MAX(GFX_ALIGN(size, alignment), (uint64_t)alignment);
         resource_desc.Height           = 1;
         resource_desc.DepthOrArraySize = 1;
         resource_desc.MipLevels        = 1;
@@ -1236,8 +1248,7 @@ public:
             resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
             break;
         }
-        if(!SUCCEEDED(mem_allocator_->CreateResource(&allocation_desc, &resource_desc, resource_state,
-            nullptr, &gfx_buffer.allocation_, IID_PPV_ARGS(&gfx_buffer.resource_))))
+        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_buffer.allocation_, IID_PPV_ARGS(&gfx_buffer.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create buffer object of size %u MiB", (uint32_t)((size + 1024 * 1024 - 1) / (1024 * 1024)));
             destroyBuffer(buffer); buffer = {};
@@ -1296,12 +1307,13 @@ public:
                 buffer.cpu_access == kGfxCpuAccess_Read ? "read" : buffer.cpu_access == kGfxCpuAccess_Write ? "write" : "no", alignment, byte_offset);
             return buffer_range;
         }
+        Buffer const gfx_buffer = buffers_[buffer];
         buffer_range.handle = buffer_handles_.allocate_handle();
-        Buffer &gfx_buffer = buffers_.insert(buffer_range, buffers_[buffer]);
-        if(gfx_buffer.data_ != nullptr) gfx_buffer.data_ = (char *)gfx_buffer.data_ + byte_offset;
-        GFX_ASSERT(gfx_buffer.resource_ != nullptr && gfx_buffer.allocation_ != nullptr && gfx_buffer.reference_count_ != nullptr);
-        gfx_buffer.data_offset_ += byte_offset;
-        ++*gfx_buffer.reference_count_; // retain
+        Buffer &gfx_buffer_range = buffers_.insert(buffer_range, gfx_buffer);
+        if(gfx_buffer_range.data_ != nullptr) gfx_buffer_range.data_ = (char *)gfx_buffer_range.data_ + byte_offset;
+        GFX_ASSERT(gfx_buffer_range.resource_ != nullptr && gfx_buffer_range.allocation_ != nullptr && gfx_buffer_range.reference_count_ != nullptr);
+        gfx_buffer_range.data_offset_ += byte_offset;
+        ++*gfx_buffer_range.reference_count_;   // retain
         buffer_range.cpu_access = buffer.cpu_access;
         strcpy(buffer_range.name, buffer.name);
         buffer_range.stride = buffer.stride;
@@ -1342,7 +1354,9 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create texture object using invalid format");
             return texture; // invalid parameter
         }
-        width = max(width, 1); height = max(height, 1); mip_levels = min(max(mip_levels, 1), gfxCalculateMipCount(width, height));
+        width = GFX_MAX(width, 1u);
+        height = GFX_MAX(height, 1u);
+        mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(width, height));
         D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
         D3D12_RESOURCE_DESC
         resource_desc                  = {};
@@ -1357,10 +1371,10 @@ public:
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
         allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-        if(!SUCCEEDED(mem_allocator_->CreateResource(&allocation_desc, &resource_desc, resource_state,
-            nullptr, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_))))
+        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create 2D texture object of size %ux%u", width, height);
+            gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
             destroyTexture(texture); texture = {};
             return texture;
         }
@@ -1488,7 +1502,7 @@ public:
         uint32_t instance_desc_count = 0;
         if(gpu_addr == 0)
             return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate for updating acceleration structure object with %u raytracing primitives", (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size());
-        active_raytracing_primitives_.reserve(max(active_raytracing_primitives_.capacity(), gfx_acceleration_structure.raytracing_primitives_.size()));
+        active_raytracing_primitives_.reserve(GFX_MAX(active_raytracing_primitives_.capacity(), gfx_acceleration_structure.raytracing_primitives_.size()));
         active_raytracing_primitives_.clear();  // compact away discarded raytracing primitives
         for(size_t i = 0; i < gfx_acceleration_structure.raytracing_primitives_.size(); ++i)
         {
@@ -1528,7 +1542,7 @@ public:
         }
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_info = {};
         device_->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_info);
-        uint64_t const scratch_data_size = max(tlas_info.ScratchDataSizeInBytes, tlas_info.UpdateScratchDataSizeInBytes);
+        uint64_t const scratch_data_size = GFX_MAX(tlas_info.ScratchDataSizeInBytes, tlas_info.UpdateScratchDataSizeInBytes);
         GFX_TRY(allocateRaytracingScratch(scratch_data_size));  // ensure scratch is large enough
         uint64_t const bvh_data_size = GFX_ALIGN(tlas_info.ResultDataMaxSizeInBytes, 65536);
         if(bvh_data_size > gfx_acceleration_structure.bvh_buffer_.size)
@@ -2099,10 +2113,10 @@ public:
             Buffer *texture_upload_buffer = nullptr;
             if(buffer_offset >= src.size)
                 break;  // further mips aren't available
-            GFX_ASSERT(num_rows[mip_level] == max(dst.height >> mip_level, 1));
-            uint32_t const buffer_row_pitch = (max(dst.width >> mip_level, 1) * bytes_per_pixel) / pixels_per_block;
+            GFX_ASSERT(num_rows[mip_level] == GFX_MAX(dst.height >> mip_level, 1u));
+            uint32_t const buffer_row_pitch = (GFX_MAX(dst.width >> mip_level, 1u) * bytes_per_pixel) / pixels_per_block;
             uint32_t const texture_row_pitch = subresource_footprints[mip_level].Footprint.RowPitch;
-            uint64_t const buffer_size = max(dst.height >> mip_level, 1) * buffer_row_pitch;
+            uint64_t const buffer_size = GFX_MAX(dst.height >> mip_level, 1u) * buffer_row_pitch;
             if(buffer_offset + buffer_size > src.size)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to mip level %u from buffer object with insufficient storage", mip_level);
             if(buffer_row_pitch != texture_row_pitch || // we must respect the 256-byte pitch alignment
@@ -2165,8 +2179,8 @@ public:
             setProgramTexture(generate_mips_program_, "InputBuffer", texture, mip_level - 1);
             setProgramTexture(generate_mips_program_, "OutputBuffer", texture, mip_level);
             uint32_t const *num_threads = getKernelNumThreads(generate_mips_kernel_);
-            uint32_t const num_groups_x = (max(texture.width >> mip_level, 1) + num_threads[0] - 1) / num_threads[0];
-            uint32_t const num_groups_y = (max(texture.height >> mip_level, 1) + num_threads[1] - 1) / num_threads[1];
+            uint32_t const num_groups_x = (GFX_MAX(texture.width  >> mip_level, 1u) + num_threads[0] - 1) / num_threads[0];
+            uint32_t const num_groups_y = (GFX_MAX(texture.height >> mip_level, 1u) + num_threads[1] - 1) / num_threads[1];
             result = encodeDispatch(num_groups_x, num_groups_y, 1);
             if(result != kGfxResult_NoError) break;
         }
@@ -2277,12 +2291,14 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeMultiDrawIndirect(GfxBuffer const &multi_draw_args)
+    GfxResult encodeMultiDrawIndirect(GfxBuffer const &args_buffer, uint32_t args_count)
     {
-        if(!buffer_handles_.has_handle(multi_draw_args.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot draw using an invalid multi-draw arguments buffer object");
-        if(multi_draw_args.cpu_access == kGfxCpuAccess_Read)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a multi-draw arguments buffer object with read CPU access");
+        if(args_count == 0)
+            return kGfxResult_NoError;  // nothing to draw
+        if(!buffer_handles_.has_handle(args_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot draw using an invalid arguments buffer object");
+        if(args_buffer.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using an arguments buffer object with read CPU access");
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
@@ -2290,24 +2306,26 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a compute kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip multi-draw call
-        Buffer &gfx_buffer = buffers_[multi_draw_args];
-        SetObjectName(gfx_buffer, multi_draw_args.name);
+        GFX_TRY(populateDrawIdBuffer(args_count));
+        Buffer &gfx_buffer = buffers_[args_buffer];
+        SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
-        if(multi_draw_args.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         GFX_TRY(installShaderState(kernel));
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
-        uint32_t const multi_draw_args_count = static_cast<uint32_t>(multi_draw_args.size / sizeof(D3D12_INDIRECT_ARGUMENT_TYPE_DRAW));
-        command_list_->ExecuteIndirect(multi_draw_signature_, multi_draw_args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
+        command_list_->ExecuteIndirect(multi_draw_signature_, args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeMultiDrawIndexedIndirect(GfxBuffer const &multi_draw_indexed_args)
+    GfxResult encodeMultiDrawIndexedIndirect(GfxBuffer const &args_buffer, uint32_t args_count)
     {
-        if(!buffer_handles_.has_handle(multi_draw_indexed_args.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot draw using an invalid multi-draw arguments buffer object");
-        if(multi_draw_indexed_args.cpu_access == kGfxCpuAccess_Read)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a multi-draw arguments buffer object with read CPU access");
+        if(args_count == 0)
+            return kGfxResult_NoError;  // nothing to draw
+        if(!buffer_handles_.has_handle(args_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot draw using an invalid arguments buffer object");
+        if(args_buffer.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using an arguments buffer object with read CPU access");
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
@@ -2315,15 +2333,15 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a compute kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip multi-draw call
-        Buffer &gfx_buffer = buffers_[multi_draw_indexed_args];
-        SetObjectName(gfx_buffer, multi_draw_indexed_args.name);
+        GFX_TRY(populateDrawIdBuffer(args_count));
+        Buffer &gfx_buffer = buffers_[args_buffer];
+        SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
-        if(multi_draw_indexed_args.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         GFX_TRY(installShaderState(kernel, true));
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
-        uint32_t const multi_draw_indexed_args_count = static_cast<uint32_t>(multi_draw_indexed_args.size / sizeof(D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED));
-        command_list_->ExecuteIndirect(multi_draw_indexed_signature_, multi_draw_indexed_args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
+        command_list_->ExecuteIndirect(multi_draw_indexed_signature_, args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
     }
 
@@ -2344,11 +2362,11 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDispatchIndirect(GfxBuffer indirect_args)
+    GfxResult encodeDispatchIndirect(GfxBuffer args_buffer)
     {
-        if(!buffer_handles_.has_handle(indirect_args.handle))
+        if(!buffer_handles_.has_handle(args_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid arguments buffer object");
-        if(indirect_args.cpu_access == kGfxCpuAccess_Read)
+        if(args_buffer.cpu_access == kGfxCpuAccess_Read)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using an arguments buffer object with read CPU access");
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
@@ -2357,12 +2375,12 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a graphics kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch call
-        Buffer &gfx_buffer = buffers_[indirect_args];
-        SetObjectName(gfx_buffer, indirect_args.name);
+        Buffer &gfx_buffer = buffers_[args_buffer];
+        SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
-        if(indirect_args.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         GFX_TRY(installShaderState(kernel));
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -2384,8 +2402,8 @@ public:
         command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
         command_queue_->Signal(fences_[fence_index_], fence_values_[fence_index_]);
         swap_chain_->Present(1, 0); // enable vsync
-        uint32_t const window_width = max(window_rect.right, 8);
-        uint32_t const window_height = max(window_rect.bottom, 8);
+        uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
+        uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         if(window_width != window_width_ || window_height != window_height_)
             resizeCallback(window_width, window_height);    // reset fence index
@@ -2407,6 +2425,7 @@ public:
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         command_list_->ResourceBarrier(1, &resource_barrier);
+        bindDrawIdBuffer(); // bind drawID buffer
         return runGarbageCollection();
     }
 
@@ -2536,11 +2555,11 @@ private:
     {
         WCHAR buffer[1024];
         GFX_ASSERT(name != nullptr);
-        if(!*name || (object.flags_ & Object::kFlag_Named) != 0)
+        if(!*name || (object.Object::flags_ & Object::kFlag_Named) != 0)
             return; // no name or already named
         mbstowcs(buffer, name, ARRAYSIZE(buffer));
+        object.Object::flags_ |= Object::kFlag_Named;
         GFX_ASSERT(object.resource_ != nullptr);
-        object.flags_ |= Object::kFlag_Named;
         object.resource_->SetName(buffer);
     }
 
@@ -2582,6 +2601,8 @@ private:
         pso_desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
         pso_desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
         pso_desc.RasterizerState.DepthClipEnable = TRUE;
+        pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
+        pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
         pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pso_desc.SampleDesc.Count = 1;
         return pso_desc;
@@ -3221,13 +3242,21 @@ private:
                 default:
                     break;  // D3D_REGISTER_COMPONENT_UNKNOWN
                 }
-                D3D12_INPUT_ELEMENT_DESC input_desc = {};
-                input_desc.SemanticName = parameter_desc.SemanticName;
-                input_desc.SemanticIndex = parameter_desc.SemanticIndex;
+                D3D12_INPUT_ELEMENT_DESC
+                input_desc                   = {};
+                input_desc.SemanticName      = parameter_desc.SemanticName;
+                input_desc.SemanticIndex     = parameter_desc.SemanticIndex;
+                input_desc.Format            = component_format;
                 input_desc.AlignedByteOffset = D3D12_APPEND_ALIGNED_ELEMENT;
-                input_desc.Format = component_format;
+                if(!!strcmp(parameter_desc.SemanticName, "gfx_DrawID"))
+                    kernel.vertex_stride_ += component_count * sizeof(uint32_t);
+                else
+                {
+                    input_desc.InputSlot            = 1;
+                    input_desc.InputSlotClass       = D3D12_INPUT_CLASSIFICATION_PER_INSTANCE_DATA;
+                    input_desc.InstanceDataStepRate = 1;
+                }
                 input_layout.push_back(input_desc);
-                kernel.vertex_stride_ += component_count * sizeof(uint32_t);
             }
         }
         D3D12_GRAPHICS_PIPELINE_STATE_DESC
@@ -3251,7 +3280,10 @@ private:
                     pso_desc.NumRenderTargets = i + 1;
                 }
             if(draw_state.draw_state_.depth_stencil_target_.texture_)
+            {
+                pso_desc.DepthStencilState.DepthEnable = TRUE;
                 pso_desc.DSVFormat = draw_state.draw_state_.depth_stencil_target_.texture_.format;
+            }
             else if(pso_desc.NumRenderTargets == 0)  // special case - if no color target is supplied, draw to back buffer
             {
                 pso_desc.NumRenderTargets = 1;
@@ -3298,7 +3330,9 @@ private:
                     GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level] != 0xFFFFFFFFu);
                     color_targets[i] = rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level]);
                     for(uint32_t j = color_target_count; j < i; ++j) color_targets[j] = rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_);
-                    render_width = min(render_width, texture.width); render_height = min(render_height, texture.height);
+                    uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
+                    uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
+                    render_width = GFX_MIN(render_width, texture_width); render_height = GFX_MIN(render_height, texture_height);
                     transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
                     color_target_count = i + 1;
                 }
@@ -3311,7 +3345,9 @@ private:
                 GFX_TRY(ensureTextureHasDepthStencilView(gfx_texture, kernel.draw_state_.depth_stencil_target_.mip_level));
                 GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level] != 0xFFFFFFFFu);
                 depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level]);
-                render_width = min(render_width, texture.width); render_height = min(render_height, texture.height);
+                uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
+                uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
+                render_width = GFX_MIN(render_width, texture_width); render_height = GFX_MIN(render_height, texture_height);
                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             }
             if(color_target_count == 0 && depth_stencil_target.ptr == 0)    // special case - if no color target is supplied, draw to back buffer
@@ -3616,7 +3652,7 @@ private:
                         srv_desc.Format = resource_desc.Format;
                         srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                         srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        srv_desc.Texture2D.MostDetailedMip = min(parameter.parameter_->data_.image_.mip_level_, (uint32_t)max(resource_desc.MipLevels, 1) - 1);
+                        srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                         srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                         device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
                     }
@@ -3815,7 +3851,7 @@ private:
                     SetObjectName(gfx_buffer, bound_vertex_buffer_.name);
                     vbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
                     vbv_desc.SizeInBytes = (uint32_t)bound_vertex_buffer_.size;
-                    vbv_desc.StrideInBytes = max(bound_vertex_buffer_.stride, kernel.vertex_stride_);
+                    vbv_desc.StrideInBytes = GFX_MAX(bound_vertex_buffer_.stride, kernel.vertex_stride_);
                     // TODO: might need multiple resource state flags... (gboisse)
                     if(bound_vertex_buffer_.cpu_access == kGfxCpuAccess_None)
                         transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
@@ -3833,47 +3869,32 @@ private:
         D3D12_RESOURCE_DESC resource_desc = texture.resource_->GetDesc();
         if(!((resource_desc.Flags & usage_flag) != 0))
         {
-            D3D12_CLEAR_VALUE
-            clear_value          = {};
-            clear_value.Format   = resource_desc.Format;
-            clear_value.Color[0] = 0.0f;
-            clear_value.Color[1] = 0.0f;
-            clear_value.Color[2] = 0.0f;
-            clear_value.Color[3] = 1.0f;
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
             resource_desc.Flags |= usage_flag;  // add usage flag
-            if(!SUCCEEDED(mem_allocator_->CreateResource(&allocation_desc, &resource_desc, D3D12_RESOURCE_STATE_COPY_DEST,
-                (resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 ? &clear_value : nullptr, &allocation, IID_PPV_ARGS(&resource))))
+            GFX_TRY(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, &allocation, IID_PPV_ARGS(&resource)));
+            if(texture.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)
             {
-                if(resource != nullptr) resource->Release();
-                if(allocation != nullptr) allocation->Release();
-                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to add usage flag `%u' to texture object", (uint32_t)usage_flag);
+                D3D12_RESOURCE_BARRIER resource_barrier = {};
+                resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                resource_barrier.Transition.pResource = texture.resource_;
+                resource_barrier.Transition.StateBefore = texture.resource_state_;
+                resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                command_list_->ResourceBarrier(1, &resource_barrier);
             }
-            else
-            {
-                if(texture.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)
-                {
-                    D3D12_RESOURCE_BARRIER resource_barrier = {};
-                    resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                    resource_barrier.Transition.pResource = texture.resource_;
-                    resource_barrier.Transition.StateBefore = texture.resource_state_;
-                    resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-                    resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                    command_list_->ResourceBarrier(1, &resource_barrier);
-                }
-                collect(texture);   // release previous texture
-                command_list_->CopyResource(resource, texture.resource_);
-                texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
-                for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
-                    texture.dsv_descriptor_slots_[i] = 0xFFFFFFFFu;
-                for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
-                    texture.rtv_descriptor_slots_[i] = 0xFFFFFFFFu;
-                texture.allocation_ = allocation;
-                texture.resource_ = resource;
-            }
+            collect(texture);   // release previous texture
+            command_list_->CopyResource(resource, texture.resource_);
+            texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+            for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
+                texture.dsv_descriptor_slots_[i] = 0xFFFFFFFFu;
+            for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
+                texture.rtv_descriptor_slots_[i] = 0xFFFFFFFFu;
+            texture.Object::flags_ &= ~Object::kFlag_Named;
+            texture.allocation_ = allocation;
+            texture.resource_ = resource;
         }
         return kGfxResult_NoError;
     }
@@ -3971,7 +3992,8 @@ private:
         Buffer &gfx_vertex_buffer = buffers_[gfx_raytracing_primitive.vertex_buffer_];
         SetObjectName(gfx_vertex_buffer, gfx_raytracing_primitive.vertex_buffer_.name);
         GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
-        if(gfx_raytracing_primitive.vertex_buffer_.size == 0)
+        if((gfx_raytracing_primitive.index_stride_ != 0 && gfx_raytracing_primitive.index_buffer_.size == 0) ||
+            gfx_raytracing_primitive.vertex_buffer_.size == 0)
         {
             destroyBuffer(gfx_raytracing_primitive.bvh_buffer_);
             gfx_raytracing_primitive.bvh_buffer_ = {};
@@ -3999,7 +4021,7 @@ private:
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
         device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
-        uint64_t const scratch_data_size = max(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
+        uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
         GFX_TRY(allocateRaytracingScratch(scratch_data_size));  // ensure scratch is large enough
         uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, 65536);
         if(bvh_data_size > gfx_raytracing_primitive.bvh_buffer_.size)
@@ -4015,8 +4037,10 @@ private:
         Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.bvh_buffer_];
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
         SetObjectName(gfx_buffer, raytracing_primitive.name);
-        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if(gfx_raytracing_primitive.index_stride_ != 0)
+            transitionResource(buffers_[gfx_raytracing_primitive.index_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
         transitionResource(buffers_[gfx_raytracing_primitive.vertex_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         submitPipelineBarriers();   // ensure scratch is not in use
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
         build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
@@ -4067,9 +4091,39 @@ private:
                 variable.id_ = variable.parameter_->id_;
                 continue;   // invalid parameter
             }
-            memcpy(&root_constants[variable.data_start_ / sizeof(uint32_t)], variable.parameter_->data_.constants_, min(variable.data_size_, variable.parameter_->data_size_));
+            memcpy(&root_constants[variable.data_start_ / sizeof(uint32_t)], variable.parameter_->data_.constants_, GFX_MIN(variable.data_size_, variable.parameter_->data_size_));
             variable.id_ = variable.parameter_->id_;
         }
+    }
+
+    void bindDrawIdBuffer()
+    {
+        GFX_ASSERT(buffer_handles_.has_handle(draw_id_buffer_.handle));
+        Buffer &gfx_buffer = buffers_[draw_id_buffer_];
+        SetObjectName(buffers_[draw_id_buffer_], draw_id_buffer_.name);
+        D3D12_VERTEX_BUFFER_VIEW
+        vbv_desc                = {};
+        vbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+        vbv_desc.SizeInBytes    = (uint32_t)draw_id_buffer_.size;
+        vbv_desc.StrideInBytes  = sizeof(uint32_t);
+        command_list_->IASetVertexBuffers(1, 1, &vbv_desc);
+    }
+
+    GfxResult populateDrawIdBuffer(uint32_t args_count)
+    {
+        uint64_t draw_id_buffer_size = args_count * sizeof(uint32_t);
+        if(draw_id_buffer_size <= draw_id_buffer_.size) return kGfxResult_NoError;
+        GFX_TRY(destroyBuffer(draw_id_buffer_));
+        draw_id_buffer_size += ((draw_id_buffer_size + 2) >> 1);
+        draw_id_buffer_size = GFX_ALIGN(draw_id_buffer_size, 65536);
+        std::vector<uint32_t> draw_ids(draw_id_buffer_size / sizeof(uint32_t));
+        for(size_t i = 0; i < draw_ids.size(); ++i) draw_ids[i] = static_cast<uint32_t>(i);
+        draw_id_buffer_ = createBuffer(draw_id_buffer_size, draw_ids.data(), kGfxCpuAccess_None, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+        if(!draw_id_buffer_)
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create the drawID buffer");
+        draw_id_buffer_.setName("gfx_DrawIDBuffer");
+        bindDrawIdBuffer(); // bind drawID buffer
+        return kGfxResult_NoError;
     }
 
     void populateDummyDescriptors()
@@ -4237,6 +4291,36 @@ private:
         dxc_reflection->Release();
     }
 
+    GfxResult createResource(D3D12MA::ALLOCATION_DESC const &allocation_desc, D3D12_RESOURCE_DESC const &resource_desc,
+        D3D12_RESOURCE_STATES initial_resource_state, D3D12MA::Allocation **allocation, REFIID riid_resource, void** ppv_resource)
+    {
+        HRESULT result;
+        D3D12_CLEAR_VALUE
+        clear_value          = {};
+        clear_value.Format   = resource_desc.Format;
+        if(IsDepthStencilFormat(resource_desc.Format))
+        {
+            clear_value.DepthStencil.Depth   = 1.0f;
+            clear_value.DepthStencil.Stencil = 0;
+        }
+        else
+        {
+            clear_value.Color[0] = 0.0f;
+            clear_value.Color[1] = 0.0f;
+            clear_value.Color[2] = 0.0f;
+            clear_value.Color[3] = 1.0f;
+        }
+        result = mem_allocator_->CreateResource(&allocation_desc, &resource_desc, initial_resource_state,
+            (resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 || (resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0 ? &clear_value : nullptr,
+            allocation, riid_resource, ppv_resource);
+        if(!SUCCEEDED(result))
+        {
+            *allocation = nullptr;  // D3D12MemoryAllocator leaves a dangling pointer to the allocation object upon failure
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory to create resource");
+        }
+        return kGfxResult_NoError;
+    }
+
     void transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state)
     {
         GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return;
@@ -4342,26 +4426,17 @@ private:
             resource_desc        = texture.resource_->GetDesc();
             resource_desc.Width  = window_width;
             resource_desc.Height = window_height;
-            D3D12_CLEAR_VALUE
-            clear_value          = {};
-            clear_value.Format   = resource_desc.Format;
-            clear_value.Color[0] = 0.0f;
-            clear_value.Color[1] = 0.0f;
-            clear_value.Color[2] = 0.0f;
-            clear_value.Color[3] = 1.0f;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-            if(!SUCCEEDED(mem_allocator_->CreateResource(&allocation_desc, &resource_desc, D3D12_RESOURCE_STATE_COPY_DEST,
-                (resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 ? &clear_value : nullptr, &allocation, IID_PPV_ARGS(&resource))))
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
-                if(resource != nullptr) resource->Release();
-                if(allocation != nullptr) allocation->Release();
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to auto-resize texture object(s) to %ux%u", window_width, window_height);
                 break;  // out of memory
             }
             collect(texture);   // release previous texture
             texture.resource_ = resource;
             texture.allocation_ = allocation;
+            texture.Object::flags_ &= ~Object::kFlag_Named;
             for(uint32_t j = 0; j < ARRAYSIZE(texture.dsv_descriptor_slots_); ++j)
                 texture.dsv_descriptor_slots_[j] = 0xFFFFFFFFu;
             for(uint32_t j = 0; j < ARRAYSIZE(texture.rtv_descriptor_slots_); ++j)
@@ -4846,18 +4921,18 @@ GfxResult gfxCommandDrawIndexed(GfxContext context, uint32_t index_count, uint32
     return gfx->encodeDrawIndexed(index_count, instance_count, first_index, base_vertex, base_instance);
 }
 
-GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer multi_draw_args)
+GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeMultiDrawIndirect(multi_draw_args);
+    return gfx->encodeMultiDrawIndirect(args_buffer, args_count);
 }
 
-GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer multi_draw_indexed_args)
+GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeMultiDrawIndexedIndirect(multi_draw_indexed_args);
+    return gfx->encodeMultiDrawIndexedIndirect(args_buffer, args_count);
 }
 
 GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
@@ -4867,11 +4942,11 @@ GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t
     return gfx->encodeDispatch(num_groups_x, num_groups_y, num_groups_z);
 }
 
-GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer indirect_args)
+GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeDispatchIndirect(indirect_args);
+    return gfx->encodeDispatchIndirect(args_buffer);
 }
 
 GfxResult gfxFrame(GfxContext context)
