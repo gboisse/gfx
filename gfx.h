@@ -218,6 +218,7 @@ GfxResult gfxDestroyProgram(GfxContext context, GfxProgram program);
 
 GfxResult gfxProgramSetBuffer(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer buffer);
 GfxResult gfxProgramSetTexture(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture texture, uint32_t mip_level = 0);
+GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count);
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state);
 GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size);
@@ -697,6 +698,12 @@ class GfxInternal
                 data_.image_.mip_level_ = mip_level;
             }
 
+            void set(GfxTexture const *textures, uint32_t texture_count)
+            {
+                (void)textures;
+                (void)texture_count;
+            }
+
             void set(GfxSamplerState const &sampler_state)
             {
                 if(type_ == kType_SamplerState)
@@ -764,7 +771,7 @@ class GfxInternal
                 default:
                     break;  // undefined type
                 }
-                return "Undefined";
+                return "undefined";
             }
         };
 
@@ -1767,6 +1774,19 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid texture object");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(texture, mip_level);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult setProgramTextures(GfxProgram const &program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count)
+    {
+        if(!program_handles_.has_handle(program.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        if(textures == nullptr && texture_count > 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid array of textures");
+        Program &gfx_program = programs_[program];  // get hold of program object
+        gfx_program.insertParameter(parameter_name).set(textures, texture_count);
         return kGfxResult_NoError;
     }
 
@@ -3128,7 +3148,7 @@ private:
                     switch(descriptor_range.RangeType)
                     {
                     case D3D12_DESCRIPTOR_RANGE_TYPE_SRV:
-                        resource_desc.BindCount = kGfxConstant_NumBindlessSlots;
+                        descriptor_range.NumDescriptors = kGfxConstant_NumBindlessSlots;
                         break;
                     default:
                         break;
@@ -4786,6 +4806,13 @@ GfxResult gfxProgramSetTexture(GfxContext context, GfxProgram program, char cons
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramTexture(program, parameter_name, texture, mip_level);
+}
+
+GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setProgramTextures(program, parameter_name, textures, texture_count);
 }
 
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state)
