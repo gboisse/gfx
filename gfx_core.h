@@ -507,6 +507,7 @@ public:
     inline bool empty() const;
 
     inline uint32_t allocate_slot();
+    inline uint32_t allocate_slots(uint32_t slot_count);
     inline void free_slot(uint32_t slot);
     inline uint32_t size() const;
     inline void clear();
@@ -514,10 +515,11 @@ public:
     inline uint32_t calculate_free_slot_count() const;
 
 protected:
-    inline void grow();
+    inline void grow(uint32_t slot_count = 1);
 
     char *name_;
     uint32_t *slots_;
+    uint32_t *slot_counts_;
     uint32_t next_slot_;
     uint32_t size_;
 };
@@ -525,6 +527,7 @@ protected:
 GfxFreelist::GfxFreelist()
     : name_(nullptr)
     , slots_(nullptr)
+    , slot_counts_(nullptr)
     , next_slot_(0xFFFFFFFFu)
     , size_(0)
 {
@@ -533,6 +536,7 @@ GfxFreelist::GfxFreelist()
 GfxFreelist::GfxFreelist(char const *name)
     : name_(name ? (char *)malloc(strlen(name) + 1) : nullptr)
     , slots_(nullptr)
+    , slot_counts_(nullptr)
     , next_slot_(0xFFFFFFFFu)
     , size_(0)
 {
@@ -548,6 +552,7 @@ GfxFreelist::~GfxFreelist()
 #endif //! _DEBUG
     free(name_);
     free(slots_);
+    free(slot_counts_);
 }
 
 bool GfxFreelist::empty() const
@@ -562,6 +567,56 @@ uint32_t GfxFreelist::allocate_slot()
     uint32_t const slot = next_slot_;
     next_slot_ = slots_[next_slot_];
     slots_[slot] = 0xFFFFFFFEu;
+    slot_counts_[slot] = 1;
+    return slot;
+}
+
+uint32_t GfxFreelist::allocate_slots(uint32_t slot_count)
+{
+    uint32_t slot = 0xFFFFFFFFu;
+    if(slot_count == 0) return 0xFFFFFFFFu;
+    if(slot_count == 1) return allocate_slot();
+    for(uint32_t next_slot = next_slot_; next_slot != 0xFFFFFFFFu; next_slot = slots_[next_slot])
+    {
+        bool is_block_available = true;
+        if(next_slot + slot_count > size_) continue;
+        for(uint32_t i = 1; i < slot_count; ++i)
+            if(slots_[next_slot + i] == 0xFFFFFFFEu)
+            {
+                is_block_available = false;
+                break;  // block isn't available
+            }
+        if(is_block_available)
+        {
+            slot = next_slot;
+            break;  // found a suitable block
+        }
+    }
+    if(slot == 0xFFFFFFFFu)
+    {
+        slot = size_;
+        grow(slot_count);
+    }
+    GFX_ASSERT(slot != 0xFFFFFFFFu);
+    GFX_ASSERT(slot + slot_count <= size_);
+    uint32_t previous_slot = 0xFFFFFFFFu;
+    uint32_t next_slot = next_slot_; next_slot_ = 0xFFFFFFFFu;
+    for(; next_slot != 0xFFFFFFFFu;)
+        if(next_slot < slot || next_slot >= slot + slot_count)
+        {
+            if(previous_slot == 0xFFFFFFFFu) next_slot_ = next_slot;
+            previous_slot = next_slot;
+            next_slot = slots_[next_slot];
+        }
+        else
+        {
+            if(previous_slot != 0xFFFFFFFFu) slots_[previous_slot] = slots_[next_slot];
+            uint32_t const previous_next_slot = slots_[next_slot];
+            slots_[next_slot] = 0xFFFFFFFEu;
+            next_slot = previous_next_slot;
+        }
+    for(uint32_t i = 0; i < slot_count; ++i)
+        slot_counts_[i + slot] = (i == 0 ? slot_count : 0);
     return slot;
 }
 
@@ -570,7 +625,15 @@ void GfxFreelist::free_slot(uint32_t slot)
     GFX_ASSERT(slot < size_); if(slot >= size_) return;
     GFX_ASSERT(slots_[slot] == 0xFFFFFFFEu);
     if(slots_[slot] != 0xFFFFFFFEu) return; // already freed
-    slots_[slot] = next_slot_; next_slot_ = slot;
+    GFX_ASSERT(slot_counts_[slot] > 0);
+    if(slot_counts_[slot] == 0) return; // cannot free within a block
+    uint32_t i = slot + slot_counts_[slot];
+    while(i-- > slot)
+    {
+        slots_[i] = next_slot_;
+        slot_counts_[i] = 0;
+        next_slot_ = i;
+    }
 }
 
 uint32_t GfxFreelist::size() const
@@ -582,6 +645,8 @@ void GfxFreelist::clear()
 {
     free(slots_);
     slots_ = nullptr;
+    free(slot_counts_);
+    slot_counts_ = nullptr;
     next_slot_ = 0xFFFFFFFFu;
     size_ = 0;
 }
@@ -594,16 +659,27 @@ uint32_t GfxFreelist::calculate_free_slot_count() const
     return free_slot_count;
 }
 
-void GfxFreelist::grow()
+void GfxFreelist::grow(uint32_t slot_count)
 {
-    GFX_ASSERT(next_slot_ == 0xFFFFFFFFu);
-    uint32_t const size = size_ + ((size_ + 2) >> 1);
+    uint32_t size = size_ + slot_count;
+    size += ((size + 2) >> 1);  // grow by half capacity
     uint32_t *slots = (uint32_t *)malloc(size * sizeof(uint32_t));
-    for(uint32_t i = 0; i < size_; ++i) slots[i] = 0xFFFFFFFEu;
-    for(uint32_t i = size_; i < size; ++i)
-        slots[i] = (i + 1 < size ? i + 1 : 0xFFFFFFFFu);
+    uint32_t *slot_counts = (uint32_t *)malloc(size * sizeof(uint32_t));
+    GFX_ASSERT(slots != nullptr && slot_counts != nullptr); // out of memory
+    for(uint32_t i = 0; i < size; ++i)
+        if(i < size_)
+        {
+            slots[i] = (slots_[i] != 0xFFFFFFFFu ? slots_[i] : size_);
+            slot_counts[i] = slot_counts_[i];
+        }
+        else
+        {
+            slots[i] = (i + 1 < size ? i + 1 : 0xFFFFFFFFu);
+            slot_counts[i] = 0;
+        }
+    next_slot_ = (next_slot_ != 0xFFFFFFFFu ? next_slot_ : size_);
+    free(slot_counts_); slot_counts_ = slot_counts;
     free(slots_); slots_ = slots;
-    next_slot_ = size_;
     size_ = size;
 }
 
