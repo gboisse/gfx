@@ -663,7 +663,7 @@ class GfxInternal
             union
             {
                 GfxBuffer buffer_;
-                struct { GfxTexture texture_; uint32_t mip_level_; } image_;
+                struct { GfxTexture *textures_; uint32_t texture_count; uint32_t mip_level_; } image_;
                 GfxSamplerState sampler_state_;
                 struct { GfxAccelerationStructure bvh_; GfxBuffer bvh_buffer_; } acceleration_structure_;
                 void *constants_;
@@ -686,22 +686,44 @@ class GfxInternal
 
             void set(GfxTexture const &texture, uint32_t mip_level)
             {
-                if(type_ == kType_Image)
-                    id_ += (texture.handle != data_.image_.texture_.handle || mip_level != data_.image_.mip_level_);
+                if(type_ == kType_Image && data_.image_.texture_count == 1)
+                    id_ += (texture.handle != data_.image_.textures_->handle || mip_level != data_.image_.mip_level_);
                 else
                 {
                     unset();
                     type_ = kType_Image;
                     data_size_ = sizeof(texture);
+                    data_.image_.texture_count = 1;
+                    data_.image_.textures_ = (GfxTexture *)malloc(sizeof(GfxTexture));
+                    if(data_.image_.textures_ == nullptr)
+                    {
+                        GFX_ASSERT(0);  // out of memory
+                        unset(); return;
+                    }
                 }
-                data_.image_.texture_ = texture;
+                *data_.image_.textures_ = texture;
                 data_.image_.mip_level_ = mip_level;
             }
 
             void set(GfxTexture const *textures, uint32_t texture_count)
             {
-                (void)textures;
-                (void)texture_count;
+                GFX_ASSERT(textures != nullptr && texture_count > 1);
+                if(type_ == kType_Image && data_.image_.texture_count == texture_count)
+                    for(uint32_t i = 0; i < texture_count; ++i) { if(textures[i].handle != data_.image_.textures_[i].handle) { ++id_; break; } }
+                else
+                {
+                    unset();
+                    type_ = kType_Image;
+                    data_.image_.texture_count = texture_count;
+                    data_size_ = texture_count * sizeof(*textures);
+                    data_.image_.textures_ = (GfxTexture *)malloc(texture_count * sizeof(GfxTexture));
+                    if(data_.image_.textures_ == nullptr)
+                    {
+                        GFX_ASSERT(0);  // out of memory
+                        unset(); return;
+                    }
+                }
+                for(uint32_t i = 0; i < texture_count; ++i) data_.image_.textures_[i] = textures[i];
             }
 
             void set(GfxSamplerState const &sampler_state)
@@ -746,8 +768,17 @@ class GfxInternal
 
             void unset()
             {
-                if(type_ == kType_Constants)
+                switch(type_)
+                {
+                case kType_Image:
+                    free(data_.image_.textures_);
+                    break;
+                case kType_Constants:
                     free(data_.constants_);
+                    break;
+                default:
+                    break;
+                }
                 memset(&data_, 0, sizeof(data_));
                 type_ = kType_Count;
                 data_size_ = 0;
@@ -791,6 +822,14 @@ class GfxInternal
             return (*it).second;
         }
 
+        void eraseParameter(char const *parameter_name)
+        {
+            uint64_t const parameter_id = Hash(parameter_name);
+            Parameters::iterator const it = parameters_.find(parameter_id);
+            GFX_ASSERT(parameter_name != nullptr && *parameter_name != '\0');
+            if(it != parameters_.end()) { (*it).second.unset(); parameters_.erase(it); }
+        }
+
         String cs_;
         String vs_;
         String gs_;
@@ -829,6 +868,7 @@ class GfxInternal
             Type type_ = kType_Count;
             uint32_t id_ = 0xFFFFFFFFu;
             uint64_t parameter_id_ = 0;
+            uint32_t descriptor_count_ = 0;
             uint32_t descriptor_slot_ = 0xFFFFFFFFu;
             Program::Parameter const *parameter_ = nullptr;
 
@@ -1786,7 +1826,18 @@ public:
         if(textures == nullptr && texture_count > 0)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid array of textures");
         Program &gfx_program = programs_[program];  // get hold of program object
-        gfx_program.insertParameter(parameter_name).set(textures, texture_count);
+        switch(texture_count)
+        {
+        case 0:
+            gfx_program.eraseParameter(parameter_name);
+            break;
+        case 1:
+            gfx_program.insertParameter(parameter_name).set(*textures, 0);
+            break;
+        default:
+            gfx_program.insertParameter(parameter_name).set(textures, texture_count);
+            break;
+        }
         return kGfxResult_NoError;
     }
 
@@ -2797,8 +2848,7 @@ private:
     void collect(Program const &program)
     {
         for(Program::Parameters::const_iterator it = program.parameters_.begin(); it != program.parameters_.end(); ++it)
-            if((*it).second.type_ == Program::Parameter::kType_Constants)
-                free((*it).second.data_.constants_);
+            const_cast<Program::Parameter &>((*it).second).unset(); // release parameter resources
     }
 
     void collect(Kernel const &kernel)
@@ -2866,9 +2916,9 @@ private:
         return kGfxResult_NoError;
     }
 
-    uint32_t allocateDescriptor()
+    uint32_t allocateDescriptor(uint32_t descriptor_count = 1)
     {
-        uint32_t const descriptor_slot = freelist_descriptors_.allocate_slot();
+        uint32_t const descriptor_slot = freelist_descriptors_.allocate_slots(descriptor_count);
         uint32_t const size = (descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0);
         if(freelist_descriptors_.size() > size)
         {
@@ -3153,6 +3203,7 @@ private:
                     default:
                         break;
                     }
+                kernel_parameter.descriptor_count_ = descriptor_range.NumDescriptors;
 
                 root_parameters.push_back(root_parameter);
                 descriptor_ranges.push_back(descriptor_range);
@@ -3465,9 +3516,9 @@ private:
                 case Kernel::Parameter::kType_RWTexture2D:
                     if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_ &&
                        parameter.parameter_->type_ == Program::Parameter::kType_Image &&
-                       parameter.parameter_->data_.image_.texture_.is2D() &&
-                       texture_handles_.has_handle(parameter.parameter_->data_.image_.texture_.handle))
-                        ensureTextureHasUsageFlag(textures_[parameter.parameter_->data_.image_.texture_], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                       parameter.parameter_->data_.image_.textures_->is2D() &&
+                       texture_handles_.has_handle(parameter.parameter_->data_.image_.textures_->handle))
+                        ensureTextureHasUsageFlag(textures_[*parameter.parameter_->data_.image_.textures_], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
                     break;
                 case Kernel::Parameter::kType_AccelerationStructure:
                     if(parameter.parameter_ != nullptr && parameter.id_ == parameter.parameter_->id_)
@@ -3486,7 +3537,8 @@ private:
                 if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
                 {
                     freeDescriptor(parameter.descriptor_slot_);
-                    parameter.descriptor_slot_ = allocateDescriptor();
+                    GFX_ASSERT(parameter.descriptor_count_ > 0);
+                    parameter.descriptor_slot_ = allocateDescriptor(parameter.descriptor_count_);
                 }
                 break;
             }
@@ -3675,35 +3727,44 @@ private:
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
                             break;  // user set an unrelated parameter type
                         }
-                        GfxTexture const &texture = parameter.parameter_->data_.image_.texture_;
-                        if(!texture_handles_.has_handle(texture.handle))
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid texture object
-                        }
-                        if(!texture.is2D())
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid texture object for shader SRV
-                        }
-                        Texture &gfx_texture = textures_[texture];
-                        SetObjectName(gfx_texture, texture.name);
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                        if(!invalidate_descriptor) break;   // already up to date
-                        D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
-                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                        srv_desc.Format = resource_desc.Format;
-                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
-                        srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
-                        device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.is2D())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader SRV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                                srv_desc.Format = resource_desc.Format;
+                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                                srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
+                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_RWTexture2D:
@@ -3716,7 +3777,7 @@ private:
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
                             break;  // user set an unrelated parameter type
                         }
-                        GfxTexture const &texture = parameter.parameter_->data_.image_.texture_;
+                        GfxTexture const &texture = *parameter.parameter_->data_.image_.textures_;
                         if(!texture_handles_.has_handle(texture.handle))
                         {
                             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
