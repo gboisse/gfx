@@ -2496,7 +2496,7 @@ public:
             fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
             WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
         }
-        resetState();
+        bound_kernel_ = {};
         ++fence_values_[fence_index_];
         command_allocators_[fence_index_]->Reset();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
@@ -2505,6 +2505,7 @@ public:
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         command_list_->ResourceBarrier(1, &resource_barrier);
+        resetState();   // re-install state
         return runGarbageCollection();
     }
 
@@ -2516,13 +2517,12 @@ public:
         GFX_TRY(sync());    // make sure GPU has gone through all pending work
         command_allocators_[fence_index_]->Reset();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
-        resetState();   // state needs to be re-installed
+        resetState();   // re-install state
         return kGfxResult_NoError;
     }
 
     void resetState()
     {
-        bound_kernel_ = {};
         descriptor_heap_id_ = 0;
         bound_viewport_.invalidate();
         bound_scissor_rect_.invalidate();
