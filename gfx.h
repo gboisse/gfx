@@ -2496,20 +2496,15 @@ public:
             fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
             WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
         }
-        bound_kernel_ = {};
-        descriptor_heap_id_ = 0;
+        resetState();
         ++fence_values_[fence_index_];
-        force_install_index_buffer_ = true;
-        force_install_vertex_buffer_ = true;
         command_allocators_[fence_index_]->Reset();
-        bound_viewport_.invalidate(); bound_scissor_rect_.invalidate();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
         constant_buffer_pool_cursors_[fence_index_] = 0;    // reset pool
         resource_barrier.Transition.pResource = back_buffers_[fence_index_];
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         command_list_->ResourceBarrier(1, &resource_barrier);
-        bindDrawIdBuffer(); // bind drawID buffer
         return runGarbageCollection();
     }
 
@@ -2521,7 +2516,19 @@ public:
         GFX_TRY(sync());    // make sure GPU has gone through all pending work
         command_allocators_[fence_index_]->Reset();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
+        resetState();   // state needs to be re-installed
         return kGfxResult_NoError;
+    }
+
+    void resetState()
+    {
+        bound_kernel_ = {};
+        descriptor_heap_id_ = 0;
+        bound_viewport_.invalidate();
+        bound_scissor_rect_.invalidate();
+        force_install_index_buffer_ = true;
+        force_install_vertex_buffer_ = true;
+        bindDrawIdBuffer(); // bind drawID buffer
     }
 
     static inline GfxInternal *GetGfx(GfxContext &context) { return reinterpret_cast<GfxInternal *>(context.handle); }
@@ -3742,7 +3749,8 @@ private:
                                 GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
                                 if(!texture_handles_.has_handle(texture.handle))
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // user set an invalid texture object
                                 }
