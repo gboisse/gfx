@@ -2134,6 +2134,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid texture object");
         Texture &dst_texture = textures_[dst]; SetObjectName(dst_texture, dst.name);
         Texture &src_texture = textures_[src]; SetObjectName(src_texture, src.name);
+        transitionResource(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST);
+        transitionResource(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        submitPipelineBarriers();   // transition our resources if needed
         command_list_->CopyResource(dst_texture.resource_, src_texture.resource_);
         return kGfxResult_NoError;
     }
