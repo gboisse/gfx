@@ -266,6 +266,7 @@ GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t c
 
 GfxResult gfxCommandClearBackBuffer(GfxContext context);
 GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
+GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
 
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
@@ -2122,6 +2123,18 @@ public:
     {
         for(uint32_t i = 0; i < texture.mip_levels; ++i)
             GFX_TRY(encodeClearImage(texture, i, 0));
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeCopyTexture(GfxTexture const &dst, GfxTexture const &src)
+    {
+        if(!texture_handles_.has_handle(dst.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy to an invalid texture object");
+        if(!texture_handles_.has_handle(src.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid texture object");
+        Texture &dst_texture = textures_[dst]; SetObjectName(dst_texture, dst.name);
+        Texture &src_texture = textures_[src]; SetObjectName(src_texture, src.name);
+        command_list_->CopyResource(dst_texture.resource_, src_texture.resource_);
         return kGfxResult_NoError;
     }
 
@@ -4974,6 +4987,13 @@ GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeClearTexture(texture);
+}
+
+GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeCopyTexture(dst, src);
 }
 
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice)
