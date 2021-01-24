@@ -366,6 +366,8 @@ public:
 
     GfxResult terminate()
     {
+        GFX_TRY(clear());
+
         return kGfxResult_NoError;
     }
 

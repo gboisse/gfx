@@ -630,6 +630,8 @@ void GfxFreelist::free_slot(uint32_t slot)
     uint32_t i = slot + slot_counts_[slot];
     while(i-- > slot)
     {
+        GFX_ASSERT(i == slot || slot_counts_[i] == 0);
+        GFX_ASSERT(slots_[i] == 0xFFFFFFFEu);
         slots_[i] = next_slot_;
         slot_counts_[i] = 0;
         next_slot_ = i;
