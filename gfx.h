@@ -2811,6 +2811,24 @@ private:
         return false;
     }
 
+    static inline DXGI_FORMAT GetCBVSRVUAVFormat(DXGI_FORMAT format)
+    {
+        switch(format)
+        {
+        case DXGI_FORMAT_D32_FLOAT:
+            return DXGI_FORMAT_R32_FLOAT;
+        case DXGI_FORMAT_D16_UNORM:
+            return DXGI_FORMAT_R16_UNORM;
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+            return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+            return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
+        default:
+            break;
+        }
+        return format;
+    }
+
     uint64_t getDescriptorHeapId() const
     {
         return (static_cast<uint64_t>(descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0) << 32);
@@ -3782,7 +3800,7 @@ private:
                                 if(!invalidate_descriptor) continue;    // already up to date
                                 D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                                srv_desc.Format = resource_desc.Format;
+                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                                 srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
@@ -3824,7 +3842,7 @@ private:
                         if(!invalidate_descriptor) break;   // already up to date
                         D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                        uav_desc.Format = resource_desc.Format;
+                        uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                         uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
                         uav_desc.Texture2D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
                         device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
