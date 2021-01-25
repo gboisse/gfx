@@ -290,6 +290,9 @@ public:
             gfxCommandSetScissorRect(gfx_); // reset scissor test
         }
 
+        for(uint32_t i = 0; i < ARRAYSIZE(io.MouseDown); ++i)
+            ImGui::ResetMouseDragDelta(i);  // reset mouse drag
+
         if(g_hWnd != 0) ImGui_ImplWin32_NewFrame();
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
