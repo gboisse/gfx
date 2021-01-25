@@ -38,6 +38,8 @@ GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char co
 GfxResult gfxDestroyWindow(GfxWindow window);
 
 GfxResult gfxWindowPumpEvents(GfxWindow window);
+
+bool gfxWindowIsKeyDown(GfxWindow window, uint32_t key_code);   // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
 bool gfxWindowIsCloseRequested(GfxWindow window);
 bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
@@ -60,6 +62,7 @@ class GfxWindowInternal
     bool is_maximized_ = false;
     bool is_close_requested_ = false;
     bool is_imgui_initialized_ = false;
+    bool is_key_down_[VK_OEM_CLEAR] = {};
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
@@ -129,6 +132,11 @@ public:
         return kGfxResult_NoError;
     }
 
+    inline bool getIsKeyDown(uint32_t key_code) const
+    {
+        return (key_code < ARRAYSIZE(is_key_down_) ? is_key_down_[key_code] : false);
+    }
+
     inline bool getIsCloseRequested() const
     {
         return is_close_requested_;
@@ -147,6 +155,41 @@ public:
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
 
 private:
+    inline void updateKeyBinding(uint32_t message, uint32_t key_code)
+    {
+        bool is_down;
+        switch(message)
+        {
+        case WM_KEYUP: case WM_SYSKEYUP:
+            is_down = false;
+            break;
+        case WM_KEYDOWN: case WM_SYSKEYDOWN:
+            is_down = true;
+            break;
+        default:
+            return;
+        }
+        if(is_imgui_initialized_)
+        {
+            ImGuiIO &io = ImGui::GetIO();
+            if(key_code < ARRAYSIZE(io.KeysDown))
+                io.KeysDown[key_code] = is_down;
+        }
+        is_key_down_[key_code] = is_down;
+    }
+
+    inline void resetKeyBindings()
+    {
+        if(is_imgui_initialized_)
+        {
+            ImGuiIO &io = ImGui::GetIO();
+            for(uint32_t i = 0; i < ARRAYSIZE(io.KeysDown); ++i)
+                io.KeysDown[i] = false;
+        }
+        for(uint32_t i = 0; i < ARRAYSIZE(is_key_down_); ++i)
+            is_key_down_[i] = false;
+    }
+
     static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM w_param, LPARAM l_param)
     {
         GfxWindowInternal *gfx_window = (GfxWindowInternal *)GetWindowLongPtrA(window, GWLP_USERDATA);
@@ -167,6 +210,11 @@ private:
                     gfx_window->is_close_requested_ = true;
                 }
                 return 0;
+            case WM_KILLFOCUS:
+                {
+                    gfx_window->resetKeyBindings();
+                }
+                break;
             case WM_CHAR:
             case WM_SETCURSOR:
             case WM_DEVICECHANGE:
@@ -179,6 +227,8 @@ private:
             case WM_RBUTTONDOWN: case WM_RBUTTONDBLCLK:
             case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK:
             case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
+                if(w_param < ARRAYSIZE(is_key_down_))
+                    gfx_window->updateKeyBinding(message, (uint32_t)w_param);
                 if(gfx_window->is_imgui_initialized_)
                     ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
                 break;
@@ -217,6 +267,13 @@ GfxResult gfxWindowPumpEvents(GfxWindow window)
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
     if(!gfx_window) return kGfxResult_InvalidParameter;
     return gfx_window->pumpEvents();
+}
+
+bool gfxWindowIsKeyDown(GfxWindow window, uint32_t key_code)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return false;   // invalid window handle
+    return gfx_window->getIsKeyDown(key_code);
 }
 
 bool gfxWindowIsCloseRequested(GfxWindow window)
