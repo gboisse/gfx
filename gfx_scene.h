@@ -650,15 +650,23 @@ private:
         stbi_uc *image_data = stbi_load(asset_file, &image_width, &image_height, &channel_count, 0);
         if(image_data == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, stbi_failure_reason());
+        uint32_t const resolved_channel_count = (uint32_t)(channel_count != 3 ? channel_count : 4);
         char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
         file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
-        size_t const image_data_size = (size_t)image_width * image_height * channel_count;
+        size_t const image_data_size = (size_t)image_width * image_height * resolved_channel_count;
         GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
         image_ref->data.resize(image_data_size);
         image_ref->width = (uint32_t)image_width;
         image_ref->height = (uint32_t)image_height;
-        image_ref->channel_count = (uint32_t)channel_count;
-        memcpy(image_ref->data.data(), image_data, image_data_size);
+        image_ref->channel_count = resolved_channel_count;
+        for(int32_t y = 0; y < image_height; ++y)
+            for(int32_t x = 0; x < image_width; ++x)
+                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
+                {
+                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + (image_height - y - 1) * image_width) + k;
+                    int32_t const src_index = channel_count * (x + y * image_width) + k;
+                    image_ref->data[dst_index] = (k < channel_count ? image_data[src_index] : (uint8_t)255);
+                }
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
