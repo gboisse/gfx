@@ -1015,6 +1015,10 @@ public:
         SetDebugName(device_, "gfx_Device");
         device->Release();
 
+        D3D12_FEATURE_DATA_D3D12_OPTIONS5 rt_features = {};
+        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5));
+        raytracing_support_ = (rt_features.RaytracingTier >= D3D12_RAYTRACING_TIER_1_1 ? true : false);
+
         D3D12_COMMAND_QUEUE_DESC
         queue_desc      = {};
         queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -1171,10 +1175,6 @@ public:
         context.vendor_id = adapter_desc.VendorId;
         GFX_PRINTLN("Created Direct3D12 device `%ws'", adapter_desc.Description);
         GFX_SNPRINTF(context.name, sizeof(context.name), "%ws", adapter_desc.Description);
-
-        D3D12_FEATURE_DATA_D3D12_OPTIONS5 rt_features = {};
-        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5));
-        raytracing_support_ = (rt_features.RaytracingTier >= D3D12_RAYTRACING_TIER_1_1 ? true : false);
         if(!raytracing_support_)
             GFX_PRINTLN("Warning: DXR-1.1 is not supported on the selected device; no raytracing will be available");
         bound_viewport_.invalidate(); bound_scissor_rect_.invalidate();
@@ -1533,6 +1533,11 @@ public:
     GfxAccelerationStructure createAccelerationStructure()
     {
         GfxAccelerationStructure acceleration_structure = {};
+        if(!raytracing_support_)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create acceleration structure");
+            return acceleration_structure;  // invalid operation
+        }
         acceleration_structure.handle = acceleration_structure_handles_.allocate_handle();
         acceleration_structures_.insert(acceleration_structure);
         return acceleration_structure;
@@ -2500,7 +2505,7 @@ public:
         command_list_->Close(); // close command list for submit
         ID3D12CommandList *const command_lists[] = { command_list_ };
         command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
-        command_queue_->Signal(fences_[fence_index_], fence_values_[fence_index_]);
+        command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
         swap_chain_->Present(1, 0); // enable vsync
         uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
         uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
@@ -2513,7 +2518,6 @@ public:
             WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
         }
         bound_kernel_ = {};
-        ++fence_values_[fence_index_];
         command_allocators_[fence_index_]->Reset();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
         constant_buffer_pool_cursors_[fence_index_] = 0;    // reset pool
@@ -4319,6 +4323,7 @@ private:
                 }
                 break;
             case Kernel::Parameter::kType_AccelerationStructure:
+                if(raytracing_support_)
                 {
                     D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                     srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
@@ -4396,7 +4401,7 @@ private:
             "gs_",
             "ps_"
         };
-        char const *shader_model = (raytracing_support_ ? "6_5" : "6_3");
+        char const *shader_model = (raytracing_support_ ? "6_5" : "6_2");
         static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < ARRAYSIZE(shader_profiles); ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), shader_model);
 
