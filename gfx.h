@@ -2236,10 +2236,10 @@ public:
                     texture_upload_buffer_ = createBuffer(texture_upload_buffer_size, nullptr, kGfxCpuAccess_None);
                     if(!texture_upload_buffer_)
                         return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory to upload texture data");
-                    texture_upload_buffer = &buffers_[texture_upload_buffer_];
                     texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
-                    SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
                 }
+                texture_upload_buffer = &buffers_[texture_upload_buffer_];
+                SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
                 Buffer &gfx_buffer = buffers_[src]; SetObjectName(gfx_buffer, src.name);
                 if(src.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
@@ -2725,6 +2725,19 @@ private:
     {
         switch(format)
         {
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+            return 1;
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+            return 2;
         case DXGI_FORMAT_R10G10B10A2_TYPELESS:
         case DXGI_FORMAT_R10G10B10A2_UNORM:
         case DXGI_FORMAT_R10G10B10A2_UINT:
