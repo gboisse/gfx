@@ -290,7 +290,7 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);
 //! Frame processing.
 //!
 
-GfxResult gfxFrame(GfxContext context);
+GfxResult gfxFrame(GfxContext context, bool vsync = true);
 GfxResult gfxFinish(GfxContext context);
 
 //!
@@ -2491,7 +2491,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult frame()
+    GfxResult frame(bool vsync)
     {
         RECT window_rect = {};
         GetClientRect(window_, &window_rect);
@@ -2506,7 +2506,7 @@ public:
         ID3D12CommandList *const command_lists[] = { command_list_ };
         command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
         command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
-        swap_chain_->Present(1, 0); // enable vsync
+        swap_chain_->Present(vsync ? 1 : 0, 0); // toggle vsync
         uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
         uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
@@ -5133,11 +5133,11 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
     return gfx->encodeDispatchIndirect(args_buffer);
 }
 
-GfxResult gfxFrame(GfxContext context)
+GfxResult gfxFrame(GfxContext context, bool vsync)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->frame();
+    return gfx->frame(vsync);
 }
 
 GfxResult gfxFinish(GfxContext context)
