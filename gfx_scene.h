@@ -187,6 +187,15 @@ GfxMetadata gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle
 GfxConstRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index);
 
 //!
+//! Material helpers.
+//!
+
+inline bool gfxMaterialIsEmissive(GfxConstRef<GfxMaterial> material_ref)
+{
+    return material_ref && (glm::dot(material_ref->emissivity, material_ref->emissivity) > 0.0f || material_ref->emissivity_map);
+}
+
+//!
 //! Mesh object.
 //!
 
