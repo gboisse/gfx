@@ -144,9 +144,10 @@ GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_i
 
 struct GfxImage
 {
-    uint32_t width         = 0;
-    uint32_t height        = 0;
-    uint32_t channel_count = 0;
+    uint32_t width             = 0;
+    uint32_t height            = 0;
+    uint32_t channel_count     = 0;
+    uint32_t bytes_per_channel = 0;
 
     std::vector<uint8_t> data;
 };
@@ -159,6 +160,27 @@ GfxImage const *gfxSceneGetImages(GfxScene scene);
 GfxImage *gfxSceneGetImage(GfxScene scene, uint64_t image_handle);
 GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle);
 GfxConstRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index);
+
+//!
+//! Image helpers.
+//!
+
+inline DXGI_FORMAT gfxImageGetFormat(GfxImage const &image)
+{
+    if(image.bytes_per_channel != 1 && image.bytes_per_channel != 2) return DXGI_FORMAT_UNKNOWN;
+    switch(image.channel_count)
+    {
+    case 1:
+        return (image.bytes_per_channel == 1 ? DXGI_FORMAT_R8_UNORM : DXGI_FORMAT_R16_UNORM);
+    case 2:
+        return (image.bytes_per_channel == 1 ? DXGI_FORMAT_R8G8_UNORM : DXGI_FORMAT_R16G16_UNORM);
+    case 4:
+        return (image.bytes_per_channel == 1 ? DXGI_FORMAT_R8G8B8A8_UNORM : DXGI_FORMAT_R16G16B16A16_UNORM);
+    default:
+        break;
+    }
+    return DXGI_FORMAT_UNKNOWN;
+}
 
 //!
 //! Material object.
@@ -190,9 +212,9 @@ GfxConstRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t mate
 //! Material helpers.
 //!
 
-inline bool gfxMaterialIsEmissive(GfxConstRef<GfxMaterial> material_ref)
+inline bool gfxMaterialIsEmissive(GfxMaterial const &material)
 {
-    return material_ref && (glm::dot(material_ref->emissivity, material_ref->emissivity) > 0.0f || material_ref->emissivity_map);
+    return glm::dot(material.emissivity, material.emissivity) > 0.0f || material.emissivity_map;
 }
 
 //!
@@ -390,6 +412,8 @@ public:
         if(CaseInsensitiveCompare(asset_extension, ".obj") ||
            CaseInsensitiveCompare(asset_extension, ".objm"))
             GFX_TRY(importObj(scene, asset_file));
+        else if(CaseInsensitiveCompare(asset_extension, ".hdr"))
+            GFX_TRY(importHdr(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||
                 CaseInsensitiveCompare(asset_extension, ".png") ||
                 CaseInsensitiveCompare(asset_extension, ".jpg") ||
@@ -650,6 +674,41 @@ private:
         return kGfxResult_NoError;
     }
 
+    GfxResult importHdr(GfxScene const &scene, char const *asset_file)
+    {
+        GFX_ASSERT(asset_file != nullptr);
+        int32_t image_width, image_height, channel_count;
+        if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
+            return kGfxResult_NoError;  // image was already imported
+        stbi_us *image_data = stbi_load_16(asset_file, &image_width, &image_height, &channel_count, 0);
+        if(image_data == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, stbi_failure_reason());
+        uint32_t const resolved_channel_count = (uint32_t)(channel_count != 3 ? channel_count : 4);
+        char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
+        file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
+        size_t const image_data_size = (size_t)image_width * image_height * resolved_channel_count * sizeof(stbi_us);
+        GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
+        image_ref->data.resize(image_data_size);
+        image_ref->width = (uint32_t)image_width;
+        image_ref->height = (uint32_t)image_height;
+        image_ref->channel_count = resolved_channel_count;
+        image_ref->bytes_per_channel = (uint32_t)2;
+        uint16_t *data = (uint16_t *)image_ref->data.data();
+        for(int32_t y = 0; y < image_height; ++y)
+            for(int32_t x = 0; x < image_width; ++x)
+                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
+                {
+                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + (image_height - y - 1) * image_width) + k;
+                    int32_t const src_index = channel_count * (x + y * image_width) + k;
+                    data[dst_index] = (k < channel_count ? image_data[src_index] : (uint16_t)65535);
+                }
+        GfxMetadata &image_metadata = image_metadata_[image_ref];
+        image_metadata.asset_file = asset_file; // set up metadata
+        image_metadata.object_name = file;
+        stbi_image_free(image_data);
+        return kGfxResult_NoError;
+    }
+
     GfxResult importImage(GfxScene const &scene, char const *asset_file)
     {
         GFX_ASSERT(asset_file != nullptr);
@@ -668,6 +727,7 @@ private:
         image_ref->width = (uint32_t)image_width;
         image_ref->height = (uint32_t)image_height;
         image_ref->channel_count = resolved_channel_count;
+        image_ref->bytes_per_channel = (uint32_t)1;
         for(int32_t y = 0; y < image_height; ++y)
             for(int32_t x = 0; x < image_width; ++x)
                 for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)

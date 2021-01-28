@@ -99,15 +99,18 @@ GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t el
 //! Texture resources.
 //!
 
-class GfxTexture { GFX_INTERNAL_NAMED_HANDLE; uint32_t width; uint32_t height; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D } type; public:
+class GfxTexture { GFX_INTERNAL_NAMED_HANDLE; uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_Cube } type; public:
+                   inline bool isCube() const { return type == kType_Cube; }
                    inline bool is2D() const { return type == kType_2D; }
                    inline uint32_t getWidth() const { return width; }
                    inline uint32_t getHeight() const { return height; }
+                   inline uint32_t getDepth() const { return depth; }
                    inline DXGI_FORMAT getFormat() const { return format; }
                    inline uint32_t getMipLevels() const { return mip_levels; } };
 
 GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format);  // creates auto-resize window-sized texture
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1);
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1);
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 
 //!
@@ -588,24 +591,16 @@ class GfxInternal
 
     struct Texture : public Object
     {
-        inline Texture()
-        {
-            for(uint32_t i = 0; i < ARRAYSIZE(dsv_descriptor_slots_); ++i)
-                dsv_descriptor_slots_[i] = 0xFFFFFFFFu;
-            for(uint32_t i = 0; i < ARRAYSIZE(rtv_descriptor_slots_); ++i)
-                rtv_descriptor_slots_[i] = 0xFFFFFFFFu;
-        }
-
         enum Flag
         {
             kFlag_AutoResize = 1 << 0
         };
 
-        uint32_t flags_;
+        uint32_t flags_ = 0;
         ID3D12Resource *resource_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
-        uint32_t dsv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
-        uint32_t rtv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
+        std::vector<uint32_t> dsv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
+        std::vector<uint32_t> rtv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         D3D12_RESOURCE_STATES resource_state_ = D3D12_RESOURCE_STATE_COMMON;
     };
     GfxArray<Texture> textures_;
@@ -855,6 +850,8 @@ class GfxInternal
 
                 kType_Texture2D,
                 kType_RWTexture2D,
+
+                kType_TextureCube,
 
                 kType_AccelerationStructure,
 
@@ -1442,6 +1439,7 @@ public:
         texture.format = format;
         texture.mip_levels = mip_levels;
         texture.type = GfxTexture::kType_2D;
+        texture.depth = 1;
         if(!((flags & Texture::kFlag_AutoResize) != 0))
         {
             texture.width = width;
@@ -1449,6 +1447,47 @@ public:
         }
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.flags_ = flags;
+        return texture;
+    }
+
+    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels)
+    {
+        GfxTexture texture = {};
+        if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create texture object using invalid format");
+            return texture; // invalid parameter
+        }
+        size = GFX_MAX(size, 1u);
+        mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(size));
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_DESC
+        resource_desc                  = {};
+        resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        resource_desc.Width            = size;
+        resource_desc.Height           = size;
+        resource_desc.DepthOrArraySize = 6;
+        resource_desc.MipLevels        = (uint16_t)mip_levels;
+        resource_desc.Format           = format;
+        resource_desc.SampleDesc.Count = 1;
+        texture.handle = texture_handles_.allocate_handle();
+        Texture &gfx_texture = textures_.insert(texture);
+        D3D12MA::ALLOCATION_DESC allocation_desc = {};
+        allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        {
+            GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create cubemap texture object of size %u", size);
+            gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
+            destroyTexture(texture); texture = {};
+            return texture;
+        }
+        texture.format = format;
+        texture.mip_levels = mip_levels;
+        texture.type = GfxTexture::kType_Cube;
+        texture.width = size;
+        texture.height = size;
+        texture.depth = 6;
+        gfx_texture.resource_state_ = resource_state;
         return texture;
     }
 
@@ -2127,7 +2166,8 @@ public:
     GfxResult encodeClearTexture(GfxTexture const &texture)
     {
         for(uint32_t i = 0; i < texture.mip_levels; ++i)
-            GFX_TRY(encodeClearImage(texture, i, 0));
+            for(uint32_t j = 0; j < texture.depth; ++j)
+                GFX_TRY(encodeClearImage(texture, i, j));
         return kGfxResult_NoError;
     }
 
@@ -2148,19 +2188,20 @@ public:
 
     GfxResult encodeClearImage(GfxTexture const &texture, uint32_t mip_level, uint32_t slice)
     {
-        (void)slice;
         if(!texture_handles_.has_handle(texture.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear an invalid texture object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear non-existing mip level %u", mip_level);
+        if(slice >= texture.depth)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear non-existing slice %u", slice);
         Texture &gfx_texture = textures_[texture];
         SetObjectName(gfx_texture, texture.name);
         if(IsDepthStencilFormat(texture.format))
         {
             D3D12_CLEAR_FLAGS clear_flags = D3D12_CLEAR_FLAG_DEPTH;
             if(HasStencilBits(texture.format)) clear_flags |= D3D12_CLEAR_FLAG_STENCIL;
-            GFX_TRY(ensureTextureHasDepthStencilView(gfx_texture, mip_level));
-            GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[mip_level] != 0xFFFFFFFFu);
+            GFX_TRY(ensureTextureHasDepthStencilView(texture, gfx_texture, mip_level, slice));
+            GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[mip_level][slice] != 0xFFFFFFFFu);
             D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
             D3D12_RECT
             rect        = {};
@@ -2168,13 +2209,13 @@ public:
             rect.bottom = (uint32_t)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             submitPipelineBarriers();   // transition our resources if needed
-            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level]), clear_flags, 1.0f, 0, 1, &rect);
+            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, 1.0f, 0, 1, &rect);
         }
         else
         {
             float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
-            GFX_TRY(ensureTextureHasRenderTargetView(gfx_texture, mip_level));
-            GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[mip_level] != 0xFFFFFFFFu);
+            GFX_TRY(ensureTextureHasRenderTargetView(texture, gfx_texture, mip_level, slice));
+            GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[mip_level][slice] != 0xFFFFFFFFu);
             D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
             D3D12_RECT
             rect        = {};
@@ -2182,7 +2223,7 @@ public:
             rect.bottom = (uint32_t)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
             submitPipelineBarriers();   // transition our resources if needed
-            command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level]), clear_color, 1, &rect);
+            command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]), clear_color, 1, &rect);
         }
         return kGfxResult_NoError;
     }
@@ -2193,6 +2234,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy to an invalid texture object");
         if(!buffer_handles_.has_handle(src.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid buffer object");
+        if(!dst.is2D()) // TODO: implement for the other texture types (gboisse)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-2D texture object");
         if(src.cpu_access == kGfxCpuAccess_Read)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from a buffer object with read CPU access");
         if(src.size == 0)
@@ -2274,6 +2317,8 @@ public:
         GfxResult result = kGfxResult_NoError;
         if(!texture_handles_.has_handle(texture.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot generate mips of an invalid texture object");
+        if(!texture.is2D()) // TODO: implement for the other texture types (gboisse)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot generate mips of a non-2D texture object");
         if(texture.mip_levels <= 1) return kGfxResult_NoError;  // nothing to generate
         Texture &gfx_texture = textures_[texture];
         SetObjectName(gfx_texture, texture.name);
@@ -2593,6 +2638,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot have more than %u render targets in draw state object", (uint32_t)kGfxConstant_MaxRenderTarget);
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
+        if(slice >= texture.depth)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
         gfx_draw_state->draw_state_.color_targets_[target_index].texture_ = texture;
         gfx_draw_state->draw_state_.color_targets_[target_index].mip_level = mip_level;
         gfx_draw_state->draw_state_.color_targets_[target_index].slice = slice;
@@ -2607,6 +2654,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth/stencil target on an invalid draw state object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
+        if(slice >= texture.depth)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
         gfx_draw_state->draw_state_.depth_stencil_target_.texture_ = texture;
         gfx_draw_state->draw_state_.depth_stencil_target_.mip_level = mip_level;
         gfx_draw_state->draw_state_.depth_stencil_target_.slice = slice;
@@ -2737,6 +2786,13 @@ private:
         case DXGI_FORMAT_R8G8_UINT:
         case DXGI_FORMAT_R8G8_SNORM:
         case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
             return 2;
         case DXGI_FORMAT_R10G10B10A2_TYPELESS:
         case DXGI_FORMAT_R10G10B10A2_UNORM:
@@ -2773,8 +2829,12 @@ private:
         case DXGI_FORMAT_BC4_TYPELESS:
         case DXGI_FORMAT_BC4_UNORM:
         case DXGI_FORMAT_BC4_SNORM:
-        case DXGI_FORMAT_R16G16B16A16_FLOAT:
         case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
             return 8;
         case DXGI_FORMAT_BC2_TYPELESS:
         case DXGI_FORMAT_BC2_UNORM:
@@ -2880,9 +2940,11 @@ private:
         collect(texture.resource_);
         collect(texture.allocation_);
         for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
-            freeDSVDescriptor(texture.dsv_descriptor_slots_[i]);
+            for(size_t j = 0; j < texture.dsv_descriptor_slots_[i].size(); ++j)
+                freeDSVDescriptor(texture.dsv_descriptor_slots_[i][j]);
         for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
-            freeRTVDescriptor(texture.rtv_descriptor_slots_[i]);
+            for(size_t j = 0; j < texture.rtv_descriptor_slots_[i].size(); ++j)
+                freeRTVDescriptor(texture.rtv_descriptor_slots_[i][j]);
     }
 
     void collect(SamplerState const &sampler_state)
@@ -3205,8 +3267,11 @@ private:
                     case D3D_SRV_DIMENSION_TEXTURE2D:
                         kernel_parameter.type_ = Kernel::Parameter::kType_Texture2D;
                         break;
+                    case D3D_SRV_DIMENSION_TEXTURECUBE:
+                        kernel_parameter.type_ = Kernel::Parameter::kType_TextureCube;
+                        break;
                     default:
-                        GFX_ASSERT(0);
+                        GFX_ASSERT(0);  // unimplemented
                         break;
                     }
                     break;
@@ -3216,7 +3281,7 @@ private:
                     break;
                 case D3D_SIT_UAV_FEEDBACKTEXTURE:
                     descriptor_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-                    GFX_ASSERT(0);
+                    GFX_ASSERT(0);  // unimplemented
                     break;
                 case D3D_SIT_UAV_RWTYPED:
                 case D3D_SIT_UAV_RWSTRUCTURED:
@@ -3234,7 +3299,7 @@ private:
                         kernel_parameter.type_ = Kernel::Parameter::kType_RWTexture2D;
                         break;
                     default:
-                        GFX_ASSERT(0);
+                        GFX_ASSERT(0);  // unimplemented
                         break;
                     }
                     break;
@@ -3470,9 +3535,9 @@ private:
                     if(!texture_handles_.has_handle(texture.handle))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at color target %u", i);
                     Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
-                    GFX_TRY(ensureTextureHasRenderTargetView(gfx_texture, kernel.draw_state_.color_targets_[i].mip_level));
-                    GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level] != 0xFFFFFFFFu);
-                    color_targets[i] = rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level]);
+                    GFX_TRY(ensureTextureHasRenderTargetView(texture, gfx_texture, kernel.draw_state_.color_targets_[i].mip_level, kernel.draw_state_.color_targets_[i].slice));
+                    GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level][kernel.draw_state_.color_targets_[i].slice] != 0xFFFFFFFFu);
+                    color_targets[i] = rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level][kernel.draw_state_.color_targets_[i].slice]);
                     for(uint32_t j = color_target_count; j < i; ++j) color_targets[j] = rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_);
                     uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
                     uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
@@ -3486,9 +3551,9 @@ private:
                 if(!texture_handles_.has_handle(texture.handle))
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at depth/stencil target");
                 Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
-                GFX_TRY(ensureTextureHasDepthStencilView(gfx_texture, kernel.draw_state_.depth_stencil_target_.mip_level));
-                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level] != 0xFFFFFFFFu);
-                depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level]);
+                GFX_TRY(ensureTextureHasDepthStencilView(texture, gfx_texture, kernel.draw_state_.depth_stencil_target_.mip_level, kernel.draw_state_.depth_stencil_target_.slice));
+                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level][kernel.draw_state_.depth_stencil_target_.slice] != 0xFFFFFFFFu);
+                depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level][kernel.draw_state_.depth_stencil_target_.slice]);
                 uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
                 uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
                 render_width = GFX_MIN(render_width, texture_width); render_height = GFX_MIN(render_height, texture_height);
@@ -3504,8 +3569,8 @@ private:
             {
                 viewport.TopLeftX = (float)viewport_.x_;
                 viewport.TopLeftY = (float)viewport_.y_;
-                viewport.Width = (float)viewport_.width_;
-                viewport.Height = (float)viewport_.height_;
+                viewport.Width    = (float)viewport_.width_;
+                viewport.Height   = (float)viewport_.height_;
             }
             if(bound_viewport_ != viewport)
             {
@@ -3515,10 +3580,10 @@ private:
             D3D12_RECT scissor_rect = { 0, 0, (LONG)render_width, (LONG)render_height };
             if(scissor_rect_.x_ != 0 || scissor_rect_.y_ != 0 || scissor_rect_.width_ != 0 || scissor_rect_.height_ != 0)
             {
-                scissor_rect.left = (LONG)scissor_rect_.x_;
-                scissor_rect.top = (LONG)scissor_rect_.y_;
-                scissor_rect.right = scissor_rect.left + (LONG)scissor_rect_.width_;
-                scissor_rect.bottom = scissor_rect.top + (LONG)scissor_rect_.height_;
+                scissor_rect.left   = (LONG)scissor_rect_.x_;
+                scissor_rect.top    = (LONG)scissor_rect_.y_;
+                scissor_rect.right  = scissor_rect.left + (LONG)scissor_rect_.width_;
+                scissor_rect.bottom = scissor_rect.top  + (LONG)scissor_rect_.height_;
             }
             if(bound_scissor_rect_ != scissor_rect)
             {
@@ -3533,7 +3598,6 @@ private:
         for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
         {
             Kernel::Parameter &parameter = kernel.parameters_[i];
-            GFX_ASSERT(parameter.type_ < Kernel::Parameter::kType_Count);
             if(parameter.type_ >= Kernel::Parameter::kType_Count) continue;
             switch(parameter.type_)
             {
@@ -3621,7 +3685,6 @@ private:
         for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
         {
             Kernel::Parameter &parameter = kernel.parameters_[i];
-            GFX_ASSERT(parameter.type_ < Kernel::Parameter::kType_Count);
             if(parameter.type_ >= Kernel::Parameter::kType_Count) continue;
             if(parameter.type_ == Kernel::Parameter::kType_Constants) continue;
             if(parameter.type_ == Kernel::Parameter::kType_Sampler)
@@ -3808,6 +3871,7 @@ private:
                                 if(!texture.is2D())
                                 {
                                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor) continue;    // already up to date
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader SRV
                                 }
@@ -3863,6 +3927,58 @@ private:
                         uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
                         uav_desc.Texture2D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
                         device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                    }
+                    break;
+                case Kernel::Parameter::kType_TextureCube:
+                    {
+                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an unrelated parameter type
+                        }
+                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.isCube())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-cube texture object as a cubemap sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader SRV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                                srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
+                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_AccelerationStructure:
@@ -3977,7 +4093,7 @@ private:
                     }
                     break;
                 default:
-                    GFX_ASSERT(0);
+                    GFX_ASSERT(0);  // missing implementation
                     break;
                 }
             }
@@ -4058,9 +4174,17 @@ private:
             command_list_->CopyResource(resource, texture.resource_);
             texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
             for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
-                texture.dsv_descriptor_slots_[i] = 0xFFFFFFFFu;
+            {
+                texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < texture.dsv_descriptor_slots_[i].size(); ++j)
+                    texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
             for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
-                texture.rtv_descriptor_slots_[i] = 0xFFFFFFFFu;
+            {
+                texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < texture.rtv_descriptor_slots_[i].size(); ++j)
+                    texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
             texture.Object::flags_ &= ~Object::kFlag_Named;
             texture.allocation_ = allocation;
             texture.resource_ = resource;
@@ -4068,40 +4192,64 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult ensureTextureHasDepthStencilView(Texture &texture, uint32_t mip_level)
+    GfxResult ensureTextureHasDepthStencilView(GfxTexture const &texture, Texture &gfx_texture, uint32_t mip_level, uint32_t slice)
     {
-        GFX_TRY(ensureTextureHasUsageFlag(texture, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL));
-        GFX_ASSERT(mip_level < ARRAYSIZE(texture.dsv_descriptor_slots_));
-        if(texture.dsv_descriptor_slots_[mip_level] == 0xFFFFFFFFu)
+        GFX_TRY(ensureTextureHasUsageFlag(gfx_texture, D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL));
+        GFX_ASSERT(mip_level < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_));
+        GFX_ASSERT(slice < gfx_texture.dsv_descriptor_slots_[mip_level].size());
+        if(gfx_texture.dsv_descriptor_slots_[mip_level][slice] == 0xFFFFFFFFu)
         {
-            texture.dsv_descriptor_slots_[mip_level] = allocateDSVDescriptor();
-            if(texture.dsv_descriptor_slots_[mip_level] == 0xFFFFFFFFu)
+            gfx_texture.dsv_descriptor_slots_[mip_level][slice] = allocateDSVDescriptor();
+            if(gfx_texture.dsv_descriptor_slots_[mip_level][slice] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate DSV descriptor");
-            D3D12_RESOURCE_DESC const resource_desc = texture.resource_->GetDesc();
-            D3D12_DEPTH_STENCIL_VIEW_DESC dsv_desc = {};
+            D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+            D3D12_DEPTH_STENCIL_VIEW_DESC
+            dsv_desc        = {};
             dsv_desc.Format = resource_desc.Format;
-            dsv_desc.ViewDimension = D3D12_DSV_DIMENSION_TEXTURE2D;
-            dsv_desc.Texture2D.MipSlice = mip_level;
-            device_->CreateDepthStencilView(texture.resource_, &dsv_desc, dsv_descriptors_.getCPUHandle(texture.dsv_descriptor_slots_[mip_level]));
+            if(texture.is2D())
+            {
+                dsv_desc.ViewDimension      = D3D12_DSV_DIMENSION_TEXTURE2D;
+                dsv_desc.Texture2D.MipSlice = mip_level;
+            }
+            else
+            {
+                dsv_desc.ViewDimension                  = D3D12_DSV_DIMENSION_TEXTURE2DARRAY;
+                dsv_desc.Texture2DArray.MipSlice        = mip_level;
+                dsv_desc.Texture2DArray.FirstArraySlice = slice;
+                dsv_desc.Texture2DArray.ArraySize       = 1;
+            }
+            device_->CreateDepthStencilView(gfx_texture.resource_, &dsv_desc, dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]));
         }
         return kGfxResult_NoError;
     }
 
-    GfxResult ensureTextureHasRenderTargetView(Texture &texture, uint32_t mip_level)
+    GfxResult ensureTextureHasRenderTargetView(GfxTexture const &texture, Texture &gfx_texture, uint32_t mip_level, uint32_t slice)
     {
-        GFX_TRY(ensureTextureHasUsageFlag(texture, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET));
-        GFX_ASSERT(mip_level < ARRAYSIZE(texture.rtv_descriptor_slots_));
-        if(texture.rtv_descriptor_slots_[mip_level] == 0xFFFFFFFFu)
+        GFX_TRY(ensureTextureHasUsageFlag(gfx_texture, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET));
+        GFX_ASSERT(mip_level < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_));
+        GFX_ASSERT(slice < gfx_texture.rtv_descriptor_slots_[mip_level].size());
+        if(gfx_texture.rtv_descriptor_slots_[mip_level][slice] == 0xFFFFFFFFu)
         {
-            texture.rtv_descriptor_slots_[mip_level] = allocateRTVDescriptor();
-            if(texture.rtv_descriptor_slots_[mip_level] == 0xFFFFFFFFu)
+            gfx_texture.rtv_descriptor_slots_[mip_level][slice] = allocateRTVDescriptor();
+            if(gfx_texture.rtv_descriptor_slots_[mip_level][slice] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate RTV descriptor");
-            D3D12_RESOURCE_DESC const resource_desc = texture.resource_->GetDesc();
-            D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+            D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+            D3D12_RENDER_TARGET_VIEW_DESC
+            rtv_desc        = {};
             rtv_desc.Format = resource_desc.Format;
-            rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
-            rtv_desc.Texture2D.MipSlice = mip_level;
-            device_->CreateRenderTargetView(texture.resource_, &rtv_desc, rtv_descriptors_.getCPUHandle(texture.rtv_descriptor_slots_[mip_level]));
+            if(texture.is2D())
+            {
+                rtv_desc.ViewDimension      = D3D12_RTV_DIMENSION_TEXTURE2D;
+                rtv_desc.Texture2D.MipSlice = mip_level;
+            }
+            else
+            {
+                rtv_desc.ViewDimension                  = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
+                rtv_desc.Texture2DArray.MipSlice        = mip_level;
+                rtv_desc.Texture2DArray.FirstArraySlice = slice;
+                rtv_desc.Texture2DArray.ArraySize       = 1;
+            }
+            device_->CreateRenderTargetView(gfx_texture.resource_, &rtv_desc, rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]));
         }
         return kGfxResult_NoError;
     }
@@ -4333,6 +4481,15 @@ private:
                     uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                     uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
                     device_->CreateUnorderedAccessView(nullptr, nullptr, &uav_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
+                }
+                break;
+            case Kernel::Parameter::kType_TextureCube:
+                {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                    srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                    srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    device_->CreateShaderResourceView(nullptr, &srv_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
                 }
                 break;
             case Kernel::Parameter::kType_AccelerationStructure:
@@ -4608,9 +4765,17 @@ private:
             texture.allocation_ = allocation;
             texture.Object::flags_ &= ~Object::kFlag_Named;
             for(uint32_t j = 0; j < ARRAYSIZE(texture.dsv_descriptor_slots_); ++j)
-                texture.dsv_descriptor_slots_[j] = 0xFFFFFFFFu;
+            {
+                texture.dsv_descriptor_slots_[j].resize(resource_desc.DepthOrArraySize);
+                for(size_t k = 0; k < texture.dsv_descriptor_slots_[j].size(); ++k)
+                    texture.dsv_descriptor_slots_[j][k] = 0xFFFFFFFFu;
+            }
             for(uint32_t j = 0; j < ARRAYSIZE(texture.rtv_descriptor_slots_); ++j)
-                texture.rtv_descriptor_slots_[j] = 0xFFFFFFFFu;
+            {
+                texture.rtv_descriptor_slots_[j].resize(resource_desc.DepthOrArraySize);
+                for(size_t k = 0; k < texture.rtv_descriptor_slots_[j].size(); ++k)
+                    texture.rtv_descriptor_slots_[j][k] = 0xFFFFFFFFu;
+            }
             texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
         for(uint32_t i = 0; i < ARRAYSIZE(back_buffers_); ++i) { collect(back_buffers_[i]); back_buffers_[i] = nullptr; }
@@ -4732,6 +4897,14 @@ GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t heigh
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
     return gfx->createTexture2D(width, height, format, mip_levels);
+}
+
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels)
+{
+    GfxTexture const texture = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return texture;    // invalid context
+    return gfx->createTextureCube(size, format, mip_levels);
 }
 
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
