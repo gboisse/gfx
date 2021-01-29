@@ -2303,7 +2303,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear an invalid texture object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear non-existing mip level %u", mip_level);
-        if(slice >= texture.depth)
+        if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear non-existing slice %u", slice);
         Texture &gfx_texture = textures_[texture];
         SetObjectName(gfx_texture, texture.name);
@@ -2749,7 +2749,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot have more than %u render targets in draw state object", (uint32_t)kGfxConstant_MaxRenderTarget);
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
-        if(slice >= texture.depth)
+        if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
         gfx_draw_state->draw_state_.color_targets_[target_index].texture_ = texture;
         gfx_draw_state->draw_state_.color_targets_[target_index].mip_level = mip_level;
@@ -2765,7 +2765,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth/stencil target on an invalid draw state object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
-        if(slice >= texture.depth)
+        if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
         gfx_draw_state->draw_state_.depth_stencil_target_.texture_ = texture;
         gfx_draw_state->draw_state_.depth_stencil_target_.mip_level = mip_level;
