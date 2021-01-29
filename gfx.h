@@ -256,9 +256,9 @@ class GfxKernel { GFX_INTERNAL_HANDLE; char name[kGfxConstant_MaxNameLength + 1]
                   inline bool isCompute() const { return type == kType_Compute; }
                   inline char const *getName() const { return name; } };
 
-GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr);
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr);   // draws to back buffer
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point = nullptr);
+GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
+GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);    // draws to back buffer
+GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
@@ -1145,7 +1145,7 @@ public:
         GfxProgramDesc clear_buffer_program_desc = {};
         clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram");
-        clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main");
+        clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the compute kernel for clearing buffer objects");
 
@@ -1173,7 +1173,7 @@ public:
             "    OutputBuffer[gidx] = result / w;\r\n"
             "}\r\n";
         generate_mips_program_ = createProgram(generate_mips_program_desc, "gfx_GenerateMipsProgram");
-        generate_mips_kernel_ = createComputeKernel(generate_mips_program_, "main");
+        generate_mips_kernel_ = createComputeKernel(generate_mips_program_, "main", nullptr, 0);
         if(!generate_mips_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the compute kernel for generating the texture mips");
 
@@ -2031,7 +2031,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxKernel createComputeKernel(GfxProgram const &program, char const *entry_point)
+    GfxKernel createComputeKernel(GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
     {
         char buffer[2048];
         GfxKernel compute_kernel = {};
@@ -2046,7 +2046,7 @@ public:
         GFX_SNPRINTF(compute_kernel.name, sizeof(compute_kernel.name), "%s", entry_point);
         compute_kernel.handle = kernel_handles_.allocate_handle();
         Kernel &gfx_kernel = kernels_.insert(compute_kernel);
-        compileShader(gfx_program, entry_point, kShaderType_CS, gfx_kernel.cs_bytecode_, gfx_kernel.cs_reflection_);
+        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_CS, gfx_kernel.cs_bytecode_, gfx_kernel.cs_reflection_);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t));
         if(gfx_kernel.cs_reflection_)
             gfx_kernel.cs_reflection_->GetThreadGroupSize(&gfx_kernel.num_threads_[0], &gfx_kernel.num_threads_[1], &gfx_kernel.num_threads_[2]);
@@ -2079,7 +2079,7 @@ public:
         return compute_kernel;
     }
 
-    GfxKernel createGraphicsKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point)
+    GfxKernel createGraphicsKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count)
     {
         char buffer[2048];
         GfxKernel graphics_kernel = {};
@@ -2101,9 +2101,9 @@ public:
         GFX_SNPRINTF(graphics_kernel.name, sizeof(graphics_kernel.name), "%s", entry_point);
         graphics_kernel.handle = kernel_handles_.allocate_handle();
         Kernel &gfx_kernel = kernels_.insert(graphics_kernel);
-        compileShader(gfx_program, entry_point, kShaderType_VS, gfx_kernel.vs_bytecode_, gfx_kernel.vs_reflection_);
-        compileShader(gfx_program, entry_point, kShaderType_GS, gfx_kernel.gs_bytecode_, gfx_kernel.gs_reflection_);
-        compileShader(gfx_program, entry_point, kShaderType_PS, gfx_kernel.ps_bytecode_, gfx_kernel.ps_reflection_);
+        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_VS, gfx_kernel.vs_bytecode_, gfx_kernel.vs_reflection_);
+        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_GS, gfx_kernel.gs_bytecode_, gfx_kernel.gs_reflection_);
+        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_PS, gfx_kernel.ps_bytecode_, gfx_kernel.ps_reflection_);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t));
         memset(gfx_kernel.num_threads_, 0, 3 * sizeof(uint32_t));
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
@@ -4872,7 +4872,7 @@ private:
             }
     }
 
-    void compileShader(Program const &program, char const *entry_point, ShaderType shader_type, IDxcBlob *&shader_bytecode, ID3D12ShaderReflection *&shader_reflection)
+    void compileShader(Program const &program, char const *entry_point, char const **defines, uint32_t define_count, ShaderType shader_type, IDxcBlob *&shader_bytecode, ID3D12ShaderReflection *&shader_reflection)
     {
         char shader_file[4096];
         DxcBuffer shader_source = {};
@@ -4931,9 +4931,34 @@ private:
         mbstowcs(wentry_point, entry_point, ARRAYSIZE(wentry_point));
         mbstowcs(wshader_profile, shader_profiles[shader_type], ARRAYSIZE(wshader_profile));
 
+        std::vector<LPCWSTR> shader_args;
+        shader_args.push_back(wshader_file);
+        shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
+        shader_args.push_back(L"-I"); shader_args.push_back(L".");
+        shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+
+        std::vector<std::wstring> user_defines;
+        if(define_count > 0)
+        {
+            size_t max_define_length = 0;
+            GFX_ASSERT(defines != nullptr);
+            for(uint32_t i = 0; i < define_count; ++i)
+                max_define_length = GFX_MAX(max_define_length, strlen(defines[i]));
+            WCHAR *wdefine = (WCHAR *)alloca((max_define_length + 1) << 1);
+            for(uint32_t i = 0; i < define_count; ++i)
+            {
+                mbstowcs(wdefine, defines[i], max_define_length + 1);
+                user_defines.push_back(wdefine);
+            }
+            for(size_t i = 0; i < user_defines.size(); ++i)
+            {
+                shader_args.push_back(L"-D");
+                shader_args.push_back(user_defines[i].c_str());
+            }
+        }
+
         IDxcResult *dxc_result = nullptr;
-        LPCWSTR shader_args[] = { wshader_file, L"-E", wentry_point, L"-I", L".", L"-T", wshader_profile };
-        dxc_compiler_->Compile(&shader_source, shader_args, ARRAYSIZE(shader_args), dxc_include_handler_, IID_PPV_ARGS(&dxc_result));
+        dxc_compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), dxc_include_handler_, IID_PPV_ARGS(&dxc_result));
         if(dxc_source) dxc_source->Release();
         if(!dxc_result) return; // should never happen?
 
@@ -5497,26 +5522,26 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
     return gfx->setProgramConstants(program, parameter_name, data, data_size);
 }
 
-GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point)
+GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const compute_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return compute_kernel; // invalid context
-    return gfx->createComputeKernel(program, entry_point);
+    return gfx->createComputeKernel(program, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point)
+GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxDrawState const default_draw_state = {};
-    return gfxCreateGraphicsKernel(context, program, default_draw_state, entry_point);
+    return gfxCreateGraphicsKernel(context, program, default_draw_state, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point)
+GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const graphics_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return graphics_kernel;    // invalid context
-    return gfx->createGraphicsKernel(program, draw_state, entry_point);
+    return gfx->createGraphicsKernel(program, draw_state, entry_point, defines, define_count);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
