@@ -95,6 +95,12 @@ GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t el
     return buffer_range;
 }
 
+template<typename TYPE>
+TYPE *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
+{
+    return (TYPE *)gfxBufferGetData(context, buffer);
+}
+
 //!
 //! Texture resources.
 //!
