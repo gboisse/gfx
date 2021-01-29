@@ -99,8 +99,10 @@ GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t el
 //! Texture resources.
 //!
 
-class GfxTexture { GFX_INTERNAL_NAMED_HANDLE; uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_Cube } type; public:
+class GfxTexture { GFX_INTERNAL_NAMED_HANDLE; uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; public:
+                   inline bool is2DArray() const { return type == kType_2DArray; }
                    inline bool isCube() const { return type == kType_Cube; }
+                   inline bool is3D() const { return type == kType_3D; }
                    inline bool is2D() const { return type == kType_2D; }
                    inline uint32_t getWidth() const { return width; }
                    inline uint32_t getHeight() const { return height; }
@@ -110,6 +112,8 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE; uint32_t width; uint32_t height; u
 
 GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format);  // creates auto-resize window-sized texture
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1);
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels = 1);
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1);
 GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1);
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 
@@ -851,6 +855,12 @@ class GfxInternal
                 kType_Texture2D,
                 kType_RWTexture2D,
 
+                kType_Texture2DArray,
+                kType_RWTexture2DArray,
+
+                kType_Texture3D,
+                kType_RWTexture3D,
+
                 kType_TextureCube,
 
                 kType_AccelerationStructure,
@@ -1447,6 +1457,102 @@ public:
         }
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.flags_ = flags;
+        return texture;
+    }
+
+    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels)
+    {
+        GfxTexture texture = {};
+        if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create texture object using invalid format");
+            return texture; // invalid parameter
+        }
+        if(slice_count > 0xFFFFu)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a 2D texture array with more than %u slices", 0xFFFFu);
+            return texture; // invalid operation
+        }
+        width = GFX_MAX(width, 1u);
+        height = GFX_MAX(height, 1u);
+        slice_count = GFX_MAX(slice_count, 1u);
+        mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(width, height));
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_DESC
+        resource_desc                  = {};
+        resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+        resource_desc.Width            = width;
+        resource_desc.Height           = height;
+        resource_desc.DepthOrArraySize = (uint16_t)slice_count;
+        resource_desc.MipLevels        = (uint16_t)mip_levels;
+        resource_desc.Format           = format;
+        resource_desc.SampleDesc.Count = 1;
+        texture.handle = texture_handles_.allocate_handle();
+        Texture &gfx_texture = textures_.insert(texture);
+        D3D12MA::ALLOCATION_DESC allocation_desc = {};
+        allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        {
+            GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create 2D texture array object of size %ux%ux%u", width, height, slice_count);
+            gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
+            destroyTexture(texture); texture = {};
+            return texture;
+        }
+        texture.format = format;
+        texture.mip_levels = mip_levels;
+        texture.type = GfxTexture::kType_2DArray;
+        texture.width = width;
+        texture.height = height;
+        texture.depth = slice_count;
+        gfx_texture.resource_state_ = resource_state;
+        return texture;
+    }
+
+    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels)
+    {
+        GfxTexture texture = {};
+        if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create texture object using invalid format");
+            return texture; // invalid parameter
+        }
+        if(depth > 0xFFFFu)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a 3D texture with a depth larger than %u", 0xFFFFu);
+            return texture; // invalid operation
+        }
+        width = GFX_MAX(width, 1u);
+        height = GFX_MAX(height, 1u);
+        depth = GFX_MAX(depth, 1u);
+        mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(width, height, depth));
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_DESC
+        resource_desc                  = {};
+        resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
+        resource_desc.Width            = width;
+        resource_desc.Height           = height;
+        resource_desc.DepthOrArraySize = (uint16_t)depth;
+        resource_desc.MipLevels        = (uint16_t)mip_levels;
+        resource_desc.Format           = format;
+        resource_desc.SampleDesc.Count = 1;
+        texture.handle = texture_handles_.allocate_handle();
+        Texture &gfx_texture = textures_.insert(texture);
+        D3D12MA::ALLOCATION_DESC allocation_desc = {};
+        allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        {
+            GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create 3D texture object of size %ux%ux%u", width, height, depth);
+            gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
+            destroyTexture(texture); texture = {};
+            return texture;
+        }
+        texture.format = format;
+        texture.mip_levels = mip_levels;
+        texture.type = GfxTexture::kType_3D;
+        texture.width = width;
+        texture.height = height;
+        texture.depth = depth;
+        gfx_texture.resource_state_ = resource_state;
         return texture;
     }
 
@@ -2165,9 +2271,14 @@ public:
 
     GfxResult encodeClearTexture(GfxTexture const &texture)
     {
+        uint32_t depth = texture.depth;
         for(uint32_t i = 0; i < texture.mip_levels; ++i)
-            for(uint32_t j = 0; j < texture.depth; ++j)
+        {
+            for(uint32_t j = 0; j < depth; ++j)
                 GFX_TRY(encodeClearImage(texture, i, j));
+            if(texture.is3D())
+                depth = GFX_MAX(depth >> 1, 1u);
+        }
         return kGfxResult_NoError;
     }
 
@@ -3267,6 +3378,12 @@ private:
                     case D3D_SRV_DIMENSION_TEXTURE2D:
                         kernel_parameter.type_ = Kernel::Parameter::kType_Texture2D;
                         break;
+                    case D3D_SRV_DIMENSION_TEXTURE2DARRAY:
+                        kernel_parameter.type_ = Kernel::Parameter::kType_Texture2DArray;
+                        break;
+                    case D3D_SRV_DIMENSION_TEXTURE3D:
+                        kernel_parameter.type_ = Kernel::Parameter::kType_Texture3D;
+                        break;
                     case D3D_SRV_DIMENSION_TEXTURECUBE:
                         kernel_parameter.type_ = Kernel::Parameter::kType_TextureCube;
                         break;
@@ -3297,6 +3414,13 @@ private:
                         break;
                     case D3D_SRV_DIMENSION_TEXTURE2D:
                         kernel_parameter.type_ = Kernel::Parameter::kType_RWTexture2D;
+                        break;
+                    case D3D_SRV_DIMENSION_TEXTURE2DARRAY:
+                    case D3D_SRV_DIMENSION_TEXTURECUBE: // note: there is no RWTextureCube<> type, RWTexture2DArray<> must be used instead...
+                        kernel_parameter.type_ = Kernel::Parameter::kType_RWTexture2DArray;
+                        break;
+                    case D3D_SRV_DIMENSION_TEXTURE3D:
+                        kernel_parameter.type_ = Kernel::Parameter::kType_RWTexture3D;
                         break;
                     default:
                         GFX_ASSERT(0);  // unimplemented
@@ -3636,9 +3760,10 @@ private:
                 switch(parameter.type_)
                 {
                 case Kernel::Parameter::kType_RWTexture2D:
+                case Kernel::Parameter::kType_RWTexture3D:
+                case Kernel::Parameter::kType_RWTexture2DArray:
                     if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_ &&
                        parameter.parameter_->type_ == Program::Parameter::kType_Image &&
-                       parameter.parameter_->data_.image_.textures_->is2D() &&
                        texture_handles_.has_handle(parameter.parameter_->data_.image_.textures_->handle))
                         ensureTextureHasUsageFlag(textures_[*parameter.parameter_->data_.image_.textures_], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
                     break;
@@ -3929,6 +4054,191 @@ private:
                         device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
                     }
                     break;
+                case Kernel::Parameter::kType_Texture2DArray:
+                    {
+                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an unrelated parameter type
+                        }
+                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.is2DArray())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D sampler array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader SRV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                                srv_desc.Texture2DArray.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2DArray.MipLevels = 0xFFFFFFFFu;    // select all mipmaps from MostDetailedMip on down to least detailed
+                                srv_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
+                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                    }
+                    break;
+                case Kernel::Parameter::kType_RWTexture2DArray:
+                    {
+                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an unrelated parameter type
+                        }
+                        GfxTexture const &texture = *parameter.parameter_->data_.image_.textures_;
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an invalid texture object
+                        }
+                        if(!texture.is2DArray() && !texture.isCube())
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // invalid texture object for shader UAV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                        if(!invalidate_descriptor) break;   // already up to date
+                        D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                        uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                        uav_desc.Texture2DArray.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                        uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
+                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                    }
+                    break;
+                case Kernel::Parameter::kType_Texture3D:
+                    {
+                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an unrelated parameter type
+                        }
+                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.is3D())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if (!invalidate_descriptor) continue;    // already up to date
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader SRV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                                srv_desc.Texture3D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture3D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
+                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                    }
+                    break;
+                case Kernel::Parameter::kType_RWTexture3D:
+                    {
+                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an unrelated parameter type
+                        }
+                        GfxTexture const &texture = *parameter.parameter_->data_.image_.textures_;
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an invalid texture object
+                        }
+                        if(!texture.is3D())
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // invalid texture object for shader UAV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                        if(!invalidate_descriptor) break;   // already up to date
+                        D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                        uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+                        uav_desc.Texture3D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                        uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
+                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                    }
+                    break;
                 case Kernel::Parameter::kType_TextureCube:
                     {
                         if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
@@ -3975,8 +4285,8 @@ private:
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
-                                srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
+                                srv_desc.TextureCube.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.TextureCube.MipLevels = 0xFFFFFFFFu;   // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             }
                     }
@@ -4242,6 +4552,13 @@ private:
                 rtv_desc.ViewDimension      = D3D12_RTV_DIMENSION_TEXTURE2D;
                 rtv_desc.Texture2D.MipSlice = mip_level;
             }
+            else if(texture.is3D())
+            {
+                rtv_desc.ViewDimension         = D3D12_RTV_DIMENSION_TEXTURE3D;
+                rtv_desc.Texture3D.MipSlice    = mip_level;
+                rtv_desc.Texture3D.FirstWSlice = slice;
+                rtv_desc.Texture3D.WSize       = 1;
+            }
             else
             {
                 rtv_desc.ViewDimension                  = D3D12_RTV_DIMENSION_TEXTURE2DARRAY;
@@ -4480,6 +4797,40 @@ private:
                     D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                     uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                     uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                    device_->CreateUnorderedAccessView(nullptr, nullptr, &uav_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
+                }
+                break;
+            case Kernel::Parameter::kType_Texture2DArray:
+                {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                    srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                    srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    device_->CreateShaderResourceView(nullptr, &srv_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
+                }
+                break;
+            case Kernel::Parameter::kType_RWTexture2DArray:
+                {
+                    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                    uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                    device_->CreateUnorderedAccessView(nullptr, nullptr, &uav_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
+                }
+                break;
+            case Kernel::Parameter::kType_Texture3D:
+                {
+                    D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                    srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+                    srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                    device_->CreateShaderResourceView(nullptr, &srv_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
+                }
+                break;
+            case Kernel::Parameter::kType_RWTexture3D:
+                {
+                    D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                    uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
                     device_->CreateUnorderedAccessView(nullptr, nullptr, &uav_desc, descriptors_.getCPUHandle(dummy_descriptors_[i]));
                 }
                 break;
@@ -4897,6 +5248,22 @@ GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t heigh
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
     return gfx->createTexture2D(width, height, format, mip_levels);
+}
+
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels)
+{
+    GfxTexture const texture = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return texture;    // invalid context
+    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels);
+}
+
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels)
+{
+    GfxTexture const texture = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return texture;    // invalid context
+    return gfx->createTexture3D(width, height, depth, format, mip_levels);
 }
 
 GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels)
