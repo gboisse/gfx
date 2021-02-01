@@ -64,6 +64,7 @@ enum GfxCpuAccess
 };
 
 class GfxBuffer { GFX_INTERNAL_NAMED_HANDLE; uint64_t size; uint32_t stride; GfxCpuAccess cpu_access; public:
+                  inline uint32_t getCount() const { return (uint32_t)(!stride ? 0 : size / stride); }
                   inline GfxCpuAccess getCpuAccess() const { return cpu_access; }
                   inline void setStride(uint32_t stride_) { stride = stride_; }
                   inline uint32_t getStride() const { return stride; }
