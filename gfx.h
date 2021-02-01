@@ -295,10 +295,10 @@ GfxResult gfxCommandSetScissorRect(GfxContext context, int32_t x = 0, int32_t y 
 
 GfxResult gfxCommandDraw(GfxContext context, uint32_t vertex_count, uint32_t instance_count = 1, uint32_t base_vertex = 0, uint32_t base_instance = 0);
 GfxResult gfxCommandDrawIndexed(GfxContext context, uint32_t index_count, uint32_t instance_count = 1, uint32_t first_index = 0, uint32_t base_vertex = 0, uint32_t base_instance = 0);
-GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);          // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DRAW elements
-GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);   // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DRAW_INDEXED elements
+GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);          // expects a buffer of D3D12_DRAW_ARGUMENTS elements
+GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);   // expects a buffer of D3D12_DRAW_INDEXED_ARGUMENTS elements
 GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
-GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);    // expects a buffer of D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH elements
+GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);    // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 
 //!
 //! Frame processing.
