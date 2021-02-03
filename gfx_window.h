@@ -30,6 +30,9 @@ SOFTWARE.
 //!
 
 class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; public:
+                  inline bool operator ==(GfxWindow const &other) const { return handle == other.handle; }
+                  inline bool operator !=(GfxWindow const &other) const { return handle != other.handle; }
+                  inline GfxWindow() { memset(this, 0, sizeof(*this)); }
                   inline operator bool() const { return !!handle; }
                   inline HWND getHWND() const { return hwnd; }
                   inline operator HWND() const { return hwnd; } };

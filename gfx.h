@@ -63,7 +63,7 @@ enum GfxCpuAccess
     kGfxCpuAccess_Count
 };
 
-class GfxBuffer { GFX_INTERNAL_NAMED_HANDLE; uint64_t size; uint32_t stride; GfxCpuAccess cpu_access; public:
+class GfxBuffer { GFX_INTERNAL_NAMED_HANDLE(GfxBuffer); uint64_t size; uint32_t stride; GfxCpuAccess cpu_access; public:
                   inline uint32_t getCount() const { return (uint32_t)(!stride ? 0 : size / stride); }
                   inline GfxCpuAccess getCpuAccess() const { return cpu_access; }
                   inline void setStride(uint32_t stride_) { stride = stride_; }
@@ -106,7 +106,7 @@ TYPE *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
 //! Texture resources.
 //!
 
-class GfxTexture { GFX_INTERNAL_NAMED_HANDLE; uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; public:
+class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; public:
                    inline bool is2DArray() const { return type == kType_2DArray; }
                    inline bool isCube() const { return type == kType_Cube; }
                    inline bool is3D() const { return type == kType_3D; }
@@ -140,7 +140,7 @@ inline uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height = 0, uint32
 //! Sampler states.
 //!
 
-class GfxSamplerState { GFX_INTERNAL_HANDLE; D3D12_FILTER filter; D3D12_TEXTURE_ADDRESS_MODE address_u; D3D12_TEXTURE_ADDRESS_MODE address_v; D3D12_TEXTURE_ADDRESS_MODE address_w; float mip_lod_bias; uint32_t max_anisotropy; D3D12_COMPARISON_FUNC comparison_func; float min_lod; float max_lod; public:
+class GfxSamplerState { GFX_INTERNAL_HANDLE(GfxSamplerState); D3D12_FILTER filter; D3D12_TEXTURE_ADDRESS_MODE address_u; D3D12_TEXTURE_ADDRESS_MODE address_v; D3D12_TEXTURE_ADDRESS_MODE address_w; float mip_lod_bias; uint32_t max_anisotropy; D3D12_COMPARISON_FUNC comparison_func; float min_lod; float max_lod; public:
                         inline D3D12_FILTER getFilter() const { return filter; }
                         inline D3D12_TEXTURE_ADDRESS_MODE getAddressU() const { return address_u; }
                         inline D3D12_TEXTURE_ADDRESS_MODE getAddressV() const { return address_v; }
@@ -168,7 +168,7 @@ GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_sta
 
 class GfxRaytracingPrimitive;   // forward declaration
 
-class GfxAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE; public: };
+class GfxAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxAccelerationStructure); public: };
 
 GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context);
 GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStructure acceleration_structure); // automatically releases all raytracing primitives
@@ -181,7 +181,7 @@ GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(Gf
 //! Raytracing primitives.
 //!
 
-class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE; public: };
+class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
@@ -217,7 +217,7 @@ inline GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state)
 //! Program creation/destruction.
 //!
 
-class GfxProgram { GFX_INTERNAL_HANDLE; char name[kGfxConstant_MaxNameLength + 1]; public:
+class GfxProgram { GFX_INTERNAL_HANDLE(GfxProgram); char name[kGfxConstant_MaxNameLength + 1]; public:
                    inline char const *getName() const { return name; } };
 
 class GfxProgramDesc { public: inline GfxProgramDesc() : cs(nullptr), vs(nullptr), gs(nullptr), ps(nullptr) {}
@@ -258,7 +258,7 @@ template<typename TYPE> inline GfxResult gfxProgramSetParameter(GfxContext conte
 //! Kernel compilation.
 //!
 
-class GfxKernel { GFX_INTERNAL_HANDLE; char name[kGfxConstant_MaxNameLength + 1]; enum { kType_Compute, kType_Graphics } type; public:
+class GfxKernel { GFX_INTERNAL_HANDLE(GfxKernel); char name[kGfxConstant_MaxNameLength + 1]; enum { kType_Compute, kType_Graphics } type; public:
                   inline bool isGraphics() const { return type == kType_Graphics; }
                   inline bool isCompute() const { return type == kType_Compute; }
                   inline char const *getName() const { return name; } };

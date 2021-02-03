@@ -26,6 +26,7 @@ SOFTWARE.
 #include "gfx.h"
 #include "glm/glm.hpp"
 
+template<typename TYPE> class GfxRef;
 template<typename TYPE> class GfxConstRef;
 
 //!
@@ -48,7 +49,7 @@ GfxResult gfxSceneClear(GfxScene scene);
 template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene scene);
 template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene scene);
 template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_handle);
-template<typename TYPE> GfxConstRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index);
+template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index);
 
 //!
 //! Ref. primitives.
@@ -67,7 +68,8 @@ template<typename TYPE>
 class GfxRef : public GfxRefBase<TYPE, TYPE> { friend class GfxConstRef<TYPE>; };
 
 template<typename TYPE>
-class GfxConstRef : public GfxRefBase<TYPE, TYPE const> { public: GfxConstRef() {} GfxConstRef(GfxRef<TYPE> const &other) { handle = other.handle; scene = other.scene; } };
+class GfxConstRef : public GfxRefBase<TYPE, TYPE const> { public: GfxConstRef() {} GfxConstRef(GfxRef<TYPE> const &other) { handle = other.handle; scene = other.scene; }
+                                                          operator GfxRef<TYPE>() const { GfxRef<TYPE> ref; ref.handle = handle; ref.scene = scene; return ref; } };
 
 //!
 //! Metadata API.
@@ -86,15 +88,15 @@ template<typename TYPE> GfxMetadata gfxSceneGetObjectMetadata(GfxScene scene, ui
 //!
 
 template<typename TYPE>
-GfxConstRef<TYPE> gfxSceneFindObjectByAssetFile(GfxScene scene, char const *asset_file)
+GfxRef<TYPE> gfxSceneFindObjectByAssetFile(GfxScene scene, char const *asset_file)
 {
-    GfxConstRef<TYPE> const object_ref = {};
+    GfxRef<TYPE> const object_ref = {};
     if(asset_file == nullptr || *asset_file == '\0')
         return object_ref;  // invalid parameter
     uint32_t const object_count = gfxSceneGetObjectCount<TYPE>(scene);
     for(uint32_t i = 0; i < object_count; ++i)
     {
-        GfxConstRef<TYPE> const object_handle = gfxSceneGetObjectHandle<TYPE>(scene, i);
+        GfxRef<TYPE> const object_handle = gfxSceneGetObjectHandle<TYPE>(scene, i);
         if(!strcmp(gfxSceneGetObjectMetadata<TYPE>(scene, object_handle).getAssetFile(), asset_file))
             return object_handle;   // found
     }
@@ -136,7 +138,7 @@ uint32_t gfxSceneGetCameraCount(GfxScene scene);
 GfxCamera const *gfxSceneGetCameras(GfxScene scene);
 GfxCamera *gfxSceneGetCamera(GfxScene scene, uint64_t camera_handle);
 GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle);
-GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index);
+GfxRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index);
 
 //!
 //! Image object.
@@ -159,7 +161,7 @@ uint32_t gfxSceneGetImageCount(GfxScene scene);
 GfxImage const *gfxSceneGetImages(GfxScene scene);
 GfxImage *gfxSceneGetImage(GfxScene scene, uint64_t image_handle);
 GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle);
-GfxConstRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index);
+GfxRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index);
 
 //!
 //! Image helpers.
@@ -206,7 +208,7 @@ uint32_t gfxSceneGetMaterialCount(GfxScene scene);
 GfxMaterial const *gfxSceneGetMaterials(GfxScene scene);
 GfxMaterial *gfxSceneGetMaterial(GfxScene scene, uint64_t material_handle);
 GfxMetadata gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle);
-GfxConstRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index);
+GfxRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index);
 
 //!
 //! Material helpers.
@@ -246,7 +248,7 @@ uint32_t gfxSceneGetMeshCount(GfxScene scene);
 GfxMesh const *gfxSceneGetMeshes(GfxScene scene);
 GfxMesh *gfxSceneGetMesh(GfxScene scene, uint64_t mesh_handle);
 GfxMetadata gfxSceneGetMeshMetadata(GfxScene scene, uint64_t mesh_handle);
-GfxConstRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index);
+GfxRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index);
 
 //!
 //! Instance object.
@@ -266,7 +268,7 @@ uint32_t gfxSceneGetInstanceCount(GfxScene scene);
 GfxInstance const *gfxSceneGetInstances(GfxScene scene);
 GfxInstance *gfxSceneGetInstance(GfxScene scene, uint64_t instance_handle);
 GfxMetadata gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle);
-GfxConstRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index);
+GfxRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index);
 
 //!
 //! Template specializations.
@@ -276,37 +278,37 @@ template<> inline uint32_t gfxSceneGetObjectCount<GfxCamera>(GfxScene scene) { r
 template<> inline GfxCamera const *gfxSceneGetObjects<GfxCamera>(GfxScene scene) { return gfxSceneGetCameras(scene); }
 template<> inline GfxCamera *gfxSceneGetObject<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCamera(scene, object_handle); }
 template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
-template<> inline GfxConstRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene scene, uint32_t object_index) { return gfxSceneGetCameraHandle(scene, object_index); }
+template<> inline GfxRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene scene, uint32_t object_index) { return gfxSceneGetCameraHandle(scene, object_index); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxImage>(GfxScene scene) { return gfxSceneGetImageCount(scene); }
 template<> inline GfxImage const *gfxSceneGetObjects<GfxImage>(GfxScene scene) { return gfxSceneGetImages(scene); }
 template<> inline GfxImage *gfxSceneGetObject<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImage(scene, object_handle); }
 template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImageMetadata(scene, object_handle); }
-template<> inline GfxConstRef<GfxImage> gfxSceneGetObjectHandle<GfxImage>(GfxScene scene, uint32_t object_index) { return gfxSceneGetImageHandle(scene, object_index); }
+template<> inline GfxRef<GfxImage> gfxSceneGetObjectHandle<GfxImage>(GfxScene scene, uint32_t object_index) { return gfxSceneGetImageHandle(scene, object_index); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxMaterial>(GfxScene scene) { return gfxSceneGetMaterialCount(scene); }
 template<> inline GfxMaterial const *gfxSceneGetObjects<GfxMaterial>(GfxScene scene) { return gfxSceneGetMaterials(scene); }
 template<> inline GfxMaterial *gfxSceneGetObject<GfxMaterial>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMaterial(scene, object_handle); }
 template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxMaterial>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMaterialMetadata(scene, object_handle); }
-template<> inline GfxConstRef<GfxMaterial> gfxSceneGetObjectHandle<GfxMaterial>(GfxScene scene, uint32_t object_index) { return gfxSceneGetMaterialHandle(scene, object_index); }
+template<> inline GfxRef<GfxMaterial> gfxSceneGetObjectHandle<GfxMaterial>(GfxScene scene, uint32_t object_index) { return gfxSceneGetMaterialHandle(scene, object_index); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxMesh>(GfxScene scene) { return gfxSceneGetMeshCount(scene); }
 template<> inline GfxMesh const *gfxSceneGetObjects<GfxMesh>(GfxScene scene) { return gfxSceneGetMeshes(scene); }
 template<> inline GfxMesh *gfxSceneGetObject<GfxMesh>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMesh(scene, object_handle); }
 template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxMesh>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMeshMetadata(scene, object_handle); }
-template<> inline GfxConstRef<GfxMesh> gfxSceneGetObjectHandle<GfxMesh>(GfxScene scene, uint32_t object_index) { return gfxSceneGetMeshHandle(scene, object_index); }
+template<> inline GfxRef<GfxMesh> gfxSceneGetObjectHandle<GfxMesh>(GfxScene scene, uint32_t object_index) { return gfxSceneGetMeshHandle(scene, object_index); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxInstance>(GfxScene scene) { return gfxSceneGetInstanceCount(scene); }
 template<> inline GfxInstance const *gfxSceneGetObjects<GfxInstance>(GfxScene scene) { return gfxSceneGetInstances(scene); }
 template<> inline GfxInstance *gfxSceneGetObject<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstance(scene, object_handle); }
 template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstanceMetadata(scene, object_handle); }
-template<> inline GfxConstRef<GfxInstance> gfxSceneGetObjectHandle<GfxInstance>(GfxScene scene, uint32_t object_index) { return gfxSceneGetInstanceHandle(scene, object_index); }
+template<> inline GfxRef<GfxInstance> gfxSceneGetObjectHandle<GfxInstance>(GfxScene scene, uint32_t object_index) { return gfxSceneGetInstanceHandle(scene, object_index); }
 
 template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene scene) { static_assert("Cannot get object count for unsupported object type"); }
 template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene scene) { static_assert("Cannot get object list for unsupported object type"); }
 template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get scene object for unsupported object type"); }
 template<typename TYPE> GfxMetadata gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get object metadata for unsupported object type"); }
-template<typename TYPE> GfxConstRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert("Cannot get object handle for unsupported object type"); }
+template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert("Cannot get object handle for unsupported object type"); }
 
 //!
 //! Implementation details.
@@ -512,9 +514,9 @@ public:
     }
 
     template<typename TYPE>
-    GfxConstRef<TYPE> getObjectHandle(GfxScene const &scene, uint32_t object_index)
+    GfxRef<TYPE> getObjectHandle(GfxScene const &scene, uint32_t object_index)
     {
-        GfxConstRef<TYPE> object_ref = {};
+        GfxRef<TYPE> object_ref = {};
         if(object_index >= object_refs_<TYPE>().size())
             return object_ref;  // out of bounds
         object_ref.handle = object_refs_<TYPE>()[object_refs_<TYPE>().get_index(object_index)];
@@ -842,9 +844,9 @@ GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle)
     return gfx_scene->getObjectMetadata<GfxCamera>(camera_handle);
 }
 
-GfxConstRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index)
+GfxRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index)
 {
-    GfxConstRef<GfxCamera> const camera_ref = {};
+    GfxRef<GfxCamera> const camera_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return camera_ref;   // invalid parameter
     return gfx_scene->getObjectHandle<GfxCamera>(scene, camera_index);
@@ -894,9 +896,9 @@ GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle)
     return gfx_scene->getObjectMetadata<GfxImage>(image_handle);
 }
 
-GfxConstRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index)
+GfxRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index)
 {
-    GfxConstRef<GfxImage> const image_ref = {};
+    GfxRef<GfxImage> const image_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return image_ref;    // invalid parameter
     return gfx_scene->getObjectHandle<GfxImage>(scene, image_index);
@@ -946,9 +948,9 @@ GfxMetadata gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle
     return gfx_scene->getObjectMetadata<GfxMaterial>(material_handle);
 }
 
-GfxConstRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index)
+GfxRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index)
 {
-    GfxConstRef<GfxMaterial> const material_ref = {};
+    GfxRef<GfxMaterial> const material_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return material_ref; // invalid parameter
     return gfx_scene->getObjectHandle<GfxMaterial>(scene, material_index);
@@ -998,9 +1000,9 @@ GfxMetadata gfxSceneGetMeshMetadata(GfxScene scene, uint64_t mesh_handle)
     return gfx_scene->getObjectMetadata<GfxMesh>(mesh_handle);
 }
 
-GfxConstRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index)
+GfxRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index)
 {
-    GfxConstRef<GfxMesh> const mesh_ref = {};
+    GfxRef<GfxMesh> const mesh_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return mesh_ref; // invalid parameter
     return gfx_scene->getObjectHandle<GfxMesh>(scene, mesh_index);
@@ -1050,9 +1052,9 @@ GfxMetadata gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle
     return gfx_scene->getObjectMetadata<GfxInstance>(instance_handle);
 }
 
-GfxConstRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index)
+GfxRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index)
 {
-    GfxConstRef<GfxInstance> const instance_ref = {};
+    GfxRef<GfxInstance> const instance_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return instance_ref; // invalid parameter
     return gfx_scene->getObjectHandle<GfxInstance>(scene, instance_index);

@@ -146,22 +146,28 @@ enum GfxConstant
 
 #define GFX_STRINGIFY2(X)   #X
 
-#define GFX_INTERNAL_HANDLE         friend class GfxInternal; public: inline operator bool() const { return !!handle; }         \
-                                    inline uint32_t getIndex() const { return (uint32_t)(handle ? handle & 0xFFFFFFFFull        \
-                                                                                                : 0xFFFFFFFFull); }             \
-                                    inline operator uint32_t() const { return getIndex(); }                                     \
-                                    private: uint64_t handle
+#define GFX_INTERNAL_HANDLE(TYPE)       friend class GfxInternal; public: inline TYPE() { memset(this, 0, sizeof(*this)); }         \
+                                        inline bool operator ==(TYPE const &other) const { return handle == other.handle; }         \
+                                        inline bool operator !=(TYPE const &other) const { return handle != other.handle; }         \
+                                        inline uint32_t getIndex() const { return (uint32_t)(handle ? handle & 0xFFFFFFFFull        \
+                                                                                                    : 0xFFFFFFFFull); }             \
+                                        inline operator uint32_t() const { return getIndex(); }                                     \
+                                        inline operator bool() const { return !!handle; }                                           \
+                                        private: uint64_t handle
 
-#define GFX_INTERNAL_NAMED_HANDLE   friend class GfxInternal; public: inline operator bool() const { return !!handle; }         \
-                                    inline uint32_t getIndex() const { return (uint32_t)(handle ? handle & 0xFFFFFFFFull        \
-                                                                                                : 0xFFFFFFFFull); }             \
-                                    inline operator uint32_t() const { return getIndex(); }                                     \
-                                    inline char const *getName() const { return name; }                                         \
-                                    inline void setName(char const *n) { uint32_t i = 0;                                        \
-                                                                         if(n)                                                  \
-                                                                           for(; n[i] && i < kGfxConstant_MaxNameLength; ++i)   \
-                                                                             name[i] = n[i]; name[i] = '\0'; }                  \
-                                    private: uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]
+#define GFX_INTERNAL_NAMED_HANDLE(TYPE) friend class GfxInternal; public: inline TYPE() { memset(this, 0, sizeof(*this)); }         \
+                                        inline bool operator ==(TYPE const &other) const { return handle == other.handle; }         \
+                                        inline bool operator !=(TYPE const &other) const { return handle != other.handle; }         \
+                                        inline uint32_t getIndex() const { return (uint32_t)(handle ? handle & 0xFFFFFFFFull        \
+                                                                                                    : 0xFFFFFFFFull); }             \
+                                        inline operator uint32_t() const { return getIndex(); }                                     \
+                                        inline char const *getName() const { return name; }                                         \
+                                        inline void setName(char const *n) { uint32_t i = 0;                                        \
+                                                                             if(n)                                                  \
+                                                                               for(; n[i] && i < kGfxConstant_MaxNameLength; ++i)   \
+                                                                                 name[i] = n[i]; name[i] = '\0'; }                  \
+                                        inline operator bool() const { return !!handle; }                                           \
+                                        private: uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]
 
 static inline char const *gfxResultGetString(GfxResult result)
 {
