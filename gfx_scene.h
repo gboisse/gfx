@@ -33,7 +33,9 @@ template<typename TYPE> class GfxConstRef;
 //! Scene creation/destruction.
 //!
 
-class GfxScene { friend class GfxSceneInternal; uint64_t handle; public:
+class GfxScene { friend class GfxSceneInternal; uint64_t handle; public: inline GfxScene() : handle(0) {}
+                 inline bool operator ==(GfxScene const &other) const { return handle == other.handle; }
+                 inline bool operator !=(GfxScene const &other) const { return handle != other.handle; }
                  inline operator bool() const { return !!handle; } };
 
 GfxScene gfxCreateScene();
@@ -57,6 +59,8 @@ template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uin
 
 template<typename TYPE, typename OBJECT_TYPE>
 class GfxRefBase { friend class GfxSceneInternal; protected: uint64_t handle; GfxScene scene; public: GfxRefBase() : handle(0), scene{} {}
+                   bool operator ==(GfxRefBase const &other) const { return handle == other.handle && scene == other.scene; }
+                   bool operator !=(GfxRefBase const &other) const { return handle != other.handle || scene != other.scene; }
                    uint32_t getIndex() const { return (uint32_t)(handle ? handle & 0xFFFFFFFFull : 0xFFFFFFFFull); }
                    OBJECT_TYPE *operator ->() const { return gfxSceneGetObject<TYPE>(scene, handle); }
                    OBJECT_TYPE &operator *() const { return *operator ->(); }

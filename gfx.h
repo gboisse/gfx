@@ -32,14 +32,16 @@ SOFTWARE.
 //!
 
 class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]; uint32_t vendor_id; public:
+                   inline bool operator ==(GfxContext const &other) const  { return handle == other.handle; }
+                   inline bool operator !=(GfxContext const &other) const  { return handle != other.handle; }
+                   inline GfxContext() { memset(this, 0, sizeof(*this)); }
                    inline uint32_t getVendorId() const { return vendor_id; }
                    inline char const *getName() const { return name; }
                    inline operator bool() const { return !!handle; } };
 
 enum GfxCreateContextFlag
 {
-    kGfxCreateContextFlag_EnableDebugLayer   = 1 << 0,
-    kGfxCreateContextFlag_EnableReloadThread = 1 << 1
+    kGfxCreateContextFlag_EnableDebugLayer = 1 << 0
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -269,6 +271,7 @@ GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDra
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
+GfxResult gfxKernelReloadAll(GfxContext context);   // hot-reloads all kernel objects
 
 //!
 //! Command encoding.
@@ -450,6 +453,7 @@ class GfxInternal
         char *data_;
         GFX_NON_COPYABLE(String);
         inline String() : data_(nullptr) {}
+        inline String(char const *data) : data_(nullptr) { *this = data; }
         inline String(String &&other) : data_(other.data_) { other.data_ = nullptr; }
         inline String &operator =(String &&other) { if(this != &other) { free(data_); data_ = other.data_; other.data_ = nullptr; } return *this; }
         inline String &operator =(char const *data) { free(data_); if(!data) data_ = nullptr; else
@@ -901,8 +905,10 @@ class GfxInternal
             uint32_t variable_size_ = 0;
         };
 
+        String entry_point_;
         GfxProgram program_ = {};
         DrawState::Data draw_state_;
+        std::vector<String> defines_;
         uint64_t descriptor_heap_id_ = 0;
         uint32_t *num_threads_ = nullptr;
         IDxcBlob *cs_bytecode_ = nullptr;
@@ -2040,7 +2046,6 @@ public:
 
     GfxKernel createComputeKernel(GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
     {
-        char buffer[2048];
         GfxKernel compute_kernel = {};
         if(!program_handles_.has_handle(program.handle))
         {
@@ -2053,19 +2058,14 @@ public:
         GFX_SNPRINTF(compute_kernel.name, sizeof(compute_kernel.name), "%s", entry_point);
         compute_kernel.handle = kernel_handles_.allocate_handle();
         Kernel &gfx_kernel = kernels_.insert(compute_kernel);
-        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_CS, gfx_kernel.cs_bytecode_, gfx_kernel.cs_reflection_);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t));
+        gfx_kernel.program_ = program;
+        gfx_kernel.entry_point_ = entry_point;
+        GFX_ASSERT(define_count == 0 || defines != nullptr);
+        for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
+        createKernel(gfx_program, gfx_kernel);  // create compute kernel
         if(gfx_kernel.cs_reflection_)
             gfx_kernel.cs_reflection_->GetThreadGroupSize(&gfx_kernel.num_threads_[0], &gfx_kernel.num_threads_[1], &gfx_kernel.num_threads_[2]);
-        else
-        {
-            gfx_kernel.num_threads_[0] = 1;
-            gfx_kernel.num_threads_[1] = 1;
-            gfx_kernel.num_threads_[2] = 1;
-        }
-        gfx_kernel.program_ = program;
-        createRootSignature(gfx_kernel);
-        createComputePipelineState(gfx_kernel);
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {
             destroyKernel(compute_kernel);
@@ -2073,28 +2073,18 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Failed to create compute kernel object `%s' using program `%s'", entry_point, gfx_program.file_path_.c_str());
             return compute_kernel;
         }
-        if(gfx_kernel.root_signature_)
-        {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_ComputeRootSignature", gfx_program.file_name_ ?gfx_program.file_name_.c_str() : gfx_program.file_path_.c_str(), entry_point);
-            SetDebugName(gfx_kernel.root_signature_, buffer);
-        }
-        if(gfx_kernel.pipeline_state_)
-        {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_ComputePipelineSignature", gfx_program.file_name_ ? gfx_program.file_name_.c_str() : gfx_program.file_path_.c_str(), entry_point);
-            SetDebugName(gfx_kernel.pipeline_state_, buffer);
-        }
         return compute_kernel;
     }
 
     GfxKernel createGraphicsKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count)
     {
-        char buffer[2048];
         GfxKernel graphics_kernel = {};
         if(!program_handles_.has_handle(program.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a graphics kernel using an invalid program object");
             return graphics_kernel;
         }
+        GFX_ASSERT(define_count == 0 || defines != nullptr);
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
         DrawState const *gfx_draw_state = draw_states_.at(draw_state_index);
         if(!gfx_draw_state)
@@ -2108,31 +2098,18 @@ public:
         GFX_SNPRINTF(graphics_kernel.name, sizeof(graphics_kernel.name), "%s", entry_point);
         graphics_kernel.handle = kernel_handles_.allocate_handle();
         Kernel &gfx_kernel = kernels_.insert(graphics_kernel);
-        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_VS, gfx_kernel.vs_bytecode_, gfx_kernel.vs_reflection_);
-        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_GS, gfx_kernel.gs_bytecode_, gfx_kernel.gs_reflection_);
-        compileShader(gfx_program, entry_point, defines, define_count, kShaderType_PS, gfx_kernel.ps_bytecode_, gfx_kernel.ps_reflection_);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t));
-        memset(gfx_kernel.num_threads_, 0, 3 * sizeof(uint32_t));
-        gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         gfx_kernel.program_ = program;
-        createRootSignature(gfx_kernel);
-        createGraphicsPipelineState(gfx_kernel, *gfx_draw_state);
+        gfx_kernel.entry_point_ = entry_point;
+        gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
+        for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
+        createKernel(gfx_program, gfx_kernel);  // create graphics kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {
             destroyKernel(graphics_kernel);
             graphics_kernel = {};   // invalidate handle
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Failed to create graphics kernel object `%s' using program `%s'", entry_point, gfx_program.file_path_.c_str());
             return graphics_kernel;
-        }
-        if(gfx_kernel.root_signature_)
-        {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_GraphicsRootSignature", gfx_program.file_name_ ? gfx_program.file_name_.c_str() : gfx_program.file_path_.c_str(), entry_point);
-            SetDebugName(gfx_kernel.root_signature_, buffer);
-        }
-        if(gfx_kernel.pipeline_state_)
-        {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_GraphicsPipelineSignature", gfx_program.file_name_ ? gfx_program.file_name_.c_str() : gfx_program.file_path_.c_str(), entry_point);
-            SetDebugName(gfx_kernel.pipeline_state_, buffer);
         }
         return graphics_kernel;
     }
@@ -2156,6 +2133,13 @@ public:
         Kernel const &gfx_kernel = kernels_[kernel];
         GFX_ASSERT(gfx_kernel.num_threads_ != nullptr);
         return gfx_kernel.num_threads_;
+    }
+
+    GfxResult reloadAllKernels()
+    {
+        for(uint32_t i = 0; i < kernels_.size(); ++i)
+            reloadKernel(kernels_.data()[i]);
+        return kGfxResult_NoError;
     }
 
     GfxResult encodeCopyBuffer(GfxBuffer const &dst, GfxBuffer const &src)
@@ -3536,7 +3520,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult createGraphicsPipelineState(Kernel &kernel, DrawState const &draw_state)
+    GfxResult createGraphicsPipelineState(Kernel &kernel, DrawState::Data const &draw_state)
     {
         GFX_ASSERT(kernel.pipeline_state_ == nullptr);
         std::vector<D3D12_INPUT_ELEMENT_DESC> input_layout;
@@ -3605,24 +3589,24 @@ private:
         pso_desc.VS                             = GetShaderBytecode(kernel.vs_bytecode_);
         pso_desc.PS                             = GetShaderBytecode(kernel.ps_bytecode_);
         pso_desc.GS                             = GetShaderBytecode(kernel.gs_bytecode_);
-        pso_desc.RasterizerState.CullMode       = draw_state.draw_state_.raster_state_.cull_mode_;
-        pso_desc.RasterizerState.FillMode       = draw_state.draw_state_.raster_state_.fill_mode_;
+        pso_desc.RasterizerState.CullMode       = draw_state.raster_state_.cull_mode_;
+        pso_desc.RasterizerState.FillMode       = draw_state.raster_state_.fill_mode_;
         pso_desc.InputLayout.pInputElementDescs = input_layout.data();
         pso_desc.InputLayout.NumElements        = (uint32_t)input_layout.size();
         {
-            for(uint32_t i = 0; i < ARRAYSIZE(draw_state.draw_state_.color_targets_); ++i)
-                if(!draw_state.draw_state_.color_targets_[i].texture_)
+            for(uint32_t i = 0; i < ARRAYSIZE(draw_state.color_targets_); ++i)
+                if(!draw_state.color_targets_[i].texture_)
                     continue;   // no valid color target at index
                 else
                 {
-                    GfxTexture const &texture = draw_state.draw_state_.color_targets_[i].texture_;
+                    GfxTexture const &texture = draw_state.color_targets_[i].texture_;
                     pso_desc.RTVFormats[i] = texture.format;
                     pso_desc.NumRenderTargets = i + 1;
                 }
-            if(draw_state.draw_state_.depth_stencil_target_.texture_)
+            if(draw_state.depth_stencil_target_.texture_)
             {
                 pso_desc.DepthStencilState.DepthEnable = TRUE;
-                pso_desc.DSVFormat = draw_state.draw_state_.depth_stencil_target_.texture_.format;
+                pso_desc.DSVFormat = draw_state.depth_stencil_target_.texture_.format;
             }
             else if(pso_desc.NumRenderTargets == 0)  // special case - if no color target is supplied, draw to back buffer
             {
@@ -3630,15 +3614,15 @@ private:
                 pso_desc.RTVFormats[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
             }
         }
-        if(draw_state.draw_state_.blend_state_)
+        if(draw_state.blend_state_)
         {
             pso_desc.BlendState.RenderTarget->BlendEnable    = TRUE;
-            pso_desc.BlendState.RenderTarget->SrcBlend       = draw_state.draw_state_.blend_state_.src_blend_;
-            pso_desc.BlendState.RenderTarget->DestBlend      = draw_state.draw_state_.blend_state_.dst_blend_;
-            pso_desc.BlendState.RenderTarget->BlendOp        = draw_state.draw_state_.blend_state_.blend_op_;
-            pso_desc.BlendState.RenderTarget->SrcBlendAlpha  = draw_state.draw_state_.blend_state_.src_blend_alpha_;
-            pso_desc.BlendState.RenderTarget->DestBlendAlpha = draw_state.draw_state_.blend_state_.dst_blend_alpha_;
-            pso_desc.BlendState.RenderTarget->BlendOpAlpha   = draw_state.draw_state_.blend_state_.blend_op_alpha_;
+            pso_desc.BlendState.RenderTarget->SrcBlend       = draw_state.blend_state_.src_blend_;
+            pso_desc.BlendState.RenderTarget->DestBlend      = draw_state.blend_state_.dst_blend_;
+            pso_desc.BlendState.RenderTarget->BlendOp        = draw_state.blend_state_.blend_op_;
+            pso_desc.BlendState.RenderTarget->SrcBlendAlpha  = draw_state.blend_state_.src_blend_alpha_;
+            pso_desc.BlendState.RenderTarget->DestBlendAlpha = draw_state.blend_state_.dst_blend_alpha_;
+            pso_desc.BlendState.RenderTarget->BlendOpAlpha   = draw_state.blend_state_.blend_op_alpha_;
         }
         device_->CreateGraphicsPipelineState(&pso_desc, IID_PPV_ARGS(&kernel.pipeline_state_));
         return kGfxResult_NoError;
@@ -4879,7 +4863,77 @@ private:
             }
     }
 
-    void compileShader(Program const &program, char const *entry_point, char const **defines, uint32_t define_count, ShaderType shader_type, IDxcBlob *&shader_bytecode, ID3D12ShaderReflection *&shader_reflection)
+    void createKernel(Program const &program, Kernel &kernel)
+    {
+        char buffer[2048];
+        char const *kernel_type = nullptr;
+        GFX_ASSERT(kernel.num_threads_ != nullptr);
+        GFX_ASSERT(kernel.cs_bytecode_ == nullptr && kernel.cs_reflection_ == nullptr);
+        GFX_ASSERT(kernel.vs_bytecode_ == nullptr && kernel.vs_reflection_ == nullptr);
+        GFX_ASSERT(kernel.gs_bytecode_ == nullptr && kernel.gs_reflection_ == nullptr);
+        GFX_ASSERT(kernel.ps_bytecode_ == nullptr && kernel.ps_reflection_ == nullptr);
+        GFX_ASSERT(kernel.root_signature_ == nullptr);
+        GFX_ASSERT(kernel.pipeline_state_ == nullptr);
+        GFX_ASSERT(kernel.parameters_ == nullptr);
+        if(kernel.isCompute())
+        {
+            kernel_type = "Compute";
+            compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
+            createRootSignature(kernel);
+            createComputePipelineState(kernel);
+        }
+        else
+        {
+            kernel_type = "Graphics";
+            compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_);
+            compileShader(program, kernel, kShaderType_GS, kernel.gs_bytecode_, kernel.gs_reflection_);
+            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            createRootSignature(kernel);
+            createGraphicsPipelineState(kernel, kernel.draw_state_);
+        }
+        if(kernel.root_signature_ != nullptr)
+        {
+            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
+            SetDebugName(kernel.root_signature_, buffer);
+        }
+        if(kernel.pipeline_state_ != nullptr)
+        {
+            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sPipelineSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
+            SetDebugName(kernel.pipeline_state_, buffer);
+        }
+    }
+
+    void reloadKernel(Kernel &kernel)
+    {
+        if(!program_handles_.has_handle(kernel.program_.handle)) return;
+        Program const &program = programs_[kernel.program_];
+        kernel.descriptor_heap_id_ = 0;
+        if(kernel.cs_bytecode_ != nullptr) { kernel.cs_bytecode_->Release(); kernel.cs_bytecode_ = nullptr; }
+        if(kernel.vs_bytecode_ != nullptr) { kernel.vs_bytecode_->Release(); kernel.vs_bytecode_ = nullptr; }
+        if(kernel.gs_bytecode_ != nullptr) { kernel.gs_bytecode_->Release(); kernel.gs_bytecode_ = nullptr; }
+        if(kernel.ps_bytecode_ != nullptr) { kernel.ps_bytecode_->Release(); kernel.ps_bytecode_ = nullptr; }
+        if(kernel.cs_reflection_ != nullptr) { kernel.cs_reflection_->Release(); kernel.cs_reflection_ = nullptr; }
+        if(kernel.vs_reflection_ != nullptr) { kernel.vs_reflection_->Release(); kernel.vs_reflection_ = nullptr; }
+        if(kernel.gs_reflection_ != nullptr) { kernel.gs_reflection_->Release(); kernel.gs_reflection_ = nullptr; }
+        if(kernel.ps_reflection_ != nullptr) { kernel.ps_reflection_->Release(); kernel.ps_reflection_ = nullptr; }
+        if(kernel.root_signature_ != nullptr) { collect(kernel.root_signature_); kernel.root_signature_ = nullptr; }
+        if(kernel.pipeline_state_ != nullptr) { collect(kernel.pipeline_state_); kernel.pipeline_state_ = nullptr; }
+        for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
+        {
+            freeDescriptor(kernel.parameters_[i].descriptor_slot_);
+            for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
+                kernel.parameters_[i].variables_[j].~Variable();
+            free(kernel.parameters_[i].variables_);
+            kernel.parameters_[i].~Parameter();
+        }
+        free(kernel.parameters_);
+        kernel.parameters_ = nullptr;
+        kernel.parameter_count_ = 0;
+        kernel.vertex_stride_ = 0;
+        createKernel(program, kernel);
+    }
+
+    void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, ID3D12ShaderReflection *&shader_reflection)
     {
         char shader_file[4096];
         DxcBuffer shader_source = {};
@@ -4933,9 +4987,8 @@ private:
         static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < ARRAYSIZE(shader_profiles); ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), shader_model);
 
-        GFX_ASSERT(entry_point != nullptr);
         WCHAR wentry_point[2048], wshader_profile[16];
-        mbstowcs(wentry_point, entry_point, ARRAYSIZE(wentry_point));
+        mbstowcs(wentry_point, kernel.entry_point_.c_str(), ARRAYSIZE(wentry_point));
         mbstowcs(wshader_profile, shader_profiles[shader_type], ARRAYSIZE(wshader_profile));
 
         std::vector<LPCWSTR> shader_args;
@@ -4945,16 +4998,15 @@ private:
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
 
         std::vector<std::wstring> user_defines;
-        if(define_count > 0)
+        if(!kernel.defines_.empty())
         {
             size_t max_define_length = 0;
-            GFX_ASSERT(defines != nullptr);
-            for(uint32_t i = 0; i < define_count; ++i)
-                max_define_length = GFX_MAX(max_define_length, strlen(defines[i]));
+            for(size_t i = 0; i < kernel.defines_.size(); ++i)
+                max_define_length = GFX_MAX(max_define_length, strlen(kernel.defines_[i].c_str()));
             WCHAR *wdefine = (WCHAR *)alloca((max_define_length + 1) << 1);
-            for(uint32_t i = 0; i < define_count; ++i)
+            for(size_t i = 0; i < kernel.defines_.size(); ++i)
             {
-                mbstowcs(wdefine, defines[i], max_define_length + 1);
+                mbstowcs(wdefine, kernel.defines_[i].c_str(), max_define_length + 1);
                 user_defines.push_back(wdefine);
             }
             for(size_t i = 0; i < user_defines.size(); ++i)
@@ -5563,6 +5615,13 @@ uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getKernelNumThreads(kernel);
+}
+
+GfxResult gfxKernelReloadAll(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->reloadAllKernels();
 }
 
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src)
