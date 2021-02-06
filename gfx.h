@@ -5027,7 +5027,7 @@ private:
         {
             IDxcBlobEncoding *dxc_error = nullptr;
             dxc_result->GetErrorBuffer(&dxc_error);
-            GFX_PRINTLN("Error: Failed to compile `%s'%s%s", shader_file, dxc_error ? ":\r\n" : "", dxc_error ? (char const *)dxc_error->GetBufferPointer() : "");
+            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file, kernel.entry_point_.c_str(), dxc_error ? ":\r\n" : "", dxc_error ? (char const *)dxc_error->GetBufferPointer() : "");
             if(dxc_error) dxc_error->Release(); dxc_result->Release();
             return;
         }
