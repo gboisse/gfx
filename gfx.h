@@ -2064,8 +2064,6 @@ public:
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
         createKernel(gfx_program, gfx_kernel);  // create compute kernel
-        if(gfx_kernel.cs_reflection_)
-            gfx_kernel.cs_reflection_->GetThreadGroupSize(&gfx_kernel.num_threads_[0], &gfx_kernel.num_threads_[1], &gfx_kernel.num_threads_[2]);
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {
             destroyKernel(compute_kernel);
@@ -4881,6 +4879,10 @@ private:
             compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
             createRootSignature(kernel);
             createComputePipelineState(kernel);
+            if(kernel.cs_reflection_ == nullptr)
+                for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
+            else
+                kernel.cs_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
         }
         else
         {
