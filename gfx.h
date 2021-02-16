@@ -304,6 +304,23 @@ GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t
 GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);    // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 
 //!
+//! Debug API.
+//!
+
+GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...);
+GfxResult gfxCommandBeginEvent(GfxContext context, uint64_t color, char const *format, ...);
+GfxResult gfxCommandEndEvent(GfxContext context);
+
+//!
+//! RAII helpers.
+//!
+
+class GfxCommandEvent { GFX_NON_COPYABLE(GfxCommandEvent); GfxContext context; public:
+                        inline GfxCommandEvent(GfxContext context, char const *format, ...) : context(context) { va_list args; va_start(args, format); char buffer[4096]; vsnprintf(buffer, sizeof(buffer), format, args); va_end(args); gfxCommandBeginEvent(context, buffer); }
+                        inline GfxCommandEvent(GfxContext context, uint64_t color, char const *format, ...) : context(context) { va_list args; va_start(args, format); char buffer[4096]; vsnprintf(buffer, sizeof(buffer), format, args); va_end(args); gfxCommandBeginEvent(context, color, buffer); }
+                        inline ~GfxCommandEvent() { gfxCommandEndEvent(context); } };
+
+//!
 //! Frame processing.
 //!
 
@@ -320,6 +337,7 @@ GfxResult gfxFinish(GfxContext context);
 #include <deque>            // std::deque
 #include "dxcapi.h"         // shader compiler
 #include "d3d12shader.h"    // shader reflection
+#include "WinPixEventRuntime/pix3.h"
 
 #pragma warning(push)
 #pragma warning(disable:4100)   // unreferenced formal parameter
@@ -2633,6 +2651,20 @@ public:
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeBeginEvent(uint64_t color, char const *format, va_list args)
+    {
+        char buffer[4096];
+        vsnprintf(buffer, sizeof(buffer), format, args);
+        PIXBeginEvent(command_list_, color, buffer);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeEndEvent()
+    {
+        PIXEndEvent(command_list_);
         return kGfxResult_NoError;
     }
 
@@ -5764,6 +5796,37 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatchIndirect(args_buffer);
+}
+
+GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...)
+{
+    va_list args;
+    GfxResult result;
+    va_start(args, format);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) result = kGfxResult_InvalidParameter;
+        else result = gfx->encodeBeginEvent(0, format, args);
+    va_end(args);   // release variadic arguments
+    return result;
+}
+
+GfxResult gfxCommandBeginEvent(GfxContext context, uint64_t color, char const *format, ...)
+{
+    va_list args;
+    GfxResult result;
+    va_start(args, format);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) result = kGfxResult_InvalidParameter;
+        else result = gfx->encodeBeginEvent(color, format, args);
+    va_end(args);   // release variadic arguments
+    return result;
+}
+
+GfxResult gfxCommandEndEvent(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeEndEvent();
 }
 
 GfxResult gfxFrame(GfxContext context, bool vsync)
