@@ -307,7 +307,7 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);
 //! Debug/profile API.
 //!
 
-class GfxTimestampQuery { GFX_INTERNAL_NAMED_HANDLE(GfxTimestampQuery); public: };
+class GfxTimestampQuery { GFX_INTERNAL_HANDLE(GfxTimestampQuery); public: };
 
 GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context);
 GfxResult gfxDestroyTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query);
