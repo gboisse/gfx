@@ -973,9 +973,8 @@ class GfxInternal
 
     struct TimestampQuery
     {
+        float duration_ = 0.0f;
         bool was_begun_ = false;
-        double begin_ = 0.0;
-        double end_ = 0.0;
     };
     GfxArray<TimestampQuery> timestamp_queries_;
     GfxHandles timestamp_query_handles_;
@@ -2716,8 +2715,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the duration of an invalid timestamp query object");
             return 0.0f;
         }
-        TimestampQuery const &gfx_timestamp_query = timestamp_queries_[timestamp_query];
-        return (float)(GFX_MAX(gfx_timestamp_query.begin_, gfx_timestamp_query.end_) - gfx_timestamp_query.begin_);
+        return timestamp_queries_[timestamp_query].duration_;
     }
 
     GfxResult encodeBeginTimestampQuery(GfxTimestampQuery const &timestamp_query)
@@ -2752,8 +2750,7 @@ public:
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for timestamp query heap buffer");
             }
             query_buffer.setName("gfx_TimestampQueryHeapBuffer");
-            if(timestamp_query_heap.query_heap_ != nullptr)
-                timestamp_query_heap.query_heap_->Release();
+            collect(timestamp_query_heap.query_heap_);
             destroyBuffer(timestamp_query_heap.query_buffer_);
             timestamp_query_heap.timestamp_queries_.clear();
             timestamp_query_heap.query_buffer_ = query_buffer;
@@ -2863,8 +2860,9 @@ public:
                 GFX_ASSERT(buffer_handles_.has_handle(timestamp_query_heaps_[fence_index_].query_buffer_.handle));
                 Buffer const &query_buffer = buffers_[timestamp_query_heaps_[fence_index_].query_buffer_];
                 uint64_t const *timestamp_query_data = (uint64_t const *)((char const *)query_buffer.data_ + query_buffer.data_offset_);
-                timestamp_query.begin_ = timestamp_query_data[2 * timestamp_query_index + 0] / ticks_per_milliseconds;
-                timestamp_query.end_   = timestamp_query_data[2 * timestamp_query_index + 1] / ticks_per_milliseconds;
+                double const begin = timestamp_query_data[2 * timestamp_query_index + 0] / ticks_per_milliseconds;
+                double const end   = timestamp_query_data[2 * timestamp_query_index + 1] / ticks_per_milliseconds;
+                timestamp_query.duration_ = (float)(GFX_MAX(begin, end) - begin);   // elapsed time in milliseconds
             }
             timestamp_query_heaps_[fence_index_].timestamp_queries_.clear();
         }
@@ -4367,7 +4365,7 @@ private:
                                 if(!texture.is3D())
                                 {
                                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if (!invalidate_descriptor) continue;    // already up to date
+                                    if(!invalidate_descriptor) continue;    // already up to date
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader SRV
                                 }
