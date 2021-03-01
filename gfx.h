@@ -304,8 +304,16 @@ GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t
 GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);    // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 
 //!
-//! Debug API.
+//! Debug/profile API.
 //!
+
+class GfxTimestampQuery { GFX_INTERNAL_NAMED_HANDLE(GfxTimestampQuery); public: };
+
+GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context);
+GfxResult gfxDestroyTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query);
+float gfxTimestampQueryGetDuration(GfxContext context, GfxTimestampQuery timestamp_query);  // in milliseconds
+GfxResult gfxCommandBeginTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query);
+GfxResult gfxCommandEndTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query);
 
 GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...);
 GfxResult gfxCommandBeginEvent(GfxContext context, uint64_t color, char const *format, ...);
@@ -314,6 +322,10 @@ GfxResult gfxCommandEndEvent(GfxContext context);
 //!
 //! RAII helpers.
 //!
+
+class GfxTimedSection { GFX_NON_COPYABLE(GfxTimedSection); GfxContext context; GfxTimestampQuery timestamp_query; char const *section_name; public:
+                        inline GfxTimedSection(GfxContext context, GfxTimestampQuery timestamp_query, char const *section_name = nullptr) : context(context), timestamp_query(timestamp_query), section_name(section_name) { gfxCommandBeginTimestampQuery(context, timestamp_query); }
+                        inline ~GfxTimedSection() { gfxCommandEndTimestampQuery(context, timestamp_query); if(section_name != nullptr) GFX_PRINTLN("Completed `%s' in %.3fms", section_name, gfxTimestampQueryGetDuration(context, timestamp_query)); } };
 
 class GfxCommandEvent { GFX_NON_COPYABLE(GfxCommandEvent); GfxContext context; public:
                         inline GfxCommandEvent(GfxContext context, char const *format, ...) : context(context) { va_list args; va_start(args, format); char buffer[4096]; vsnprintf(buffer, sizeof(buffer), format, args); va_end(args); gfxCommandBeginEvent(context, buffer); }
@@ -959,10 +971,28 @@ class GfxInternal
     uint32_t dummy_descriptors_[Kernel::Parameter::kType_Count] = {};
     uint32_t dummy_rtv_descriptor_ = 0xFFFFFFFFu;
 
+    struct TimestampQuery
+    {
+        bool was_begun_ = false;
+        double begin_ = 0.0;
+        double end_ = 0.0;
+    };
+    GfxArray<TimestampQuery> timestamp_queries_;
+    GfxHandles timestamp_query_handles_;
+
+    struct TimestampQueryHeap
+    {
+        GfxBuffer query_buffer_ = {};
+        ID3D12QueryHeap *query_heap_ = nullptr;
+        std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>> timestamp_queries_;
+    };
+    uint64_t timestamp_query_ticks_per_second_ = 0;
+    TimestampQueryHeap timestamp_query_heaps_[kGfxConstant_BackBufferCount];
+
 public:
     GfxInternal(GfxContext &gfx) : buffer_handles_("buffer"), texture_handles_("texture"), sampler_state_handles_("sampler state")
                                  , acceleration_structure_handles_("acceleration structure"), raytracing_primitive_handles_("raytracing primitive")
-                                 , program_handles_("program"), kernel_handles_("kernel")
+                                 , program_handles_("program"), kernel_handles_("kernel"), timestamp_query_handles_("timestamp query/")
                                  { gfx.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxInternal() { terminate(); }
 
@@ -1062,6 +1092,7 @@ public:
         queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
         if(!SUCCEEDED(device_->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&command_queue_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create command queue");
+        command_queue_->GetTimestampFrequency(&timestamp_query_ticks_per_second_);
         SetDebugName(command_queue_, "gfx_CommandQueue");
 
         RECT window_rect = {};
@@ -1252,6 +1283,11 @@ public:
             collect(kernels_.data()[i]);
         for(uint32_t i = 0; i < programs_.size(); ++i)
             collect(programs_.data()[i]);
+        for(uint32_t i = 0; i < ARRAYSIZE(timestamp_query_heaps_); ++i)
+        {
+            collect(timestamp_query_heaps_[i].query_heap_);
+            destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
+        }
 
         forceGarbageCollection();
         freelist_descriptors_.clear();
@@ -2654,6 +2690,102 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxTimestampQuery createTimestampQuery()
+    {
+        GfxTimestampQuery timestamp_query = {};
+        timestamp_query.handle = timestamp_query_handles_.allocate_handle();
+        timestamp_queries_.insert(timestamp_query);
+        return timestamp_query;
+    }
+
+    GfxResult destroyTimestampQuery(GfxTimestampQuery const &timestamp_query)
+    {
+        if(!timestamp_query)
+            return kGfxResult_NoError;
+        if(!timestamp_query_handles_.has_handle(timestamp_query.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid timestamp query object");
+        timestamp_queries_.erase(timestamp_query);  // destroy timestamp query
+        timestamp_query_handles_.free_handle(timestamp_query.handle);
+        return kGfxResult_NoError;
+    }
+
+    float getTimestampQueryDuration(GfxTimestampQuery const &timestamp_query)
+    {
+        if(!timestamp_query_handles_.has_handle(timestamp_query.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the duration of an invalid timestamp query object");
+            return 0.0f;
+        }
+        TimestampQuery const &gfx_timestamp_query = timestamp_queries_[timestamp_query];
+        return (float)(GFX_MAX(gfx_timestamp_query.begin_, gfx_timestamp_query.end_) - gfx_timestamp_query.begin_);
+    }
+
+    GfxResult encodeBeginTimestampQuery(GfxTimestampQuery const &timestamp_query)
+    {
+        if(!timestamp_query_handles_.has_handle(timestamp_query.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot begin a timed section using an invalid timestamp query object");
+        TimestampQuery &gfx_timestamp_query = timestamp_queries_[timestamp_query];
+        if(gfx_timestamp_query.was_begun_)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot begin a timed section on a timestamp query object that was already open");
+        GFX_ASSERT(fence_index_ < ARRAYSIZE(timestamp_query_heaps_));   // should never happen
+        TimestampQueryHeap &timestamp_query_heap = timestamp_query_heaps_[fence_index_];
+        if(timestamp_query_heap.timestamp_queries_.find(timestamp_query.handle) != timestamp_query_heap.timestamp_queries_.end())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot use a timestamp query object more than once per frame");
+        uint32_t timestamp_query_index = (uint32_t)timestamp_query_heap.timestamp_queries_.size();
+        uint64_t timestamp_query_heap_size = 2 * (timestamp_query_index + 1) * sizeof(uint64_t);
+        if(timestamp_query_heap_size > timestamp_query_heap.query_buffer_.size)
+        {
+            ID3D12QueryHeap *query_heap = nullptr;
+            timestamp_query_heap_size += (timestamp_query_heap_size + 2) >> 1;
+            timestamp_query_heap_size = GFX_ALIGN(timestamp_query_heap_size, 65536);
+            D3D12_QUERY_HEAP_DESC
+            query_heap_desc       = {};
+            query_heap_desc.Type  = D3D12_QUERY_HEAP_TYPE_TIMESTAMP;
+            query_heap_desc.Count = (uint32_t)(timestamp_query_heap_size >> 3);
+            device_->CreateQueryHeap(&query_heap_desc, IID_PPV_ARGS(&query_heap));
+            if(query_heap == nullptr)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create query heap for timestamp query object");
+            GfxBuffer query_buffer = createBuffer(timestamp_query_heap_size, nullptr, kGfxCpuAccess_Read);
+            if(!query_buffer)
+            {
+                query_heap->Release();  // release resource
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for timestamp query heap buffer");
+            }
+            query_buffer.setName("gfx_TimestampQueryHeapBuffer");
+            if(timestamp_query_heap.query_heap_ != nullptr)
+                timestamp_query_heap.query_heap_->Release();
+            destroyBuffer(timestamp_query_heap.query_buffer_);
+            timestamp_query_heap.timestamp_queries_.clear();
+            timestamp_query_heap.query_buffer_ = query_buffer;
+            timestamp_query_heap.query_heap_ = query_heap;
+        }
+        GFX_ASSERT(timestamp_query_heap.query_heap_ != nullptr);
+        timestamp_query_index = (uint32_t)timestamp_query_heap.timestamp_queries_.size();
+        command_list_->EndQuery(timestamp_query_heap.query_heap_, D3D12_QUERY_TYPE_TIMESTAMP, 2 * timestamp_query_index + 0);
+        timestamp_query_heap.timestamp_queries_[timestamp_query.handle] = std::pair<uint32_t, GfxTimestampQuery>(timestamp_query_index, timestamp_query);
+        gfx_timestamp_query.was_begun_ = true;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeEndTimestampQuery(GfxTimestampQuery const &timestamp_query)
+    {
+        if(!timestamp_query_handles_.has_handle(timestamp_query.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot end a timed section using an invalid timestamp query object");
+        TimestampQuery &gfx_timestamp_query = timestamp_queries_[timestamp_query];
+        if(!gfx_timestamp_query.was_begun_)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot end a timed section using a timestamp query object that was already closed");
+        GFX_ASSERT(fence_index_ < ARRAYSIZE(timestamp_query_heaps_));   // should never happen
+        TimestampQueryHeap &timestamp_query_heap = timestamp_query_heaps_[fence_index_];
+        gfx_timestamp_query.was_begun_ = false; // timestamp query is now closed
+        std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>>::const_iterator const it = timestamp_query_heap.timestamp_queries_.find(timestamp_query.handle);
+        GFX_ASSERT(it != timestamp_query_heap.timestamp_queries_.end());
+        if(it == timestamp_query_heap.timestamp_queries_.end())
+            return kGfxResult_InternalError;    // should never happen
+        uint32_t const timestamp_query_index = (*it).second.first;
+        command_list_->EndQuery(timestamp_query_heap.query_heap_, D3D12_QUERY_TYPE_TIMESTAMP, 2 * timestamp_query_index + 1);
+        return kGfxResult_NoError;
+    }
+
     GfxResult encodeBeginEvent(uint64_t color, char const *format, va_list args)
     {
         char buffer[4096];
@@ -2678,6 +2810,23 @@ public:
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty())
+        {
+            for(std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>>::const_iterator it = timestamp_query_heaps_[fence_index_].timestamp_queries_.begin(); it != timestamp_query_heaps_[fence_index_].timestamp_queries_.end(); ++it)
+            {
+                if(!timestamp_query_handles_.has_handle((*it).second.second.handle))
+                    continue;   // timestamp query object was destroyed
+                TimestampQuery const &timestamp_query = timestamp_queries_[(*it).second.second];
+                if(timestamp_query.was_begun_)  // was the query not closed properly?
+                    encodeEndTimestampQuery((*it).second.second);
+                GFX_ASSERT(!timestamp_query.was_begun_);
+            }
+            uint32_t const timestamp_query_count = (uint32_t)timestamp_query_heaps_[fence_index_].timestamp_queries_.size();
+            GFX_ASSERT(buffer_handles_.has_handle(timestamp_query_heaps_[fence_index_].query_buffer_.handle));
+            Buffer const &query_buffer = buffers_[timestamp_query_heaps_[fence_index_].query_buffer_];
+            command_list_->ResolveQueryData(timestamp_query_heaps_[fence_index_].query_heap_,
+                D3D12_QUERY_TYPE_TIMESTAMP, 0, 2 * timestamp_query_count, query_buffer.resource_, query_buffer.data_offset_);
+        }
         command_list_->ResourceBarrier(1, &resource_barrier);
         command_list_->Close(); // close command list for submit
         ID3D12CommandList *const command_lists[] = { command_list_ };
@@ -2702,6 +2851,23 @@ public:
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         command_list_->ResourceBarrier(1, &resource_barrier);
+        if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty())
+        {
+            double const ticks_per_milliseconds = timestamp_query_ticks_per_second_ / 1000.0;
+            for(std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>>::const_iterator it = timestamp_query_heaps_[fence_index_].timestamp_queries_.begin(); it != timestamp_query_heaps_[fence_index_].timestamp_queries_.end(); ++it)
+            {
+                if(!timestamp_query_handles_.has_handle((*it).second.second.handle))
+                    continue;   // timestamp query object was destroyed
+                uint32_t const timestamp_query_index = (*it).second.first;
+                TimestampQuery &timestamp_query = timestamp_queries_[(*it).second.second];
+                GFX_ASSERT(buffer_handles_.has_handle(timestamp_query_heaps_[fence_index_].query_buffer_.handle));
+                Buffer const &query_buffer = buffers_[timestamp_query_heaps_[fence_index_].query_buffer_];
+                uint64_t const *timestamp_query_data = (uint64_t const *)((char const *)query_buffer.data_ + query_buffer.data_offset_);
+                timestamp_query.begin_ = timestamp_query_data[2 * timestamp_query_index + 0] / ticks_per_milliseconds;
+                timestamp_query.end_   = timestamp_query_data[2 * timestamp_query_index + 1] / ticks_per_milliseconds;
+            }
+            timestamp_query_heaps_[fence_index_].timestamp_queries_.clear();
+        }
         resetState();   // re-install state
         return runGarbageCollection();
     }
@@ -5796,6 +5962,42 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatchIndirect(args_buffer);
+}
+
+GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
+{
+    GfxTimestampQuery const timestamp_query;
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return timestamp_query;    // invalid context
+    return gfx->createTimestampQuery();
+}
+
+GfxResult gfxDestroyTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->destroyTimestampQuery(timestamp_query);
+}
+
+float gfxTimestampQueryGetDuration(GfxContext context, GfxTimestampQuery timestamp_query)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0.0f;   // invalid context
+    return gfx->getTimestampQueryDuration(timestamp_query);
+}
+
+GfxResult gfxCommandBeginTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeBeginTimestampQuery(timestamp_query);
+}
+
+GfxResult gfxCommandEndTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeEndTimestampQuery(timestamp_query);
 }
 
 GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...)
