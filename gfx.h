@@ -2863,7 +2863,9 @@ public:
                 uint64_t const *timestamp_query_data = (uint64_t const *)((char const *)query_buffer.data_ + query_buffer.data_offset_);
                 double const begin = timestamp_query_data[2 * timestamp_query_index + 0] / ticks_per_milliseconds;
                 double const end   = timestamp_query_data[2 * timestamp_query_index + 1] / ticks_per_milliseconds;
-                timestamp_query.duration_ = (float)(GFX_MAX(begin, end) - begin);   // elapsed time in milliseconds
+                float const duration    = (float)(GFX_MAX(begin, end) - begin); // elapsed time in milliseconds
+                float const lerp_amount = (fabsf(duration - timestamp_query.duration_) / GFX_MAX(duration, 1e-3f) > 1.0f ? 0.0f : 0.95f);
+                timestamp_query.duration_ = duration * (1.0f - lerp_amount) + timestamp_query.duration_ * lerp_amount;
             }
             timestamp_query_heaps_[fence_index_].timestamp_queries_.clear();
         }
