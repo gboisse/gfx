@@ -2858,6 +2858,7 @@ public:
                 uint32_t const timestamp_query_index = (*it).second.first;
                 TimestampQuery &timestamp_query = timestamp_queries_[(*it).second.second];
                 GFX_ASSERT(buffer_handles_.has_handle(timestamp_query_heaps_[fence_index_].query_buffer_.handle));
+                GFX_ASSERT(timestamp_query_index < timestamp_query_heaps_[fence_index_].timestamp_queries_.size());
                 Buffer const &query_buffer = buffers_[timestamp_query_heaps_[fence_index_].query_buffer_];
                 uint64_t const *timestamp_query_data = (uint64_t const *)((char const *)query_buffer.data_ + query_buffer.data_offset_);
                 double const begin = timestamp_query_data[2 * timestamp_query_index + 0] / ticks_per_milliseconds;
@@ -5964,7 +5965,7 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
 
 GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
 {
-    GfxTimestampQuery const timestamp_query;
+    GfxTimestampQuery const timestamp_query = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return timestamp_query;    // invalid context
     return gfx->createTimestampQuery();
