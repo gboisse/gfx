@@ -991,7 +991,7 @@ class GfxInternal
 public:
     GfxInternal(GfxContext &gfx) : buffer_handles_("buffer"), texture_handles_("texture"), sampler_state_handles_("sampler state")
                                  , acceleration_structure_handles_("acceleration structure"), raytracing_primitive_handles_("raytracing primitive")
-                                 , program_handles_("program"), kernel_handles_("kernel"), timestamp_query_handles_("timestamp query/")
+                                 , program_handles_("program"), kernel_handles_("kernel"), timestamp_query_handles_("timestamp query")
                                  { gfx.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxInternal() { terminate(); }
 
