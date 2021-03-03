@@ -3061,6 +3061,7 @@ private:
         pso_desc.SampleMask = UINT_MAX;
         pso_desc.RasterizerState.FillMode = D3D12_FILL_MODE_SOLID;
         pso_desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
+        pso_desc.RasterizerState.FrontCounterClockwise = TRUE;
         pso_desc.RasterizerState.DepthClipEnable = TRUE;
         pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
         pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
