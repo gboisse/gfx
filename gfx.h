@@ -349,7 +349,6 @@ GfxResult gfxFinish(GfxContext context);
 #include <deque>            // std::deque
 #include "dxcapi.h"         // shader compiler
 #include "d3d12shader.h"    // shader reflection
-#include "WinPixEventRuntime/pix3.h"
 
 #pragma warning(push)
 #pragma warning(disable:4100)   // unreferenced formal parameter
@@ -357,6 +356,7 @@ GfxResult gfxFinish(GfxContext context);
 #pragma warning(disable:4189)   // local variable is initialized but not referenced
 #pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
 #include "D3D12MemAlloc.cpp"    // D3D12MemoryAllocator
+#include "WinPixEventRuntime/pix3.h"
 #pragma warning(pop)
 
 #pragma warning(push)
@@ -1970,8 +1970,10 @@ public:
         GfxProgram program = {};
         if(!file_name)
             return program; // invalid parameter
-        file_path = (file_path ? file_path : ".");
-        GFX_SNPRINTF(program.name, sizeof(program.name), "%s/%s", file_path, file_name);
+        file_path = (file_path != nullptr ? file_path : ".");
+        char const last_char = file_path[strlen(file_path) - 1];
+        char const *path_separator = (last_char == '/' || last_char == '\\' ? "" : "/");
+        GFX_SNPRINTF(program.name, sizeof(program.name), "%s%s%s", file_path, path_separator, file_name);
         program.handle = program_handles_.allocate_handle();
         Program &gfx_program = programs_.insert(program);
         gfx_program.file_name_ = file_name;
