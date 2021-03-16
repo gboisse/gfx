@@ -17,3 +17,5 @@ target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Wi
 target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc_2020_10-22/lib/x64/dxcompiler.lib
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.200127001/bin/x64/WinPixEventRuntime.lib)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/examples)
