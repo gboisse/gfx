@@ -1395,8 +1395,8 @@ public:
                 {
                     D3D12_RANGE read_range = {};
                     gfx_buffer.resource_->Map(0, &read_range, &gfx_buffer.data_);
-                    memset(gfx_buffer.data_, 0, resource_desc.Width);
-                    if(data) memcpy(gfx_buffer.data_, data, size);
+                    memset(gfx_buffer.data_, 0, (size_t)resource_desc.Width);
+                    if(data) memcpy(gfx_buffer.data_, data, (size_t)size);
                 }
                 break;
             default:
@@ -4941,7 +4941,7 @@ private:
         GFX_TRY(destroyBuffer(draw_id_buffer_));
         draw_id_buffer_size += ((draw_id_buffer_size + 2) >> 1);
         draw_id_buffer_size = GFX_ALIGN(draw_id_buffer_size, 65536);
-        std::vector<uint32_t> draw_ids(draw_id_buffer_size / sizeof(uint32_t));
+        std::vector<uint32_t> draw_ids((size_t)(draw_id_buffer_size / sizeof(uint32_t)));
         for(size_t i = 0; i < draw_ids.size(); ++i) draw_ids[i] = static_cast<uint32_t>(i);
         draw_id_buffer_ = createBuffer(draw_id_buffer_size, draw_ids.data(), kGfxCpuAccess_None, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
         if(!draw_id_buffer_)
