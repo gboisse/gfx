@@ -509,6 +509,15 @@ class GfxInternal
     };
     std::map<uint32_t, ScanKernels> scan_kernels_;
 
+    struct SortKernels
+    {
+        GfxProgram sort_program_ = {};
+        GfxKernel histogram_kernel_ = {};
+        GfxKernel scatter_kernel_ = {};
+        GfxKernel args_kernel_ = {};
+    };
+    std::map<uint32_t, SortKernels> sort_kernels_;
+
     struct String
     {
         char *data_;
@@ -1299,6 +1308,13 @@ public:
             destroyKernel((*it).second.reduce_kernel_);
             destroyKernel((*it).second.scan_add_kernel_);
             destroyKernel((*it).second.scan_kernel_);
+            destroyKernel((*it).second.args_kernel_);
+        }
+        for(std::map<uint32_t, SortKernels>::const_iterator it = sort_kernels_.begin(); it != sort_kernels_.end(); ++it)
+        {
+            destroyProgram((*it).second.sort_program_);
+            destroyKernel((*it).second.histogram_kernel_);
+            destroyKernel((*it).second.scatter_kernel_);
             destroyKernel((*it).second.args_kernel_);
         }
 
@@ -2865,7 +2881,7 @@ public:
         uint32_t const group_size = 256;
         uint32_t const keys_per_thread = 4;
         uint32_t const keys_per_group = group_size * keys_per_thread;
-        uint32_t const num_keys = (uint32_t)(dst.size >> 2);
+        uint32_t const num_keys = (uint32_t)(src.size >> 2);
         uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
@@ -2994,7 +3010,7 @@ public:
         uint32_t const group_size = 256;
         uint32_t const keys_per_thread = 4;
         uint32_t const keys_per_group = group_size * keys_per_thread;
-        uint32_t const num_keys = (uint32_t)(dst.size >> 2);
+        uint32_t const num_keys = (uint32_t)(src.size >> 2);
         uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
@@ -3094,7 +3110,13 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort values when supplied buffer object is invalid");
         if(count != nullptr && !buffer_handles_.has_handle(count->handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort when supplied count buffer object is invalid");
+        SortKernels const &sort_kernels = getSortKernels(count);
+        //uint32_t const group_size = 256;
+        //uint32_t const keys_per_thread = 4;
+        //uint32_t const keys_per_group = group_size * keys_per_thread;
+        //uint32_t const num_keys = (uint32_t)(src.size >> 2);
         // TODO: ... (gboisse)
+        (void)&sort_kernels;
         return kGfxResult_NoError;
     }
 
@@ -5199,6 +5221,7 @@ private:
     ScanKernels const &getScanKernels(OpType op_type, GfxDataType data_type, GfxBuffer const *count)
     {
         GFX_ASSERT(op_type < kOpType_Count);    // should never happen
+        GFX_ASSERT(count == nullptr || buffer_handles_.has_handle(count->handle));
         uint32_t const key = (data_type << 3) | (op_type << 1) | (count != nullptr ? 1 : 0);
         std::map<uint32_t, ScanKernels>::const_iterator const it = scan_kernels_.find(key);
         if(it != scan_kernels_.end()) return (*it).second;  // already compiled
@@ -5470,6 +5493,83 @@ private:
         if(count != nullptr)
             scan_kernels.args_kernel_ = createComputeKernel(scan_kernels.scan_program_, "GenerateDispatches", nullptr, 0);
         return scan_kernels;
+    }
+
+    SortKernels const &getSortKernels(GfxBuffer const *count)
+    {
+        uint32_t const key = (count != nullptr ? 1 : 0);
+        GFX_ASSERT(count == nullptr || buffer_handles_.has_handle(count->handle));
+        std::map<uint32_t, SortKernels>::const_iterator const it = sort_kernels_.find(key);
+        if(it != sort_kernels_.end()) return (*it).second;  // already compiled
+        std::string sort_program_source;
+        sort_program_source +=
+            "#define NUM_BITS_PER_PASS   4\r\n"
+            "#define NUM_BINS            (1 << NUM_BITS_PER_PASS)\r\n"
+            "#define GROUP_SIZE          256\r\n"
+            "#define KEYS_PER_THREAD     4\r\n"
+            "#define KEYS_PER_GROUP      (GROUP_SIZE * KEYS_PER_THREAD)\r\n"
+            "\r\n"
+            "uint g_Bitshift;\r\n";
+        if(count != nullptr)
+            sort_program_source += "\r\nRWStructuredBuffer<uint> g_CountBuffer;\r\n";
+        else
+            sort_program_source += "uint g_Count;\r\n\r\n";
+        sort_program_source +=
+            "RWStructuredBuffer<uint> g_InputKeys;\r\n"
+            "RWStructuredBuffer<uint> g_OutputKeys;\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "RWStructuredBuffer<uint> g_InputValues;\r\n"
+            "RWStructuredBuffer<uint> g_OutputValues;\r\n"
+            "#endif\r\n"
+            "RWStructuredBuffer<uint> g_GroupHistograms;\r\n"
+            "\r\n"
+            "groupshared uint lds_keys[GROUP_SIZE];\r\n"
+            "groupshared uint lds_scratch[GROUP_SIZE];\r\n"
+            "groupshared uint lds_histogram[NUM_BINS];\r\n"
+            "groupshared uint lds_scanned_histogram[NUM_BINS];\r\n"
+            "\r\n"
+            "uint GetCount()\r\n"
+            "{\r\n";
+        if(count != nullptr)
+            sort_program_source += "    return g_CountBuffer[0];\r\n";
+        else
+            sort_program_source += "    return g_Count;\r\n";
+        sort_program_source +=
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void BitHistogram(in uint gidx : SV_DispatchThreadID,\r\n"
+            "                  in uint lidx : SV_GroupThreadID,\r\n"
+            "                  in uint bidx : SV_GroupID)\r\n"
+            "{\r\n"
+            "    if(lidx < NUM_BINS)\r\n"
+            "        lds_histogram[lidx] = 0;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint key_index = gidx * KEYS_PER_THREAD + i;\r\n"
+            "        if(key_index >= GetCount()) break;  // out of bounds\r\n"
+            "        uint bin_index = (g_InputKeys[key_index] >> g_Bitshift) & 0xFu;\r\n"
+            "        InterlockedAdd(lds_histogram[bin_index], 1);\r\n"
+            "    }\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    if(lidx < NUM_BINS)\r\n"
+            "    {\r\n"
+            "        uint num_blocks = (GetCount() + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+            "        g_GroupHistograms[num_blocks * lidx + bidx] = lds_histogram[lidx];\r\n"
+            "    }\r\n"
+            "}\r\n";
+        // TODO: ... (gboisse)
+        SortKernels &sort_kernels = sort_kernels_[key];
+        GfxProgramDesc sort_program_desc = {};
+        sort_program_desc.cs = sort_program_source.c_str();
+        char const *sort_values_defines[] = { "SORT_VALUES" };
+        sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram");
+        sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0);
+        // TODO: ... (gboisse)
+        return sort_kernels;
     }
 
     void populateRootConstants(Program const &program, Kernel::Parameter &parameter, uint32_t *root_constants)
