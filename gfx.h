@@ -252,7 +252,7 @@ template<> inline GfxResult gfxProgramSetParameter<GfxSamplerState>(GfxContext c
 template<> inline GfxResult gfxProgramSetParameter<GfxAccelerationStructure>(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure const &value) { return gfxProgramSetAccelerationStructure(context, program, parameter_name, value); }
 template<typename TYPE> inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, TYPE const &value)
 {
-    static_assert(!std::is_pointer<TYPE>::value, "Program resources must be passed by reference, not by pointer");
+    static_assert(!std::is_pointer<TYPE>::value, "Program parameters must be passed by reference, not by pointer");
     return gfxProgramSetConstants(context, program, parameter_name, &value, sizeof(value));
 }
 
