@@ -2849,8 +2849,6 @@ public:
 
     GfxResult encodeScan(OpType op_type, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
     {
-        ScanKernels *scan_kernels = nullptr;
-        GFX_ASSERT(op_type < kOpType_Count);    // should never happen
         if(data_type < 0 || data_type >= kGfxDataType_Count)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot scan buffer object of unsupported data type `%u'", data_type);
         if(dst.size != src.size)
@@ -2863,281 +2861,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan when supplied buffer object is invalid");
         if(count != nullptr && !buffer_handles_.has_handle(count->handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan when supplied count buffer object is invalid");
-        uint32_t const key = (data_type << 3) | (op_type << 1) | (count != nullptr ? 1 : 0);
-        std::map<uint32_t, ScanKernels>::iterator const it = scan_kernels_.find(key);
-        if(it != scan_kernels_.end())
-            scan_kernels = &(*it).second;
-        else
-        {
-            char const *data_type_str = nullptr, *identity_str = nullptr;
-            switch(data_type)
-            {
-            case kGfxDataType_Int:
-                data_type_str = "int";
-                identity_str = (op_type == kOpType_Min ? "2147483647" : op_type == kOpType_Max ? "-2147483648" : "0");
-                break;
-            case kGfxDataType_Uint:
-                data_type_str = "uint";
-                identity_str = (op_type == kOpType_Min ? "4294967295u" : "0");
-                break;
-            default:
-                data_type_str = "float";
-                identity_str = (op_type == kOpType_Min ? "3.402823466e+38f" : op_type == kOpType_Max ? "1.175494351e-38f" : "0.0f");
-                break;
-            }
-            std::string scan_program_source;
-            scan_program_source +=
-                "#define GROUP_SIZE      256\r\n"
-                "#define KEYS_PER_THREAD 4\r\n"
-                "#define KEYS_PER_GROUP  (GROUP_SIZE * KEYS_PER_THREAD)\r\n"
-                "\r\n";
-            if(count != nullptr)
-                scan_program_source += "RWStructuredBuffer<uint> g_CountBuffer;\r\n";
-            else
-                scan_program_source += "uint g_Count;\r\n\r\n";
-            scan_program_source +=
-                "RWStructuredBuffer<";
-            scan_program_source += data_type_str;
-            scan_program_source += "> g_InputKeys;\r\n";
-            scan_program_source +=
-                "RWStructuredBuffer<";
-            scan_program_source += data_type_str;
-            scan_program_source += "> g_OutputKeys;\r\n";
-            scan_program_source +=
-                "RWStructuredBuffer<";
-            scan_program_source += data_type_str;
-            scan_program_source += "> g_PartialResults;\r\n";
-            if(count != nullptr)
-                scan_program_source +=
-                    "\r\n"
-                    "RWStructuredBuffer<uint4> g_Args1Buffer;\r\n"
-                    "RWStructuredBuffer<uint4> g_Args2Buffer;\r\n"
-                    "RWStructuredBuffer<uint>  g_Count1Buffer;\r\n"
-                    "RWStructuredBuffer<uint>  g_Count2Buffer;\r\n";
-            scan_program_source +=
-                "\r\n"
-                "groupshared ";
-            scan_program_source += data_type_str;
-            scan_program_source += " lds_keys[GROUP_SIZE];\r\n";
-            scan_program_source +=
-                "groupshared ";
-            scan_program_source += data_type_str;
-            scan_program_source += " lds_loads[KEYS_PER_THREAD][GROUP_SIZE];\r\n";
-            scan_program_source +=
-                "\r\n"
-                "uint GetCount()\r\n"
-                "{\r\n";
-            if(count != nullptr)
-                scan_program_source += "    return g_CountBuffer[0];\r\n";
-            else
-                scan_program_source += "    return g_Count;\r\n";
-            scan_program_source +=
-                "}\r\n"
-                "\r\n";
-            scan_program_source += data_type_str;
-            scan_program_source += " Op(in ";
-            scan_program_source += data_type_str;
-            scan_program_source += " lhs, in ";
-            scan_program_source += data_type_str;
-            scan_program_source += " rhs)\r\n";
-            scan_program_source +=
-                "{\r\n";
-            switch(op_type)
-            {
-            case kOpType_Min:
-                scan_program_source += "    return min(lhs, rhs);\r\n";
-                break;
-            case kOpType_Max:
-                scan_program_source += "    return max(lhs, rhs);\r\n";
-                break;
-            default:
-                scan_program_source += "    return lhs + rhs;\r\n";
-                break;
-            }
-            scan_program_source +=
-                "}\r\n"
-                "\r\n";
-            scan_program_source += data_type_str;
-            scan_program_source += " GroupScan(in ";
-            scan_program_source += data_type_str;
-            scan_program_source += " key, in uint lidx)\r\n";
-            scan_program_source +=
-                "{\r\n"
-                "    lds_keys[lidx] = key;\r\n"
-                "    GroupMemoryBarrierWithGroupSync();\r\n"
-                "\r\n"
-                "    uint stride;\r\n"
-                "    for(stride = 1; stride < GROUP_SIZE; stride <<= 1)\r\n"
-                "    {\r\n"
-                "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
-                "        {\r\n"
-                "            lds_keys[2 * (lidx + 1) * stride - 1] = Op(lds_keys[2 * (lidx + 1) * stride - 1],\r\n"
-                "                                                       lds_keys[(2 * lidx + 1) * stride - 1]);\r\n"
-                "        }\r\n"
-                "        GroupMemoryBarrierWithGroupSync();\r\n"
-                "    }\r\n"
-                "\r\n"
-                "    if(lidx == 0)\r\n"
-                "        lds_keys[GROUP_SIZE - 1] = ";
-            scan_program_source += identity_str;
-            scan_program_source += ";\r\n";
-            scan_program_source +=
-                "    GroupMemoryBarrierWithGroupSync();\r\n"
-                "\r\n"
-                "    for(stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
-                "    {\r\n"
-                "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
-                "        {\r\n            ";
-            scan_program_source += data_type_str;
-            scan_program_source += " tmp = lds_keys[(2 * lidx + 1) * stride - 1];\r\n";
-            scan_program_source +=
-                "            lds_keys[(2 * lidx + 1) * stride - 1] = lds_keys[2 * (lidx + 1) * stride - 1];\r\n"
-                "            lds_keys[2 * (lidx + 1) * stride - 1] = Op(lds_keys[2 * (lidx + 1) * stride - 1], tmp);\r\n"
-                "        }\r\n"
-                "        GroupMemoryBarrierWithGroupSync();\r\n"
-                "    }\r\n"
-                "\r\n"
-                "    return lds_keys[lidx];\r\n"
-                "}\r\n"
-                "\r\n";
-            scan_program_source += data_type_str;
-            scan_program_source += " GroupReduce(in ";
-            scan_program_source += data_type_str;
-            scan_program_source += " key, in uint lidx)\r\n";
-            scan_program_source +=
-                "{\r\n"
-                "    lds_keys[lidx] = key;\r\n"
-                "    GroupMemoryBarrierWithGroupSync();\r\n"
-                "\r\n"
-                "    for(uint stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
-                "    {\r\n"
-                "        if(lidx < stride)\r\n"
-                "        {\r\n"
-                "            lds_keys[lidx] = Op(lds_keys[lidx], lds_keys[lidx + stride]);\r\n"
-                "        }\r\n"
-                "        GroupMemoryBarrierWithGroupSync();\r\n"
-                "    }\r\n"
-                "\r\n"
-                "    return lds_keys[0];\r\n"
-                "}\r\n"
-                "\r\n"
-                "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
-                "void BlockScan(in uint gidx : SV_DispatchThreadID, in uint lidx : SV_GroupThreadID, in uint bidx : SV_GroupID)\r\n"
-                "{\r\n"
-                "    uint i, count = GetCount();\r\n"
-                "\r\n"
-                "    uint range_begin = bidx * GROUP_SIZE * KEYS_PER_THREAD;\r\n"
-                "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
-                "    {\r\n"
-                "        uint load_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
-                "\r\n"
-                "        uint col = (i * GROUP_SIZE + lidx) / KEYS_PER_THREAD;\r\n"
-                "        uint row = (i * GROUP_SIZE + lidx) % KEYS_PER_THREAD;\r\n"
-                "\r\n"
-                "        lds_loads[row][col] = (load_index < count ? g_InputKeys[load_index] : ";
-            scan_program_source += identity_str;
-            scan_program_source += ");\r\n";
-            scan_program_source +=
-                "    }\r\n"
-                "    GroupMemoryBarrierWithGroupSync();\r\n"
-                "\r\n    ";
-            scan_program_source += data_type_str;
-            scan_program_source += " thread_sum = ";
-            scan_program_source += identity_str;
-            scan_program_source += ";\r\n";
-            scan_program_source +=
-                "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
-                "    {\r\n        ";
-            scan_program_source += data_type_str;
-            scan_program_source += " tmp = lds_loads[i][lidx];\r\n";
-            scan_program_source +=
-                "        lds_loads[i][lidx] = thread_sum;\r\n"
-                "        thread_sum = Op(thread_sum, tmp);\r\n"
-                "    }\r\n"
-                "    thread_sum = GroupScan(thread_sum, lidx);\r\n"
-                "\r\n    ";
-            scan_program_source += data_type_str;
-            scan_program_source += " partial_result = ";
-            scan_program_source += identity_str;
-            scan_program_source += ";\r\n";
-            scan_program_source +=
-                "#ifdef PARTIAL_RESULT\r\n"
-                "    partial_result = g_PartialResults[bidx];\r\n"
-                "#endif\r\n"
-                "\r\n"
-                "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
-                "    {\r\n"
-                "        lds_loads[i][lidx] = Op(lds_loads[i][lidx], thread_sum);\r\n"
-                "    }\r\n"
-                "    GroupMemoryBarrierWithGroupSync();\r\n"
-                "\r\n"
-                "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
-                "    {\r\n"
-                "        uint store_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
-                "\r\n"
-                "        uint col = (i * GROUP_SIZE + lidx) / KEYS_PER_THREAD;\r\n"
-                "        uint row = (i * GROUP_SIZE + lidx) % KEYS_PER_THREAD;\r\n"
-                "\r\n"
-                "        if(store_index < count)\r\n"
-                "        {\r\n"
-                "            g_OutputKeys[store_index] = Op(lds_loads[row][col], partial_result);\r\n"
-                "        }\r\n"
-                "    }\r\n"
-                "}\r\n"
-                "\r\n"
-                "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
-                "void BlockReduce(in uint gidx : SV_DispatchThreadID, in uint lidx : SV_GroupThreadID, in uint bidx : SV_GroupID)\r\n"
-                "{\r\n    ";
-            scan_program_source += data_type_str;
-            scan_program_source += " thread_sum = ";
-            scan_program_source += identity_str;
-            scan_program_source += ";\r\n";
-            scan_program_source +=
-                "\r\n"
-                "    uint range_begin = bidx * GROUP_SIZE * KEYS_PER_THREAD, count = GetCount();\r\n"
-                "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
-                "    {\r\n"
-                "        uint load_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
-                "        thread_sum = Op(load_index < count ? g_InputKeys[load_index] : ";
-            scan_program_source += identity_str;
-            scan_program_source += ", thread_sum);\r\n";
-            scan_program_source +=
-                "    }\r\n"
-                "    thread_sum = GroupReduce(thread_sum, lidx);\r\n"
-                "\r\n"
-                "    if(lidx == 0)\r\n"
-                "    {\r\n"
-                "        g_PartialResults[bidx] = thread_sum;\r\n"
-                "    }\r\n"
-                "}\r\n";
-            if(count != nullptr)
-            {
-                scan_program_source +=
-                    "\r\n"
-                    "[numthreads(1, 1, 1)]\r\n"
-                    "void GenerateDispatches()\r\n"
-                    "{\r\n"
-                    "    uint num_keys = g_CountBuffer[0];\r\n"
-                    "    uint num_groups_level_1 = (num_keys + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
-                    "    uint num_groups_level_2 = (num_groups_level_1 + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
-                    "    g_Args1Buffer[0] = uint4((num_keys + GROUP_SIZE - 1) / GROUP_SIZE, 1, 1, 0);\r\n"
-                    "    g_Args2Buffer[0] = uint4((num_groups_level_1 + GROUP_SIZE - 1) / GROUP_SIZE, 1, 1, 0);\r\n"
-                    "    g_Count1Buffer[0] = num_groups_level_1;\r\n"
-                    "    g_Count2Buffer[0] = num_groups_level_2;\r\n"
-                    "}\r\n";
-            }
-            scan_kernels = &scan_kernels_[key];
-            GfxProgramDesc scan_program_desc = {};
-            scan_program_desc.cs = scan_program_source.c_str();
-            char const *scan_add_defines[] = { "PARTIAL_RESULT" };
-            scan_kernels->scan_program_ = createProgram(scan_program_desc, "gfx_ScanProgram");
-            scan_kernels->reduce_kernel_ = createComputeKernel(scan_kernels->scan_program_, "BlockReduce", nullptr, 0);
-            scan_kernels->scan_add_kernel_ = createComputeKernel(scan_kernels->scan_program_, "BlockScan", scan_add_defines, ARRAYSIZE(scan_add_defines));
-            scan_kernels->scan_kernel_ = createComputeKernel(scan_kernels->scan_program_, "BlockScan", nullptr, 0);
-            if(count != nullptr)
-                scan_kernels->args_kernel_ = createComputeKernel(scan_kernels->scan_program_, "GenerateDispatches", nullptr, 0);
-        }
-        GFX_ASSERT(scan_kernels != nullptr);
+        ScanKernels const &scan_kernels = getScanKernels(op_type, data_type, count);
         uint32_t const group_size = 256;
         uint32_t const keys_per_thread = 4;
         uint32_t const keys_per_group = group_size * keys_per_thread;
@@ -3173,23 +2897,23 @@ public:
         GfxKernel const bound_kernel = bound_kernel_;
         if(count != nullptr)
         {
-            setProgramBuffer(scan_kernels->scan_program_, "g_CountBuffer", *count);
-            setProgramBuffer(scan_kernels->scan_program_, "g_Args1Buffer", scan_level_1_args_buffer);
-            setProgramBuffer(scan_kernels->scan_program_, "g_Args2Buffer", scan_level_2_args_buffer);
-            setProgramBuffer(scan_kernels->scan_program_, "g_Count1Buffer", num_groups_level_1_buffer);
-            setProgramBuffer(scan_kernels->scan_program_, "g_Count2Buffer", num_groups_level_2_buffer);
-            encodeBindKernel(scan_kernels->args_kernel_);
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args1Buffer", scan_level_1_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args2Buffer", scan_level_2_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count1Buffer", num_groups_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count2Buffer", num_groups_level_2_buffer);
+            encodeBindKernel(scan_kernels.args_kernel_);
             encodeDispatch(1, 1, 1);
         }
         if(num_keys > keys_per_group)
         {
             if(count != nullptr)
-                setProgramBuffer(scan_kernels->scan_program_, "g_CountBuffer", *count);
+                setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
             else
-                setProgramConstants(scan_kernels->scan_program_, "g_Count", &num_keys, sizeof(num_keys));
-            setProgramBuffer(scan_kernels->scan_program_, "g_PartialResults", scan_level_1_buffer);
-            setProgramBuffer(scan_kernels->scan_program_, "g_InputKeys", src);
-            encodeBindKernel(scan_kernels->reduce_kernel_);
+                setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_keys, sizeof(num_keys));
+            setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", src);
+            encodeBindKernel(scan_kernels.reduce_kernel_);
             if(count != nullptr)
                 encodeDispatchIndirect(scan_level_1_args_buffer);
             else
@@ -3197,47 +2921,47 @@ public:
             if(num_groups_level_1 > keys_per_group)
             {
                 if(count != nullptr)
-                    setProgramBuffer(scan_kernels->scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
+                    setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
                 else
-                    setProgramConstants(scan_kernels->scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
-                setProgramBuffer(scan_kernels->scan_program_, "g_PartialResults", scan_level_2_buffer);
-                setProgramBuffer(scan_kernels->scan_program_, "g_InputKeys", scan_level_1_buffer);
+                    setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
+                setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_2_buffer);
+                setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", scan_level_1_buffer);
                 if(count != nullptr)
                     encodeDispatchIndirect(scan_level_2_args_buffer);
                 else
                     encodeDispatch(num_groups_level_2, 1, 1);
                 {
                     if(count != nullptr)
-                        setProgramBuffer(scan_kernels->scan_program_, "g_CountBuffer", num_groups_level_2_buffer);
+                        setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_2_buffer);
                     else
-                        setProgramConstants(scan_kernels->scan_program_, "g_Count", &num_groups_level_2, sizeof(num_groups_level_2));
-                    setProgramBuffer(scan_kernels->scan_program_, "g_InputKeys", scan_level_2_buffer);
-                    setProgramBuffer(scan_kernels->scan_program_, "g_OutputKeys", scan_level_2_buffer);
-                    encodeBindKernel(scan_kernels->scan_kernel_);
+                        setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_2, sizeof(num_groups_level_2));
+                    setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", scan_level_2_buffer);
+                    setProgramBuffer(scan_kernels.scan_program_, "g_OutputKeys", scan_level_2_buffer);
+                    encodeBindKernel(scan_kernels.scan_kernel_);
                     encodeDispatch(1, 1, 1);
                 }
             }
             if(count != nullptr)
-                setProgramBuffer(scan_kernels->scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
+                setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
             else
-                setProgramConstants(scan_kernels->scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
-            setProgramBuffer(scan_kernels->scan_program_, "g_InputKeys", scan_level_1_buffer);
-            setProgramBuffer(scan_kernels->scan_program_, "g_OutputKeys", scan_level_1_buffer);
-            setProgramBuffer(scan_kernels->scan_program_, "g_PartialResults", scan_level_2_buffer);
-            encodeBindKernel(num_groups_level_1 > keys_per_group ? scan_kernels->scan_add_kernel_ : scan_kernels->scan_kernel_);
+                setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
+            setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", scan_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_OutputKeys", scan_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_2_buffer);
+            encodeBindKernel(num_groups_level_1 > keys_per_group ? scan_kernels.scan_add_kernel_ : scan_kernels.scan_kernel_);
             if(count != nullptr)
                 encodeDispatchIndirect(scan_level_2_args_buffer);
             else
                 encodeDispatch(num_groups_level_2, 1, 1);
         }
         if(count != nullptr)
-            setProgramBuffer(scan_kernels->scan_program_, "g_CountBuffer", *count);
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
         else
-            setProgramConstants(scan_kernels->scan_program_, "g_Count", &num_keys, sizeof(num_keys));
-        setProgramBuffer(scan_kernels->scan_program_, "g_InputKeys", src);
-        setProgramBuffer(scan_kernels->scan_program_, "g_OutputKeys", dst);
-        setProgramBuffer(scan_kernels->scan_program_, "g_PartialResults", scan_level_1_buffer);
-        encodeBindKernel(num_keys > keys_per_group ? scan_kernels->scan_add_kernel_ : scan_kernels->scan_kernel_);
+            setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_keys, sizeof(num_keys));
+        setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", src);
+        setProgramBuffer(scan_kernels.scan_program_, "g_OutputKeys", dst);
+        setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_1_buffer);
+        encodeBindKernel(num_keys > keys_per_group ? scan_kernels.scan_add_kernel_ : scan_kernels.scan_kernel_);
         if(count != nullptr)
             encodeDispatchIndirect(scan_level_1_args_buffer);
         else
@@ -5388,6 +5112,283 @@ private:
         gfx_acceleration_structure.raytracing_primitives_[gfx_raytracing_primitive.index_] = raytracing_primitive;
         gfx_acceleration_structure.needs_update_ = true;
         return kGfxResult_NoError;
+    }
+
+    ScanKernels const &getScanKernels(OpType op_type, GfxDataType data_type, GfxBuffer const *count)
+    {
+        GFX_ASSERT(op_type < kOpType_Count);    // should never happen
+        uint32_t const key = (data_type << 3) | (op_type << 1) | (count != nullptr ? 1 : 0);
+        std::map<uint32_t, ScanKernels>::iterator const it = scan_kernels_.find(key);
+        if(it != scan_kernels_.end())
+            return (*it).second;
+        char const *data_type_str = nullptr, *identity_str = nullptr;
+        switch(data_type)
+        {
+        case kGfxDataType_Int:
+            data_type_str = "int";
+            identity_str = (op_type == kOpType_Min ? "2147483647" : op_type == kOpType_Max ? "-2147483648" : "0");
+            break;
+        case kGfxDataType_Uint:
+            data_type_str = "uint";
+            identity_str = (op_type == kOpType_Min ? "4294967295u" : "0");
+            break;
+        default:
+            data_type_str = "float";
+            identity_str = (op_type == kOpType_Min ? "3.402823466e+38f" : op_type == kOpType_Max ? "1.175494351e-38f" : "0.0f");
+            break;
+        }
+        std::string scan_program_source;
+        scan_program_source +=
+            "#define GROUP_SIZE      256\r\n"
+            "#define KEYS_PER_THREAD 4\r\n"
+            "#define KEYS_PER_GROUP  (GROUP_SIZE * KEYS_PER_THREAD)\r\n"
+            "\r\n";
+        if(count != nullptr)
+            scan_program_source += "RWStructuredBuffer<uint> g_CountBuffer;\r\n";
+        else
+            scan_program_source += "uint g_Count;\r\n\r\n";
+        scan_program_source +=
+            "RWStructuredBuffer<";
+        scan_program_source += data_type_str;
+        scan_program_source += "> g_InputKeys;\r\n";
+        scan_program_source +=
+            "RWStructuredBuffer<";
+        scan_program_source += data_type_str;
+        scan_program_source += "> g_OutputKeys;\r\n";
+        scan_program_source +=
+            "RWStructuredBuffer<";
+        scan_program_source += data_type_str;
+        scan_program_source += "> g_PartialResults;\r\n";
+        if(count != nullptr)
+            scan_program_source +=
+                "\r\n"
+                "RWStructuredBuffer<uint4> g_Args1Buffer;\r\n"
+                "RWStructuredBuffer<uint4> g_Args2Buffer;\r\n"
+                "RWStructuredBuffer<uint>  g_Count1Buffer;\r\n"
+                "RWStructuredBuffer<uint>  g_Count2Buffer;\r\n";
+        scan_program_source +=
+            "\r\n"
+            "groupshared ";
+        scan_program_source += data_type_str;
+        scan_program_source += " lds_keys[GROUP_SIZE];\r\n";
+        scan_program_source +=
+            "groupshared ";
+        scan_program_source += data_type_str;
+        scan_program_source += " lds_loads[KEYS_PER_THREAD][GROUP_SIZE];\r\n";
+        scan_program_source +=
+            "\r\n"
+            "uint GetCount()\r\n"
+            "{\r\n";
+        if(count != nullptr)
+            scan_program_source += "    return g_CountBuffer[0];\r\n";
+        else
+            scan_program_source += "    return g_Count;\r\n";
+        scan_program_source +=
+            "}\r\n"
+            "\r\n";
+        scan_program_source += data_type_str;
+        scan_program_source += " Op(in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " lhs, in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " rhs)\r\n";
+        scan_program_source +=
+            "{\r\n";
+        switch(op_type)
+        {
+        case kOpType_Min:
+            scan_program_source += "    return min(lhs, rhs);\r\n";
+            break;
+        case kOpType_Max:
+            scan_program_source += "    return max(lhs, rhs);\r\n";
+            break;
+        default:
+            scan_program_source += "    return lhs + rhs;\r\n";
+            break;
+        }
+        scan_program_source +=
+            "}\r\n"
+            "\r\n";
+        scan_program_source += data_type_str;
+        scan_program_source += " GroupScan(in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " key, in uint lidx)\r\n";
+        scan_program_source +=
+            "{\r\n"
+            "    lds_keys[lidx] = key;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    uint stride;\r\n"
+            "    for(stride = 1; stride < GROUP_SIZE; stride <<= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "        {\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] = Op(lds_keys[2 * (lidx + 1) * stride - 1],\r\n"
+            "                                                       lds_keys[(2 * lidx + 1) * stride - 1]);\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    if(lidx == 0)\r\n"
+            "        lds_keys[GROUP_SIZE - 1] = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "        {\r\n            ";
+        scan_program_source += data_type_str;
+        scan_program_source += " tmp = lds_keys[(2 * lidx + 1) * stride - 1];\r\n";
+        scan_program_source +=
+            "            lds_keys[(2 * lidx + 1) * stride - 1] = lds_keys[2 * (lidx + 1) * stride - 1];\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] = Op(lds_keys[2 * (lidx + 1) * stride - 1], tmp);\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    return lds_keys[lidx];\r\n"
+            "}\r\n"
+            "\r\n";
+        scan_program_source += data_type_str;
+        scan_program_source += " GroupReduce(in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " key, in uint lidx)\r\n";
+        scan_program_source +=
+            "{\r\n"
+            "    lds_keys[lidx] = key;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(uint stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < stride)\r\n"
+            "        {\r\n"
+            "            lds_keys[lidx] = Op(lds_keys[lidx], lds_keys[lidx + stride]);\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    return lds_keys[0];\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void BlockScan(in uint gidx : SV_DispatchThreadID, in uint lidx : SV_GroupThreadID, in uint bidx : SV_GroupID)\r\n"
+            "{\r\n"
+            "    uint i, count = GetCount();\r\n"
+            "\r\n"
+            "    uint range_begin = bidx * GROUP_SIZE * KEYS_PER_THREAD;\r\n"
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint load_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
+            "\r\n"
+            "        uint col = (i * GROUP_SIZE + lidx) / KEYS_PER_THREAD;\r\n"
+            "        uint row = (i * GROUP_SIZE + lidx) % KEYS_PER_THREAD;\r\n"
+            "\r\n"
+            "        lds_loads[row][col] = (load_index < count ? g_InputKeys[load_index] : ";
+        scan_program_source += identity_str;
+        scan_program_source += ");\r\n";
+        scan_program_source +=
+            "    }\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n    ";
+        scan_program_source += data_type_str;
+        scan_program_source += " thread_sum = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n        ";
+        scan_program_source += data_type_str;
+        scan_program_source += " tmp = lds_loads[i][lidx];\r\n";
+        scan_program_source +=
+            "        lds_loads[i][lidx] = thread_sum;\r\n"
+            "        thread_sum = Op(thread_sum, tmp);\r\n"
+            "    }\r\n"
+            "    thread_sum = GroupScan(thread_sum, lidx);\r\n"
+            "\r\n    ";
+        scan_program_source += data_type_str;
+        scan_program_source += " partial_result = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "#ifdef PARTIAL_RESULT\r\n"
+            "    partial_result = g_PartialResults[bidx];\r\n"
+            "#endif\r\n"
+            "\r\n"
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        lds_loads[i][lidx] = Op(lds_loads[i][lidx], thread_sum);\r\n"
+            "    }\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint store_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
+            "\r\n"
+            "        uint col = (i * GROUP_SIZE + lidx) / KEYS_PER_THREAD;\r\n"
+            "        uint row = (i * GROUP_SIZE + lidx) % KEYS_PER_THREAD;\r\n"
+            "\r\n"
+            "        if(store_index < count)\r\n"
+            "        {\r\n"
+            "            g_OutputKeys[store_index] = Op(lds_loads[row][col], partial_result);\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void BlockReduce(in uint gidx : SV_DispatchThreadID, in uint lidx : SV_GroupThreadID, in uint bidx : SV_GroupID)\r\n"
+            "{\r\n    ";
+        scan_program_source += data_type_str;
+        scan_program_source += " thread_sum = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "\r\n"
+            "    uint range_begin = bidx * GROUP_SIZE * KEYS_PER_THREAD, count = GetCount();\r\n"
+            "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint load_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
+            "        thread_sum = Op(load_index < count ? g_InputKeys[load_index] : ";
+        scan_program_source += identity_str;
+        scan_program_source += ", thread_sum);\r\n";
+        scan_program_source +=
+            "    }\r\n"
+            "    thread_sum = GroupReduce(thread_sum, lidx);\r\n"
+            "\r\n"
+            "    if(lidx == 0)\r\n"
+            "    {\r\n"
+            "        g_PartialResults[bidx] = thread_sum;\r\n"
+            "    }\r\n"
+            "}\r\n";
+        if(count != nullptr)
+        {
+            scan_program_source +=
+                "\r\n"
+                "[numthreads(1, 1, 1)]\r\n"
+                "void GenerateDispatches()\r\n"
+                "{\r\n"
+                "    uint num_keys = g_CountBuffer[0];\r\n"
+                "    uint num_groups_level_1 = (num_keys + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+                "    uint num_groups_level_2 = (num_groups_level_1 + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+                "    g_Args1Buffer[0] = uint4((num_keys + GROUP_SIZE - 1) / GROUP_SIZE, 1, 1, 0);\r\n"
+                "    g_Args2Buffer[0] = uint4((num_groups_level_1 + GROUP_SIZE - 1) / GROUP_SIZE, 1, 1, 0);\r\n"
+                "    g_Count1Buffer[0] = num_groups_level_1;\r\n"
+                "    g_Count2Buffer[0] = num_groups_level_2;\r\n"
+                "}\r\n";
+        }
+        ScanKernels &scan_kernels = scan_kernels_[key];
+        GfxProgramDesc scan_program_desc = {};
+        scan_program_desc.cs = scan_program_source.c_str();
+        char const *scan_add_defines[] = { "PARTIAL_RESULT" };
+        scan_kernels.scan_program_ = createProgram(scan_program_desc, "gfx_ScanProgram");
+        scan_kernels.reduce_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockReduce", nullptr, 0);
+        scan_kernels.scan_add_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", scan_add_defines, ARRAYSIZE(scan_add_defines));
+        scan_kernels.scan_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", nullptr, 0);
+        if(count != nullptr)
+            scan_kernels.args_kernel_ = createComputeKernel(scan_kernels.scan_program_, "GenerateDispatches", nullptr, 0);
+        return scan_kernels;
     }
 
     void populateRootConstants(Program const &program, Kernel::Parameter &parameter, uint32_t *root_constants)
