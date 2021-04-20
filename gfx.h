@@ -2978,7 +2978,6 @@ public:
 
     GfxResult encodeReduce(OpType op_type, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
     {
-        GFX_ASSERT(op_type < kOpType_Count);    // should never happen
         if(data_type < 0 || data_type >= kGfxDataType_Count)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot reduce buffer object of unsupported data type `%u'", data_type);
         if(dst.size < 4)
@@ -2991,8 +2990,91 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce when supplied buffer object is invalid");
         if(count != nullptr && !buffer_handles_.has_handle(count->handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce when supplied count buffer object is invalid");
-        // TODO: ... (gboisse)
-        (void)op_type;
+        ScanKernels const &scan_kernels = getScanKernels(op_type, data_type, count);
+        uint32_t const group_size = 256;
+        uint32_t const keys_per_thread = 4;
+        uint32_t const keys_per_group = group_size * keys_per_thread;
+        uint32_t const num_keys = (uint32_t)(dst.size >> 2);
+        uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
+        uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
+        if(num_groups_level_2 > keys_per_group)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");   // TODO: implement 3-level reduction? (gboisse)
+        uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
+        if(texture_upload_buffer_.size < scratch_buffer_size)
+        {
+            destroyBuffer(texture_upload_buffer_);
+            scratch_buffer_size += (scratch_buffer_size + 2) >> 1;
+            scratch_buffer_size = GFX_ALIGN(scratch_buffer_size, 65536);
+            texture_upload_buffer_ = createBuffer(scratch_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!texture_upload_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for scan");
+            texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
+        }
+        GfxBuffer const reduce_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, num_groups_level_1 << 2);
+        GfxBuffer const reduce_level_2_buffer = createBufferRange(texture_upload_buffer_, num_groups_level_1 << 2, num_groups_level_2 << 2);
+        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2) << 2, 4);
+        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
+        GfxBuffer const reduce_level_1_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
+        GfxBuffer const reduce_level_2_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
+        if(!reduce_level_1_buffer || !reduce_level_2_buffer || !num_groups_level_1_buffer || !num_groups_level_2_buffer || !reduce_level_1_args_buffer || !reduce_level_2_args_buffer)
+        {
+            destroyBuffer(reduce_level_1_buffer); destroyBuffer(reduce_level_2_buffer);
+            destroyBuffer(num_groups_level_1_buffer); destroyBuffer(num_groups_level_2_buffer);
+            destroyBuffer(reduce_level_1_args_buffer); destroyBuffer(reduce_level_2_args_buffer);
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create scratch memory for scan");
+        }
+        GfxKernel const bound_kernel = bound_kernel_;
+        if(count != nullptr)
+        {
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args1Buffer", reduce_level_1_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args2Buffer", reduce_level_2_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count1Buffer", num_groups_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count2Buffer", num_groups_level_2_buffer);
+            encodeBindKernel(scan_kernels.args_kernel_);
+            encodeDispatch(1, 1, 1);
+        }
+        encodeBindKernel(scan_kernels.reduce_kernel_);
+        if(num_keys > keys_per_group)
+        {
+            if(count != nullptr)
+                setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            else
+                setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_keys, sizeof(num_keys));
+            setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", reduce_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", src);
+            if(count != nullptr)
+                encodeDispatchIndirect(reduce_level_1_args_buffer);
+            else
+                encodeDispatch(num_groups_level_1, 1, 1);
+            if(num_groups_level_1 > keys_per_group)
+            {
+                if(count != nullptr)
+                    setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
+                else
+                    setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
+                setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", reduce_level_2_buffer);
+                setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", reduce_level_1_buffer);
+                if(count != nullptr)
+                    encodeDispatchIndirect(reduce_level_2_args_buffer);
+                else
+                    encodeDispatch(num_groups_level_2, 1, 1);
+            }
+        }
+        if(count != nullptr)
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_keys > keys_per_group ? num_groups_level_1 > keys_per_group ? num_groups_level_2_buffer : num_groups_level_1_buffer : *count);
+        else
+            setProgramConstants(scan_kernels.scan_program_, "g_Count", num_keys > keys_per_group ? num_groups_level_1 > keys_per_group ? &num_groups_level_2 : &num_groups_level_1 : &num_keys, sizeof(num_keys));
+        setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", dst);
+        setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", num_keys > keys_per_group ? num_groups_level_1 > keys_per_group ? reduce_level_2_buffer : reduce_level_1_buffer : src);
+        encodeDispatch(1, 1, 1);    // reduce to output
+        destroyBuffer(reduce_level_1_buffer); destroyBuffer(reduce_level_2_buffer);
+        destroyBuffer(num_groups_level_1_buffer); destroyBuffer(num_groups_level_2_buffer);
+        destroyBuffer(reduce_level_1_args_buffer); destroyBuffer(reduce_level_2_args_buffer);
+        if(kernel_handles_.has_handle(bound_kernel.handle))
+            encodeBindKernel(bound_kernel);
+        else
+            bound_kernel_ = bound_kernel;
         return kGfxResult_NoError;
     }
 
@@ -5118,9 +5200,8 @@ private:
     {
         GFX_ASSERT(op_type < kOpType_Count);    // should never happen
         uint32_t const key = (data_type << 3) | (op_type << 1) | (count != nullptr ? 1 : 0);
-        std::map<uint32_t, ScanKernels>::iterator const it = scan_kernels_.find(key);
-        if(it != scan_kernels_.end())
-            return (*it).second;
+        std::map<uint32_t, ScanKernels>::const_iterator const it = scan_kernels_.find(key);
+        if(it != scan_kernels_.end()) return (*it).second;  // already compiled
         char const *data_type_str = nullptr, *identity_str = nullptr;
         switch(data_type)
         {
