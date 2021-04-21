@@ -1068,7 +1068,7 @@ public:
             uint32_t j, adapter_score;
             DXGI_ADAPTER_DESC1 adapter_desc = {};
             adapter->GetDesc1(&adapter_desc);
-            if(adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE)
+            if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
                 adapter_score = 0;
             else
                 switch(adapter_desc.VendorId)
@@ -1973,7 +1973,7 @@ public:
         if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion vertices");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        gfx_raytracing_primitive.vertex_buffer_ = vertex_buffer;
+        gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
@@ -1995,9 +1995,9 @@ public:
         if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion vertices");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        gfx_raytracing_primitive.index_buffer_ = index_buffer;
+        gfx_raytracing_primitive.index_buffer_ = createBufferRange(index_buffer, 0, index_buffer.size);
         gfx_raytracing_primitive.index_stride_ = index_stride;
-        gfx_raytracing_primitive.vertex_buffer_ = vertex_buffer;
+        gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
@@ -3656,6 +3656,8 @@ private:
     void collect(RaytracingPrimitive const &raytracing_primitive)
     {
         destroyBuffer(raytracing_primitive.bvh_buffer_);
+        destroyBuffer(raytracing_primitive.index_buffer_);
+        destroyBuffer(raytracing_primitive.vertex_buffer_);
     }
 
     void collect(Program const &program)
