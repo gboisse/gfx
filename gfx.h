@@ -252,7 +252,7 @@ template<> inline GfxResult gfxProgramSetParameter<GfxSamplerState>(GfxContext c
 template<> inline GfxResult gfxProgramSetParameter<GfxAccelerationStructure>(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure const &value) { return gfxProgramSetAccelerationStructure(context, program, parameter_name, value); }
 template<typename TYPE> inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, TYPE const &value)
 {
-    static_assert(!std::is_pointer<TYPE>::value, "Program resources must be passed by reference, not by pointer");
+    static_assert(!std::is_pointer<TYPE>::value, "Program parameters must be passed by reference, not by pointer");
     return gfxProgramSetConstants(context, program, parameter_name, &value, sizeof(value));
 }
 
@@ -331,6 +331,27 @@ class GfxCommandEvent { GFX_NON_COPYABLE(GfxCommandEvent); GfxContext context; p
                         inline GfxCommandEvent(GfxContext context, char const *format, ...) : context(context) { va_list args; va_start(args, format); char buffer[4096]; vsnprintf(buffer, sizeof(buffer), format, args); va_end(args); gfxCommandBeginEvent(context, buffer); }
                         inline GfxCommandEvent(GfxContext context, uint64_t color, char const *format, ...) : context(context) { va_list args; va_start(args, format); char buffer[4096]; vsnprintf(buffer, sizeof(buffer), format, args); va_end(args); gfxCommandBeginEvent(context, color, buffer); }
                         inline ~GfxCommandEvent() { gfxCommandEndEvent(context); } };
+
+//!
+//! Parallel primitives.
+//!
+
+enum GfxDataType
+{
+    kGfxDataType_Int = 0,
+    kGfxDataType_Uint,
+    kGfxDataType_Float,
+
+    kGfxDataType_Count
+};
+
+GfxResult gfxCommandScanMin(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count = nullptr); // dst can be the same the src for all parallel primitives
+GfxResult gfxCommandScanMax(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count = nullptr);
+GfxResult gfxCommandScanSum(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count = nullptr);
+GfxResult gfxCommandReduceMin(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count = nullptr);
+GfxResult gfxCommandReduceMax(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count = nullptr);
+GfxResult gfxCommandReduceSum(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count = nullptr);
+GfxResult gfxCommandSortRadix(GfxContext context, GfxBuffer keys_dst, GfxBuffer keys_src, GfxBuffer const *values_dst = nullptr, GfxBuffer const *values_src = nullptr, GfxBuffer const *count = nullptr);
 
 //!
 //! Frame processing.
@@ -477,6 +498,26 @@ class GfxInternal
 
     GfxKernel generate_mips_kernel_ = {};
     GfxProgram generate_mips_program_ = {};
+
+    struct ScanKernels
+    {
+        GfxProgram scan_program_ = {};
+        GfxKernel reduce_kernel_ = {};
+        GfxKernel scan_add_kernel_ = {};
+        GfxKernel scan_kernel_ = {};
+        GfxKernel args_kernel_ = {};
+    };
+    std::map<uint32_t, ScanKernels> scan_kernels_;
+
+    struct SortKernels
+    {
+        GfxProgram sort_program_ = {};
+        GfxKernel histogram_kernel_ = {};
+        GfxKernel scatter_kernel_ = {};
+        GfxKernel args_kernel_ = {};
+    };
+    GfxBuffer sort_scratch_buffer_;
+    std::map<uint32_t, SortKernels> sort_kernels_;
 
     struct String
     {
@@ -1260,8 +1301,24 @@ public:
         destroyProgram(generate_mips_program_);
         destroyBuffer(texture_upload_buffer_);
         destroyBuffer(raytracing_scratch_buffer_);
+        destroyBuffer(sort_scratch_buffer_);
         for(uint32_t i = 0; i < ARRAYSIZE(constant_buffer_pool_); ++i)
             destroyBuffer(constant_buffer_pool_[i]);
+        for(std::map<uint32_t, ScanKernels>::const_iterator it = scan_kernels_.begin(); it != scan_kernels_.end(); ++it)
+        {
+            destroyProgram((*it).second.scan_program_);
+            destroyKernel((*it).second.reduce_kernel_);
+            destroyKernel((*it).second.scan_add_kernel_);
+            destroyKernel((*it).second.scan_kernel_);
+            destroyKernel((*it).second.args_kernel_);
+        }
+        for(std::map<uint32_t, SortKernels>::const_iterator it = sort_kernels_.begin(); it != sort_kernels_.end(); ++it)
+        {
+            destroyProgram((*it).second.sort_program_);
+            destroyKernel((*it).second.histogram_kernel_);
+            destroyKernel((*it).second.scatter_kernel_);
+            destroyKernel((*it).second.args_kernel_);
+        }
 
         collect(descriptors_);
         collect(dsv_descriptors_);
@@ -2796,6 +2853,340 @@ public:
     GfxResult encodeEndEvent()
     {
         PIXEndEvent(command_list_);
+        return kGfxResult_NoError;
+    }
+
+    enum OpType
+    {
+        kOpType_Min = 0,
+        kOpType_Max,
+        kOpType_Sum,
+
+        kOpType_Count
+    };
+
+    GfxResult encodeScan(OpType op_type, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
+    {
+        if(data_type < 0 || data_type >= kGfxDataType_Count)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot scan buffer object of unsupported data type `%u'", data_type);
+        if(dst.size != src.size)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot scan if source and destination buffer objects aren't of the same size");
+        if((dst.size >> 2) > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 4 billion keys");
+        if(dst.cpu_access == kGfxCpuAccess_Read || src.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object with read CPU access");
+        if(!buffer_handles_.has_handle(dst.handle) || !buffer_handles_.has_handle(src.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan when supplied buffer object is invalid");
+        if(count != nullptr && !buffer_handles_.has_handle(count->handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan when supplied count buffer object is invalid");
+        ScanKernels const &scan_kernels = getScanKernels(op_type, data_type, count);
+        uint32_t const group_size = 256;
+        uint32_t const keys_per_thread = 4;
+        uint32_t const keys_per_group = group_size * keys_per_thread;
+        uint32_t const num_keys = (uint32_t)(src.size >> 2);
+        uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
+        uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
+        if(num_groups_level_2 > keys_per_group)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 1 billion keys"); // TODO: implement 3-level scan? (gboisse)
+        uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
+        if(texture_upload_buffer_.size < scratch_buffer_size)
+        {
+            destroyBuffer(texture_upload_buffer_);
+            scratch_buffer_size += (scratch_buffer_size + 2) >> 1;
+            scratch_buffer_size = GFX_ALIGN(scratch_buffer_size, 65536);
+            texture_upload_buffer_ = createBuffer(scratch_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!texture_upload_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for scan");
+            texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
+        }
+        GfxBuffer const scan_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, num_groups_level_1 << 2);
+        GfxBuffer const scan_level_2_buffer = createBufferRange(texture_upload_buffer_, num_groups_level_1 << 2, num_groups_level_2 << 2);
+        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2) << 2, 4);
+        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
+        GfxBuffer const scan_level_1_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
+        GfxBuffer const scan_level_2_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
+        if(!scan_level_1_buffer || !scan_level_2_buffer || !num_groups_level_1_buffer || !num_groups_level_2_buffer || !scan_level_1_args_buffer || !scan_level_2_args_buffer)
+        {
+            destroyBuffer(scan_level_1_buffer); destroyBuffer(scan_level_2_buffer);
+            destroyBuffer(scan_level_1_args_buffer); destroyBuffer(scan_level_2_args_buffer);
+            destroyBuffer(num_groups_level_1_buffer); destroyBuffer(num_groups_level_2_buffer);
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create scratch memory for scan");
+        }
+        GfxKernel const bound_kernel = bound_kernel_;
+        if(count != nullptr)
+        {
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args1Buffer", scan_level_1_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args2Buffer", scan_level_2_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count1Buffer", num_groups_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count2Buffer", num_groups_level_2_buffer);
+            encodeBindKernel(scan_kernels.args_kernel_);
+            encodeDispatch(1, 1, 1);
+        }
+        if(num_keys > keys_per_group)
+        {
+            if(count != nullptr)
+                setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            else
+                setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_keys, sizeof(num_keys));
+            setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", src);
+            encodeBindKernel(scan_kernels.reduce_kernel_);
+            if(count != nullptr)
+                encodeDispatchIndirect(scan_level_1_args_buffer);
+            else
+                encodeDispatch(num_groups_level_1, 1, 1);
+            if(num_groups_level_1 > keys_per_group)
+            {
+                if(count != nullptr)
+                    setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
+                else
+                    setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
+                setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_2_buffer);
+                setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", scan_level_1_buffer);
+                if(count != nullptr)
+                    encodeDispatchIndirect(scan_level_2_args_buffer);
+                else
+                    encodeDispatch(num_groups_level_2, 1, 1);
+                {
+                    if(count != nullptr)
+                        setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_2_buffer);
+                    else
+                        setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_2, sizeof(num_groups_level_2));
+                    setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", scan_level_2_buffer);
+                    setProgramBuffer(scan_kernels.scan_program_, "g_OutputKeys", scan_level_2_buffer);
+                    encodeBindKernel(scan_kernels.scan_kernel_);
+                    encodeDispatch(1, 1, 1);
+                }
+            }
+            if(count != nullptr)
+                setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
+            else
+                setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
+            setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", scan_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_OutputKeys", scan_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_2_buffer);
+            encodeBindKernel(num_groups_level_1 > keys_per_group ? scan_kernels.scan_add_kernel_ : scan_kernels.scan_kernel_);
+            if(count != nullptr)
+                encodeDispatchIndirect(scan_level_2_args_buffer);
+            else
+                encodeDispatch(num_groups_level_2, 1, 1);
+        }
+        if(count != nullptr)
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+        else
+            setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_keys, sizeof(num_keys));
+        setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", src);
+        setProgramBuffer(scan_kernels.scan_program_, "g_OutputKeys", dst);
+        setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", scan_level_1_buffer);
+        encodeBindKernel(num_keys > keys_per_group ? scan_kernels.scan_add_kernel_ : scan_kernels.scan_kernel_);
+        if(count != nullptr)
+            encodeDispatchIndirect(scan_level_1_args_buffer);
+        else
+            encodeDispatch(num_groups_level_1, 1, 1);
+        destroyBuffer(scan_level_1_buffer); destroyBuffer(scan_level_2_buffer);
+        destroyBuffer(scan_level_1_args_buffer); destroyBuffer(scan_level_2_args_buffer);
+        destroyBuffer(num_groups_level_1_buffer); destroyBuffer(num_groups_level_2_buffer);
+        if(kernel_handles_.has_handle(bound_kernel.handle))
+            encodeBindKernel(bound_kernel);
+        else
+            bound_kernel_ = bound_kernel;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeReduce(OpType op_type, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
+    {
+        if(data_type < 0 || data_type >= kGfxDataType_Count)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot reduce buffer object of unsupported data type `%u'", data_type);
+        if(dst.size < 4)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot reduce if destination buffer object isn't at least 4 bytes large");
+        if((src.size >> 2) > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 4 billion keys");
+        if(dst.cpu_access == kGfxCpuAccess_Read || src.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object with read CPU access");
+        if(!buffer_handles_.has_handle(dst.handle) || !buffer_handles_.has_handle(src.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce when supplied buffer object is invalid");
+        if(count != nullptr && !buffer_handles_.has_handle(count->handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce when supplied count buffer object is invalid");
+        ScanKernels const &scan_kernels = getScanKernels(op_type, data_type, count);
+        uint32_t const group_size = 256;
+        uint32_t const keys_per_thread = 4;
+        uint32_t const keys_per_group = group_size * keys_per_thread;
+        uint32_t const num_keys = (uint32_t)(src.size >> 2);
+        uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
+        uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
+        if(num_groups_level_2 > keys_per_group)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");   // TODO: implement 3-level reduction? (gboisse)
+        uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
+        if(texture_upload_buffer_.size < scratch_buffer_size)
+        {
+            destroyBuffer(texture_upload_buffer_);
+            scratch_buffer_size += (scratch_buffer_size + 2) >> 1;
+            scratch_buffer_size = GFX_ALIGN(scratch_buffer_size, 65536);
+            texture_upload_buffer_ = createBuffer(scratch_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!texture_upload_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for scan");
+            texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
+        }
+        GfxBuffer const reduce_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, num_groups_level_1 << 2);
+        GfxBuffer const reduce_level_2_buffer = createBufferRange(texture_upload_buffer_, num_groups_level_1 << 2, num_groups_level_2 << 2);
+        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2) << 2, 4);
+        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
+        GfxBuffer const reduce_level_1_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
+        GfxBuffer const reduce_level_2_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
+        if(!reduce_level_1_buffer || !reduce_level_2_buffer || !num_groups_level_1_buffer || !num_groups_level_2_buffer || !reduce_level_1_args_buffer || !reduce_level_2_args_buffer)
+        {
+            destroyBuffer(reduce_level_1_buffer); destroyBuffer(reduce_level_2_buffer);
+            destroyBuffer(num_groups_level_1_buffer); destroyBuffer(num_groups_level_2_buffer);
+            destroyBuffer(reduce_level_1_args_buffer); destroyBuffer(reduce_level_2_args_buffer);
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create scratch memory for scan");
+        }
+        GfxKernel const bound_kernel = bound_kernel_;
+        if(count != nullptr)
+        {
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args1Buffer", reduce_level_1_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Args2Buffer", reduce_level_2_args_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count1Buffer", num_groups_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_Count2Buffer", num_groups_level_2_buffer);
+            encodeBindKernel(scan_kernels.args_kernel_);
+            encodeDispatch(1, 1, 1);
+        }
+        encodeBindKernel(scan_kernels.reduce_kernel_);
+        if(num_keys > keys_per_group)
+        {
+            if(count != nullptr)
+                setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", *count);
+            else
+                setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_keys, sizeof(num_keys));
+            setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", reduce_level_1_buffer);
+            setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", src);
+            if(count != nullptr)
+                encodeDispatchIndirect(reduce_level_1_args_buffer);
+            else
+                encodeDispatch(num_groups_level_1, 1, 1);
+            if(num_groups_level_1 > keys_per_group)
+            {
+                if(count != nullptr)
+                    setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_groups_level_1_buffer);
+                else
+                    setProgramConstants(scan_kernels.scan_program_, "g_Count", &num_groups_level_1, sizeof(num_groups_level_1));
+                setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", reduce_level_2_buffer);
+                setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", reduce_level_1_buffer);
+                if(count != nullptr)
+                    encodeDispatchIndirect(reduce_level_2_args_buffer);
+                else
+                    encodeDispatch(num_groups_level_2, 1, 1);
+            }
+        }
+        if(count != nullptr)
+            setProgramBuffer(scan_kernels.scan_program_, "g_CountBuffer", num_keys > keys_per_group ? num_groups_level_1 > keys_per_group ? num_groups_level_2_buffer : num_groups_level_1_buffer : *count);
+        else
+            setProgramConstants(scan_kernels.scan_program_, "g_Count", num_keys > keys_per_group ? num_groups_level_1 > keys_per_group ? &num_groups_level_2 : &num_groups_level_1 : &num_keys, sizeof(num_keys));
+        setProgramBuffer(scan_kernels.scan_program_, "g_PartialResults", dst);
+        setProgramBuffer(scan_kernels.scan_program_, "g_InputKeys", num_keys > keys_per_group ? num_groups_level_1 > keys_per_group ? reduce_level_2_buffer : reduce_level_1_buffer : src);
+        encodeDispatch(1, 1, 1);    // reduce to output
+        destroyBuffer(reduce_level_1_buffer); destroyBuffer(reduce_level_2_buffer);
+        destroyBuffer(num_groups_level_1_buffer); destroyBuffer(num_groups_level_2_buffer);
+        destroyBuffer(reduce_level_1_args_buffer); destroyBuffer(reduce_level_2_args_buffer);
+        if(kernel_handles_.has_handle(bound_kernel.handle))
+            encodeBindKernel(bound_kernel);
+        else
+            bound_kernel_ = bound_kernel;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeRadixSort(GfxBuffer const &keys_dst, GfxBuffer const &keys_src, GfxBuffer const *values_dst, GfxBuffer const *values_src, GfxBuffer const *count)
+    {
+        if(keys_dst.size != keys_src.size)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot sort if source and destination buffer objects aren't of the same size");
+        if(values_dst != nullptr && keys_dst.size != values_dst->size)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot sort if keys and values buffer objects aren't of the same size");
+        if(values_dst != nullptr && values_src != nullptr && values_dst->size != values_src->size)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot sort if source and destination buffer objects aren't of the same size");
+        if((keys_dst.size >> 2) > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort buffer object of more than 4 billion keys");
+        if(!buffer_handles_.has_handle(keys_dst.handle) || !buffer_handles_.has_handle(keys_src.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort keys when supplied buffer object is invalid");
+        if((values_dst != nullptr && !buffer_handles_.has_handle(values_dst->handle)) || (values_src != nullptr && !buffer_handles_.has_handle(values_src->handle)))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort values when supplied buffer object is invalid");
+        if((values_dst != nullptr && values_src == nullptr) || (values_dst == nullptr && values_src != nullptr))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot sort values if source or destination isn't a valid buffer object");
+        if(count != nullptr && !buffer_handles_.has_handle(count->handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort when supplied count buffer object is invalid");
+        SortKernels const &sort_kernels = getSortKernels(values_src != nullptr, count);
+        uint32_t const group_size = 256;
+        uint32_t const keys_per_thread = 4;
+        uint32_t const num_bits_per_pass = 4;
+        uint32_t const num_bins = (1 << num_bits_per_pass);
+        uint32_t const keys_per_group = group_size * keys_per_thread;
+        uint32_t const num_keys = (uint32_t)(keys_src.size >> 2);
+        uint32_t const num_groups = (num_keys + keys_per_group - 1) / keys_per_group;
+        uint32_t const num_histogram_values = num_bins * num_groups;
+        uint64_t scratch_buffer_size = (2 * num_keys + num_histogram_values + 5) << 2;
+        if(sort_scratch_buffer_.size < scratch_buffer_size)
+        {
+            destroyBuffer(sort_scratch_buffer_);
+            scratch_buffer_size += (scratch_buffer_size + 2) >> 1;
+            scratch_buffer_size = GFX_ALIGN(scratch_buffer_size, 65536);
+            sort_scratch_buffer_ = createBuffer(scratch_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!sort_scratch_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for sort");
+            sort_scratch_buffer_.setName("gfx_SortScratchBuffer");
+        }
+        GfxBuffer const scratch_keys = createBufferRange(sort_scratch_buffer_, 0, num_keys << 2);
+        GfxBuffer const scratch_values = createBufferRange(sort_scratch_buffer_, num_keys << 2, num_keys << 2);
+        GfxBuffer const group_histograms = createBufferRange(sort_scratch_buffer_, (2 * num_keys) << 2, num_histogram_values << 2);
+        GfxBuffer const args_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values) << 2, 4 << 2);
+        GfxBuffer const count_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values + 4) << 2, 4);
+        if(!scratch_keys || !scratch_values || !group_histograms || !args_buffer)
+        {
+            destroyBuffer(group_histograms);
+            destroyBuffer(args_buffer); destroyBuffer(count_buffer);
+            destroyBuffer(scratch_keys); destroyBuffer(scratch_values);
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create scratch memory for sort");
+        }
+        GfxKernel const bound_kernel = bound_kernel_;
+        if(count == nullptr)
+            setProgramConstants(sort_kernels.sort_program_, "g_Count", &num_keys, sizeof(num_keys));
+        else
+        {
+            setProgramBuffer(sort_kernels.sort_program_, "g_CountBuffer", *count);
+            setProgramBuffer(sort_kernels.sort_program_, "g_ArgsBuffer", args_buffer);
+            setProgramBuffer(sort_kernels.sort_program_, "g_ScanCountBuffer", count_buffer);
+            encodeBindKernel(sort_kernels.args_kernel_);
+            encodeDispatch(1, 1, 1);
+        }
+        setProgramBuffer(sort_kernels.sort_program_, "g_GroupHistograms", group_histograms);
+        for(uint32_t bitshift = 0, i = 0; bitshift < 32; bitshift += num_bits_per_pass, ++i)
+        {
+            setProgramConstants(sort_kernels.sort_program_, "g_Bitshift", &bitshift, sizeof(bitshift));
+            setProgramBuffer(sort_kernels.sort_program_, "g_InputKeys", i == 0 ? keys_src : (i & 1) != 0 ? scratch_keys : keys_dst);
+            setProgramBuffer(sort_kernels.sort_program_, "g_OutputKeys", (i & 1) == 0 ? scratch_keys : keys_dst);
+            if(values_dst != nullptr)
+            {
+                setProgramBuffer(sort_kernels.sort_program_, "g_InputValues", i == 0 ? *values_src : (i & 1) != 0 ? scratch_values : *values_dst);
+                setProgramBuffer(sort_kernels.sort_program_, "g_OutputValues", (i & 1) == 0 ? scratch_values : *values_dst);
+            }
+            encodeBindKernel(sort_kernels.histogram_kernel_);
+            if(count != nullptr)
+                encodeDispatchIndirect(args_buffer);
+            else
+                encodeDispatch(num_groups, 1, 1);
+            encodeScan(kOpType_Sum, kGfxDataType_Uint, group_histograms, group_histograms, &count_buffer);
+            encodeBindKernel(sort_kernels.scatter_kernel_);
+            if(count != nullptr)
+                encodeDispatchIndirect(args_buffer);
+            else
+                encodeDispatch(num_groups, 1, 1);
+        }
+        destroyBuffer(group_histograms);
+        destroyBuffer(args_buffer); destroyBuffer(count_buffer);
+        destroyBuffer(scratch_keys); destroyBuffer(scratch_values);
+        if(kernel_handles_.has_handle(bound_kernel.handle))
+            encodeBindKernel(bound_kernel);
+        else
+            bound_kernel_ = bound_kernel;
         return kGfxResult_NoError;
     }
 
@@ -4897,6 +5288,484 @@ private:
         return kGfxResult_NoError;
     }
 
+    ScanKernels const &getScanKernels(OpType op_type, GfxDataType data_type, GfxBuffer const *count)
+    {
+        GFX_ASSERT(op_type < kOpType_Count);    // should never happen
+        GFX_ASSERT(count == nullptr || buffer_handles_.has_handle(count->handle));
+        uint32_t const key = (data_type << 3) | (op_type << 1) | (count != nullptr ? 1 : 0);
+        std::map<uint32_t, ScanKernels>::const_iterator const it = scan_kernels_.find(key);
+        if(it != scan_kernels_.end()) return (*it).second;  // already compiled
+        char const *data_type_str = nullptr, *identity_str = nullptr;
+        switch(data_type)
+        {
+        case kGfxDataType_Int:
+            data_type_str = "int";
+            identity_str = (op_type == kOpType_Min ? "2147483647" : op_type == kOpType_Max ? "-2147483648" : "0");
+            break;
+        case kGfxDataType_Uint:
+            data_type_str = "uint";
+            identity_str = (op_type == kOpType_Min ? "4294967295u" : "0");
+            break;
+        default:
+            data_type_str = "float";
+            identity_str = (op_type == kOpType_Min ? "3.402823466e+38f" : op_type == kOpType_Max ? "1.175494351e-38f" : "0.0f");
+            break;
+        }
+        std::string scan_program_source;
+        scan_program_source +=
+            "#define GROUP_SIZE      256\r\n"
+            "#define KEYS_PER_THREAD 4\r\n"
+            "#define KEYS_PER_GROUP  (GROUP_SIZE * KEYS_PER_THREAD)\r\n"
+            "\r\n";
+        if(count != nullptr)
+            scan_program_source += "RWStructuredBuffer<uint> g_CountBuffer;\r\n";
+        else
+            scan_program_source += "uint g_Count;\r\n\r\n";
+        scan_program_source +=
+            "RWStructuredBuffer<";
+        scan_program_source += data_type_str;
+        scan_program_source += "> g_InputKeys;\r\n";
+        scan_program_source +=
+            "RWStructuredBuffer<";
+        scan_program_source += data_type_str;
+        scan_program_source += "> g_OutputKeys;\r\n";
+        scan_program_source +=
+            "RWStructuredBuffer<";
+        scan_program_source += data_type_str;
+        scan_program_source += "> g_PartialResults;\r\n";
+        if(count != nullptr)
+            scan_program_source +=
+                "\r\n"
+                "RWStructuredBuffer<uint4> g_Args1Buffer;\r\n"
+                "RWStructuredBuffer<uint4> g_Args2Buffer;\r\n"
+                "RWStructuredBuffer<uint>  g_Count1Buffer;\r\n"
+                "RWStructuredBuffer<uint>  g_Count2Buffer;\r\n";
+        scan_program_source +=
+            "\r\n"
+            "groupshared ";
+        scan_program_source += data_type_str;
+        scan_program_source += " lds_keys[GROUP_SIZE];\r\n";
+        scan_program_source +=
+            "groupshared ";
+        scan_program_source += data_type_str;
+        scan_program_source += " lds_loads[KEYS_PER_THREAD][GROUP_SIZE];\r\n";
+        scan_program_source +=
+            "\r\n"
+            "uint GetCount()\r\n"
+            "{\r\n";
+        if(count != nullptr)
+            scan_program_source += "    return g_CountBuffer[0];\r\n";
+        else
+            scan_program_source += "    return g_Count;\r\n";
+        scan_program_source +=
+            "}\r\n"
+            "\r\n";
+        scan_program_source += data_type_str;
+        scan_program_source += " Op(in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " lhs, in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " rhs)\r\n";
+        scan_program_source +=
+            "{\r\n";
+        switch(op_type)
+        {
+        case kOpType_Min:
+            scan_program_source += "    return min(lhs, rhs);\r\n";
+            break;
+        case kOpType_Max:
+            scan_program_source += "    return max(lhs, rhs);\r\n";
+            break;
+        default:
+            scan_program_source += "    return lhs + rhs;\r\n";
+            break;
+        }
+        scan_program_source +=
+            "}\r\n"
+            "\r\n";
+        scan_program_source += data_type_str;
+        scan_program_source += " GroupScan(in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " key, in uint lidx)\r\n";
+        scan_program_source +=
+            "{\r\n"
+            "    lds_keys[lidx] = key;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    uint stride;\r\n"
+            "    for(stride = 1; stride < GROUP_SIZE; stride <<= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "        {\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] = Op(lds_keys[2 * (lidx + 1) * stride - 1],\r\n"
+            "                                                       lds_keys[(2 * lidx + 1) * stride - 1]);\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    if(lidx == 0)\r\n"
+            "        lds_keys[GROUP_SIZE - 1] = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "        {\r\n            ";
+        scan_program_source += data_type_str;
+        scan_program_source += " tmp = lds_keys[(2 * lidx + 1) * stride - 1];\r\n";
+        scan_program_source +=
+            "            lds_keys[(2 * lidx + 1) * stride - 1] = lds_keys[2 * (lidx + 1) * stride - 1];\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] = Op(lds_keys[2 * (lidx + 1) * stride - 1], tmp);\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    return lds_keys[lidx];\r\n"
+            "}\r\n"
+            "\r\n";
+        scan_program_source += data_type_str;
+        scan_program_source += " GroupReduce(in ";
+        scan_program_source += data_type_str;
+        scan_program_source += " key, in uint lidx)\r\n";
+        scan_program_source +=
+            "{\r\n"
+            "    lds_keys[lidx] = key;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(uint stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < stride)\r\n"
+            "        {\r\n"
+            "            lds_keys[lidx] = Op(lds_keys[lidx], lds_keys[lidx + stride]);\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    return lds_keys[0];\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void BlockScan(in uint gidx : SV_DispatchThreadID, in uint lidx : SV_GroupThreadID, in uint bidx : SV_GroupID)\r\n"
+            "{\r\n"
+            "    uint i, count = GetCount();\r\n"
+            "\r\n"
+            "    uint range_begin = bidx * GROUP_SIZE * KEYS_PER_THREAD;\r\n"
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint load_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
+            "\r\n"
+            "        uint col = (i * GROUP_SIZE + lidx) / KEYS_PER_THREAD;\r\n"
+            "        uint row = (i * GROUP_SIZE + lidx) % KEYS_PER_THREAD;\r\n"
+            "\r\n"
+            "        lds_loads[row][col] = (load_index < count ? g_InputKeys[load_index] : ";
+        scan_program_source += identity_str;
+        scan_program_source += ");\r\n";
+        scan_program_source +=
+            "    }\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n    ";
+        scan_program_source += data_type_str;
+        scan_program_source += " thread_sum = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n        ";
+        scan_program_source += data_type_str;
+        scan_program_source += " tmp = lds_loads[i][lidx];\r\n";
+        scan_program_source +=
+            "        lds_loads[i][lidx] = thread_sum;\r\n"
+            "        thread_sum = Op(thread_sum, tmp);\r\n"
+            "    }\r\n"
+            "    thread_sum = GroupScan(thread_sum, lidx);\r\n"
+            "\r\n    ";
+        scan_program_source += data_type_str;
+        scan_program_source += " partial_result = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "#ifdef PARTIAL_RESULT\r\n"
+            "    partial_result = g_PartialResults[bidx];\r\n"
+            "#endif\r\n"
+            "\r\n"
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        lds_loads[i][lidx] = Op(lds_loads[i][lidx], thread_sum);\r\n"
+            "    }\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint store_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
+            "\r\n"
+            "        uint col = (i * GROUP_SIZE + lidx) / KEYS_PER_THREAD;\r\n"
+            "        uint row = (i * GROUP_SIZE + lidx) % KEYS_PER_THREAD;\r\n"
+            "\r\n"
+            "        if(store_index < count)\r\n"
+            "        {\r\n"
+            "            g_OutputKeys[store_index] = Op(lds_loads[row][col], partial_result);\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void BlockReduce(in uint gidx : SV_DispatchThreadID, in uint lidx : SV_GroupThreadID, in uint bidx : SV_GroupID)\r\n"
+            "{\r\n    ";
+        scan_program_source += data_type_str;
+        scan_program_source += " thread_sum = ";
+        scan_program_source += identity_str;
+        scan_program_source += ";\r\n";
+        scan_program_source +=
+            "\r\n"
+            "    uint range_begin = bidx * GROUP_SIZE * KEYS_PER_THREAD, count = GetCount();\r\n"
+            "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint load_index = range_begin + i * GROUP_SIZE + lidx;\r\n"
+            "        thread_sum = Op(load_index < count ? g_InputKeys[load_index] : ";
+        scan_program_source += identity_str;
+        scan_program_source += ", thread_sum);\r\n";
+        scan_program_source +=
+            "    }\r\n"
+            "    thread_sum = GroupReduce(thread_sum, lidx);\r\n"
+            "\r\n"
+            "    if(lidx == 0)\r\n"
+            "    {\r\n"
+            "        g_PartialResults[bidx] = thread_sum;\r\n"
+            "    }\r\n"
+            "}\r\n";
+        if(count != nullptr)
+        {
+            scan_program_source +=
+                "\r\n"
+                "[numthreads(1, 1, 1)]\r\n"
+                "void GenerateDispatches()\r\n"
+                "{\r\n"
+                "    uint num_keys = g_CountBuffer[0];\r\n"
+                "    uint num_groups_level_1 = (num_keys + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+                "    uint num_groups_level_2 = (num_groups_level_1 + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+                "    g_Args1Buffer[0] = uint4(num_groups_level_1, 1, 1, 0);\r\n"
+                "    g_Args2Buffer[0] = uint4(num_groups_level_2, 1, 1, 0);\r\n"
+                "    g_Count1Buffer[0] = num_groups_level_1;\r\n"
+                "    g_Count2Buffer[0] = num_groups_level_2;\r\n"
+                "}\r\n";
+        }
+        ScanKernels &scan_kernels = scan_kernels_[key];
+        GfxProgramDesc scan_program_desc = {};
+        scan_program_desc.cs = scan_program_source.c_str();
+        char const *scan_add_defines[] = { "PARTIAL_RESULT" };
+        scan_kernels.scan_program_ = createProgram(scan_program_desc, "gfx_ScanProgram");
+        scan_kernels.reduce_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockReduce", nullptr, 0);
+        scan_kernels.scan_add_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", scan_add_defines, ARRAYSIZE(scan_add_defines));
+        scan_kernels.scan_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", nullptr, 0);
+        if(count != nullptr)
+            scan_kernels.args_kernel_ = createComputeKernel(scan_kernels.scan_program_, "GenerateDispatches", nullptr, 0);
+        return scan_kernels;
+    }
+
+    SortKernels const &getSortKernels(bool sort_values, GfxBuffer const *count)
+    {
+        GFX_ASSERT(count == nullptr || buffer_handles_.has_handle(count->handle));
+        uint32_t const key = ((sort_values ? 1 : 0) << 1) | (count != nullptr ? 1 : 0);
+        std::map<uint32_t, SortKernels>::const_iterator const it = sort_kernels_.find(key);
+        if(it != sort_kernels_.end()) return (*it).second;  // already compiled
+        std::string sort_program_source;
+        sort_program_source +=
+            "#define NUM_BITS_PER_PASS   4\r\n"
+            "#define NUM_BINS            (1 << NUM_BITS_PER_PASS)\r\n"
+            "#define GROUP_SIZE          256\r\n"
+            "#define KEYS_PER_THREAD     4\r\n"
+            "#define KEYS_PER_GROUP      (GROUP_SIZE * KEYS_PER_THREAD)\r\n"
+            "\r\n"
+            "uint g_Bitshift;\r\n";
+        if(count != nullptr)
+            sort_program_source += "\r\nRWStructuredBuffer<uint> g_CountBuffer;\r\n";
+        else
+            sort_program_source += "uint g_Count;\r\n\r\n";
+        sort_program_source +=
+            "RWStructuredBuffer<uint> g_InputKeys;\r\n"
+            "RWStructuredBuffer<uint> g_OutputKeys;\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "RWStructuredBuffer<uint> g_InputValues;\r\n"
+            "RWStructuredBuffer<uint> g_OutputValues;\r\n"
+            "#endif\r\n"
+            "RWStructuredBuffer<uint> g_GroupHistograms;\r\n"
+            "\r\n";
+        if(count != nullptr)
+            sort_program_source +=
+                "RWStructuredBuffer<uint4> g_ArgsBuffer;\r\n"
+                "RWStructuredBuffer<uint>  g_ScanCountBuffer;\r\n"
+                "\r\n";
+        sort_program_source +=
+            "groupshared uint lds_keys[GROUP_SIZE];\r\n"
+            "groupshared uint lds_scratch[GROUP_SIZE];\r\n"
+            "groupshared uint lds_histogram[NUM_BINS];\r\n"
+            "groupshared uint lds_scanned_histogram[NUM_BINS];\r\n"
+            "\r\n"
+            "uint GetCount()\r\n"
+            "{\r\n";
+        if(count != nullptr)
+            sort_program_source += "    return g_CountBuffer[0];\r\n";
+        else
+            sort_program_source += "    return g_Count;\r\n";
+        sort_program_source +=
+            "}\r\n"
+            "\r\n"
+            "uint GroupScan(in uint key, in uint lidx)\r\n"
+            "{\r\n"
+            "    lds_keys[lidx] = key;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    uint stride;\r\n"
+            "    for(stride = 1; stride < GROUP_SIZE; stride <<= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] += lds_keys[(2 * lidx + 1) * stride - 1];\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    if(lidx == 0)\r\n"
+            "        lds_keys[GROUP_SIZE - 1] = 0;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "        {\r\n"
+            "            uint tmp = lds_keys[(2 * lidx + 1) * stride - 1];\r\n"
+            "            lds_keys[(2 * lidx + 1) * stride - 1] = lds_keys[2 * (lidx + 1) * stride - 1];\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] += tmp;\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    return lds_keys[lidx];\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void Scatter(in uint lidx : SV_GroupThreadID,\r\n"
+            "             in uint bidx : SV_GroupID)\r\n"
+            "{\r\n"
+            "    uint block_start_index = bidx * GROUP_SIZE * KEYS_PER_THREAD;\r\n"
+            "    uint num_blocks = (GetCount() + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+            "    if(lidx < NUM_BINS)\r\n"
+            "        lds_scanned_histogram[lidx] = g_GroupHistograms[num_blocks * lidx + bidx];\r\n"
+            "\r\n"
+            "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        if(lidx < NUM_BINS)\r\n"
+            "            lds_histogram[lidx] = 0;\r\n"
+            "\r\n"
+            "        uint key_index = block_start_index + i * GROUP_SIZE + lidx;\r\n"
+            "        uint key = (key_index < GetCount() ? g_InputKeys[key_index] : 0xFFFFFFFFu);\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "        uint value = (key_index < GetCount() ? g_InputValues[key_index] : 0);\r\n"
+            "#endif\r\n"
+            "\r\n"
+            "        for(uint shift = 0; shift < NUM_BITS_PER_PASS; shift += 2)\r\n"
+            "        {\r\n"
+            "            uint bin_index = ((key >> g_Bitshift) >> shift) & 0x3;\r\n"
+            "\r\n"
+            "            uint local_histogram = 1 << (bin_index * 8);\r\n"
+            "            uint local_histogram_scanned = GroupScan(local_histogram, lidx);\r\n"
+            "            if(lidx == (GROUP_SIZE - 1))\r\n"
+            "                lds_scratch[0] = local_histogram_scanned + local_histogram;\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "            local_histogram = lds_scratch[0];\r\n"
+            "            local_histogram = (local_histogram << 8) +\r\n"
+            "                              (local_histogram << 16) +\r\n"
+            "                              (local_histogram << 24);\r\n"
+            "            local_histogram_scanned += local_histogram;\r\n"
+            "\r\n"
+            "            uint offset = (local_histogram_scanned >> (bin_index * 8)) & 0xFFu;\r\n"
+            "            lds_keys[offset] = key;\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "            key = lds_keys[lidx];\r\n"
+            "\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "            lds_keys[offset] = value;\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "            value = lds_keys[lidx];\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "#endif\r\n"
+            "        }\r\n"
+            "\r\n"
+            "        uint bin_index = (key >> g_Bitshift) & 0xFu;\r\n"
+            "        InterlockedAdd(lds_histogram[bin_index], 1);\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "        uint histogram_value = GroupScan(lidx < NUM_BINS ? lds_histogram[lidx] : 0, lidx);\r\n"
+            "        if(lidx < NUM_BINS)\r\n"
+            "            lds_scratch[lidx] = histogram_value;\r\n"
+            "\r\n"
+            "        uint global_offset = lds_scanned_histogram[bin_index];\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "        uint local_offset = lidx - lds_scratch[bin_index];\r\n"
+            "\r\n"
+            "        if(global_offset + local_offset < GetCount())\r\n"
+            "        {\r\n"
+            "            g_OutputKeys[global_offset + local_offset] = key;\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "            g_OutputValues[global_offset + local_offset] = value;\r\n"
+            "#endif\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "        if(lidx < NUM_BINS)\r\n"
+            "            lds_scanned_histogram[lidx] += lds_histogram[lidx];\r\n"
+            "    }\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void BitHistogram(in uint gidx : SV_DispatchThreadID,\r\n"
+            "                  in uint lidx : SV_GroupThreadID,\r\n"
+            "                  in uint bidx : SV_GroupID)\r\n"
+            "{\r\n"
+            "    if(lidx < NUM_BINS)\r\n"
+            "        lds_histogram[lidx] = 0;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        uint key_index = gidx * KEYS_PER_THREAD + i;\r\n"
+            "        if(key_index >= GetCount()) break;  // out of bounds\r\n"
+            "        uint bin_index = (g_InputKeys[key_index] >> g_Bitshift) & 0xFu;\r\n"
+            "        InterlockedAdd(lds_histogram[bin_index], 1);\r\n"
+            "    }\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    if(lidx < NUM_BINS)\r\n"
+            "    {\r\n"
+            "        uint num_blocks = (GetCount() + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+            "        g_GroupHistograms[num_blocks * lidx + bidx] = lds_histogram[lidx];\r\n"
+            "    }\r\n"
+            "}\r\n";
+        if(count != nullptr)
+            sort_program_source +=
+                "\r\n"
+                "[numthreads(1, 1, 1)]\r\n"
+                "void GenerateDispatches()\r\n"
+                "{\r\n"
+                "    uint num_groups = (GetCount() + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+                "    g_ArgsBuffer[0] = uint4(num_groups, 1, 1, 0);\r\n"
+                "    g_ScanCountBuffer[0] = NUM_BINS * num_groups;\r\n"
+                "}\r\n";
+        SortKernels &sort_kernels = sort_kernels_[key];
+        GfxProgramDesc sort_program_desc = {};
+        sort_program_desc.cs = sort_program_source.c_str();
+        char const *sort_values_defines[] = { "SORT_VALUES" };
+        sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram");
+        sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0);
+        sort_kernels.scatter_kernel_ = createComputeKernel(sort_kernels.sort_program_, "Scatter", sort_values_defines, sort_values ? 1 : 0);
+        if(count != nullptr)
+            sort_kernels.args_kernel_ = createComputeKernel(sort_kernels.sort_program_, "GenerateDispatches", nullptr, 0);
+        return sort_kernels;
+    }
+
     void populateRootConstants(Program const &program, Kernel::Parameter &parameter, uint32_t *root_constants)
     {
         memset(root_constants, 0, parameter.variable_size_);
@@ -6033,6 +6902,55 @@ GfxResult gfxCommandEndEvent(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeEndEvent();
+}
+
+GfxResult gfxCommandScanMin(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeScan(GfxInternal::kOpType_Min, data_type, dst, src, count);
+}
+
+GfxResult gfxCommandScanMax(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeScan(GfxInternal::kOpType_Max, data_type, dst, src, count);
+}
+
+GfxResult gfxCommandScanSum(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeScan(GfxInternal::kOpType_Sum, data_type, dst, src, count);
+}
+
+GfxResult gfxCommandReduceMin(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeReduce(GfxInternal::kOpType_Min, data_type, dst, src, count);
+}
+
+GfxResult gfxCommandReduceMax(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeReduce(GfxInternal::kOpType_Max, data_type, dst, src, count);
+}
+
+GfxResult gfxCommandReduceSum(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeReduce(GfxInternal::kOpType_Sum, data_type, dst, src, count);
+}
+
+GfxResult gfxCommandSortRadix(GfxContext context, GfxBuffer keys_dst, GfxBuffer keys_src, GfxBuffer const *values_dst, GfxBuffer const *values_src, GfxBuffer const *count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeRadixSort(keys_dst, keys_src, values_dst, values_src, count);
 }
 
 GfxResult gfxFrame(GfxContext context, bool vsync)

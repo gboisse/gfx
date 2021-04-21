@@ -107,7 +107,7 @@ public:
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
 
-        ShowWindow(window_, SW_SHOWDEFAULT);
+        ShowWindow(window_, SW_SHOWMAXIMIZED);
 
         window.hwnd = window_;
 
