@@ -3115,12 +3115,78 @@ public:
         if(count != nullptr && !buffer_handles_.has_handle(count->handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort when supplied count buffer object is invalid");
         SortKernels const &sort_kernels = getSortKernels(values_src != nullptr, count);
-        //uint32_t const group_size = 256;
-        //uint32_t const keys_per_thread = 4;
-        //uint32_t const keys_per_group = group_size * keys_per_thread;
-        //uint32_t const num_keys = (uint32_t)(src.size >> 2);
-        // TODO: ... (gboisse)
-        (void)&sort_kernels;
+        uint32_t const group_size = 256;
+        uint32_t const keys_per_thread = 4;
+        uint32_t const num_bits_per_pass = 4;
+        uint32_t const num_bins = (1 << num_bits_per_pass);
+        uint32_t const keys_per_group = group_size * keys_per_thread;
+        uint32_t const num_keys = (uint32_t)(keys_src.size >> 2);
+        uint32_t const num_groups = (num_keys + keys_per_group - 1) / keys_per_group;
+        uint32_t const num_histogram_values = num_bins * num_groups;
+        uint64_t scratch_buffer_size = (2 * num_keys + num_histogram_values + 5) << 2;
+        if(sort_scratch_buffer_.size < scratch_buffer_size)
+        {
+            destroyBuffer(sort_scratch_buffer_);
+            scratch_buffer_size += (scratch_buffer_size + 2) >> 1;
+            scratch_buffer_size = GFX_ALIGN(scratch_buffer_size, 65536);
+            sort_scratch_buffer_ = createBuffer(scratch_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!sort_scratch_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for sort");
+            sort_scratch_buffer_.setName("gfx_SortScratchBuffer");
+        }
+        GfxBuffer const scratch_keys = createBufferRange(sort_scratch_buffer_, 0, num_keys << 2);
+        GfxBuffer const scratch_values = createBufferRange(sort_scratch_buffer_, num_keys << 2, num_keys << 2);
+        GfxBuffer const group_histograms = createBufferRange(sort_scratch_buffer_, (2 * num_keys) << 2, num_histogram_values << 2);
+        GfxBuffer const args_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values) << 2, 4 << 2);
+        GfxBuffer const count_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values + 4) << 2, 4);
+        if(!scratch_keys || !scratch_values || !group_histograms || !args_buffer)
+        {
+            destroyBuffer(group_histograms);
+            destroyBuffer(args_buffer); destroyBuffer(count_buffer);
+            destroyBuffer(scratch_keys); destroyBuffer(scratch_values);
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create scratch memory for sort");
+        }
+        GfxKernel const bound_kernel = bound_kernel_;
+        if(count == nullptr)
+            setProgramConstants(sort_kernels.sort_program_, "g_Count", &num_keys, sizeof(num_keys));
+        else
+        {
+            setProgramBuffer(sort_kernels.sort_program_, "g_CountBuffer", *count);
+            setProgramBuffer(sort_kernels.sort_program_, "g_ArgsBuffer", args_buffer);
+            setProgramBuffer(sort_kernels.sort_program_, "g_ScanCountBuffer", count_buffer);
+            encodeBindKernel(sort_kernels.args_kernel_);
+            encodeDispatch(1, 1, 1);
+        }
+        setProgramBuffer(sort_kernels.sort_program_, "g_GroupHistograms", group_histograms);
+        for(uint32_t bitshift = 0, i = 0; bitshift < 32; bitshift += num_bits_per_pass, ++i)
+        {
+            setProgramConstants(sort_kernels.sort_program_, "g_Bitshift", &bitshift, sizeof(bitshift));
+            setProgramBuffer(sort_kernels.sort_program_, "g_InputKeys", i == 0 ? keys_src : (i & 1) != 0 ? scratch_keys : keys_dst);
+            setProgramBuffer(sort_kernels.sort_program_, "g_OutputKeys", (i & 1) == 0 ? scratch_keys : keys_dst);
+            if(values_dst != nullptr)
+            {
+                setProgramBuffer(sort_kernels.sort_program_, "g_InputValues", i == 0 ? *values_src : (i & 1) != 0 ? scratch_values : *values_dst);
+                setProgramBuffer(sort_kernels.sort_program_, "g_OutputValues", (i & 1) == 0 ? scratch_values : *values_dst);
+            }
+            encodeBindKernel(sort_kernels.histogram_kernel_);
+            if(count != nullptr)
+                encodeDispatchIndirect(args_buffer);
+            else
+                encodeDispatch(num_groups, 1, 1);
+            encodeScan(kOpType_Sum, kGfxDataType_Uint, group_histograms, group_histograms, &count_buffer);
+            encodeBindKernel(sort_kernels.scatter_kernel_);
+            if(count != nullptr)
+                encodeDispatchIndirect(args_buffer);
+            else
+                encodeDispatch(num_groups, 1, 1);
+        }
+        destroyBuffer(group_histograms);
+        destroyBuffer(args_buffer); destroyBuffer(count_buffer);
+        destroyBuffer(scratch_keys); destroyBuffer(scratch_values);
+        if(kernel_handles_.has_handle(bound_kernel.handle))
+            encodeBindKernel(bound_kernel);
+        else
+            bound_kernel_ = bound_kernel;
         return kGfxResult_NoError;
     }
 
@@ -5480,8 +5546,8 @@ private:
                 "    uint num_keys = g_CountBuffer[0];\r\n"
                 "    uint num_groups_level_1 = (num_keys + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
                 "    uint num_groups_level_2 = (num_groups_level_1 + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
-                "    g_Args1Buffer[0] = uint4((num_keys + GROUP_SIZE - 1) / GROUP_SIZE, 1, 1, 0);\r\n"
-                "    g_Args2Buffer[0] = uint4((num_groups_level_1 + GROUP_SIZE - 1) / GROUP_SIZE, 1, 1, 0);\r\n"
+                "    g_Args1Buffer[0] = uint4(num_groups_level_1, 1, 1, 0);\r\n"
+                "    g_Args2Buffer[0] = uint4(num_groups_level_2, 1, 1, 0);\r\n"
                 "    g_Count1Buffer[0] = num_groups_level_1;\r\n"
                 "    g_Count2Buffer[0] = num_groups_level_2;\r\n"
                 "}\r\n";
@@ -5526,7 +5592,13 @@ private:
             "RWStructuredBuffer<uint> g_OutputValues;\r\n"
             "#endif\r\n"
             "RWStructuredBuffer<uint> g_GroupHistograms;\r\n"
-            "\r\n"
+            "\r\n";
+        if(count != nullptr)
+            sort_program_source +=
+                "RWStructuredBuffer<uint4> g_ArgsBuffer;\r\n"
+                "RWStructuredBuffer<uint>  g_ScanCountBuffer;\r\n"
+                "\r\n";
+        sort_program_source +=
             "groupshared uint lds_keys[GROUP_SIZE];\r\n"
             "groupshared uint lds_scratch[GROUP_SIZE];\r\n"
             "groupshared uint lds_histogram[NUM_BINS];\r\n"
@@ -5672,7 +5744,16 @@ private:
             "        g_GroupHistograms[num_blocks * lidx + bidx] = lds_histogram[lidx];\r\n"
             "    }\r\n"
             "}\r\n";
-        // TODO: ... (gboisse)
+        if(count != nullptr)
+            sort_program_source +=
+                "\r\n"
+                "[numthreads(1, 1, 1)]\r\n"
+                "void GenerateDispatches()\r\n"
+                "{\r\n"
+                "    uint num_groups = (GetCount() + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+                "    g_ArgsBuffer[0] = uint4(num_groups, 1, 1, 0);\r\n"
+                "    g_ScanCountBuffer[0] = NUM_BINS * num_groups;\r\n"
+                "}\r\n";
         SortKernels &sort_kernels = sort_kernels_[key];
         GfxProgramDesc sort_program_desc = {};
         sort_program_desc.cs = sort_program_source.c_str();
@@ -5680,7 +5761,8 @@ private:
         sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram");
         sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0);
         sort_kernels.scatter_kernel_ = createComputeKernel(sort_kernels.sort_program_, "Scatter", sort_values_defines, sort_values ? 1 : 0);
-        // TODO: ... (gboisse)
+        if(count != nullptr)
+            sort_kernels.args_kernel_ = createComputeKernel(sort_kernels.sort_program_, "GenerateDispatches", nullptr, 0);
         return sort_kernels;
     }
 
