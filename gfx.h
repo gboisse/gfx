@@ -3139,7 +3139,7 @@ public:
         GfxBuffer const group_histograms = createBufferRange(sort_scratch_buffer_, (2 * num_keys) << 2, num_histogram_values << 2);
         GfxBuffer const args_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values) << 2, 4 << 2);
         GfxBuffer const count_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values + 4) << 2, 4);
-        if(!scratch_keys || !scratch_values || !group_histograms || !args_buffer)
+        if(!scratch_keys || !scratch_values || !group_histograms || !args_buffer || !count_buffer)
         {
             destroyBuffer(group_histograms);
             destroyBuffer(args_buffer); destroyBuffer(count_buffer);
