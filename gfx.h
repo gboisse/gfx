@@ -516,6 +516,7 @@ class GfxInternal
         GfxKernel scatter_kernel_ = {};
         GfxKernel args_kernel_ = {};
     };
+    GfxBuffer sort_scratch_buffer_;
     std::map<uint32_t, SortKernels> sort_kernels_;
 
     struct String
@@ -1300,6 +1301,7 @@ public:
         destroyProgram(generate_mips_program_);
         destroyBuffer(texture_upload_buffer_);
         destroyBuffer(raytracing_scratch_buffer_);
+        destroyBuffer(sort_scratch_buffer_);
         for(uint32_t i = 0; i < ARRAYSIZE(constant_buffer_pool_); ++i)
             destroyBuffer(constant_buffer_pool_[i]);
         for(std::map<uint32_t, ScanKernels>::const_iterator it = scan_kernels_.begin(); it != scan_kernels_.end(); ++it)
@@ -3108,9 +3110,11 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort keys when supplied buffer object is invalid");
         if((values_dst != nullptr && !buffer_handles_.has_handle(values_dst->handle)) || (values_src != nullptr && !buffer_handles_.has_handle(values_src->handle)))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort values when supplied buffer object is invalid");
+        if((values_dst != nullptr && values_src == nullptr) || (values_dst == nullptr && values_src != nullptr))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot sort values if source or destination isn't a valid buffer object");
         if(count != nullptr && !buffer_handles_.has_handle(count->handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot sort when supplied count buffer object is invalid");
-        SortKernels const &sort_kernels = getSortKernels(count);
+        SortKernels const &sort_kernels = getSortKernels(values_src != nullptr, count);
         //uint32_t const group_size = 256;
         //uint32_t const keys_per_thread = 4;
         //uint32_t const keys_per_group = group_size * keys_per_thread;
@@ -5495,10 +5499,10 @@ private:
         return scan_kernels;
     }
 
-    SortKernels const &getSortKernels(GfxBuffer const *count)
+    SortKernels const &getSortKernels(bool sort_values, GfxBuffer const *count)
     {
-        uint32_t const key = (count != nullptr ? 1 : 0);
         GFX_ASSERT(count == nullptr || buffer_handles_.has_handle(count->handle));
+        uint32_t const key = ((sort_values ? 1 : 0) << 1) | (count != nullptr ? 1 : 0);
         std::map<uint32_t, SortKernels>::const_iterator const it = sort_kernels_.find(key);
         if(it != sort_kernels_.end()) return (*it).second;  // already compiled
         std::string sort_program_source;
@@ -5537,6 +5541,113 @@ private:
         sort_program_source +=
             "}\r\n"
             "\r\n"
+            "uint GroupScan(in uint key, in uint lidx)\r\n"
+            "{\r\n"
+            "    lds_keys[lidx] = key;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    uint stride;\r\n"
+            "    for(stride = 1; stride < GROUP_SIZE; stride <<= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] += lds_keys[(2 * lidx + 1) * stride - 1];\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    if(lidx == 0)\r\n"
+            "        lds_keys[GROUP_SIZE - 1] = 0;\r\n"
+            "    GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "    for(stride = (GROUP_SIZE >> 1); stride > 0; stride >>= 1)\r\n"
+            "    {\r\n"
+            "        if(lidx < GROUP_SIZE / (2 * stride))\r\n"
+            "        {\r\n"
+            "            uint tmp = lds_keys[(2 * lidx + 1) * stride - 1];\r\n"
+            "            lds_keys[(2 * lidx + 1) * stride - 1] = lds_keys[2 * (lidx + 1) * stride - 1];\r\n"
+            "            lds_keys[2 * (lidx + 1) * stride - 1] += tmp;\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "    }\r\n"
+            "\r\n"
+            "    return lds_keys[lidx];\r\n"
+            "}\r\n"
+            "\r\n"
+            "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
+            "void Scatter(in uint lidx : SV_GroupThreadID,\r\n"
+            "             in uint bidx : SV_GroupID)\r\n"
+            "{\r\n"
+            "    uint block_start_index = bidx * GROUP_SIZE * KEYS_PER_THREAD;\r\n"
+            "    uint num_blocks = (GetCount() + KEYS_PER_GROUP - 1) / KEYS_PER_GROUP;\r\n"
+            "    if(lidx < NUM_BINS)\r\n"
+            "        lds_scanned_histogram[lidx] = g_GroupHistograms[num_blocks * lidx + bidx];\r\n"
+            "\r\n"
+            "    for(uint i = 0; i < KEYS_PER_THREAD; ++i)\r\n"
+            "    {\r\n"
+            "        if(lidx < NUM_BINS)\r\n"
+            "            lds_histogram[lidx] = 0;\r\n"
+            "\r\n"
+            "        uint key_index = block_start_index + i * GROUP_SIZE + lidx;\r\n"
+            "        uint key = (key_index < GetCount() ? g_InputKeys[key_index] : 0xFFFFFFFFu);\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "        uint value = (key_index < GetCount() ? g_InputValues[key_index] : 0);\r\n"
+            "#endif\r\n"
+            "\r\n"
+            "        for(uint shift = 0; shift < NUM_BITS_PER_PASS; shift += 2)\r\n"
+            "        {\r\n"
+            "            uint bin_index = ((key >> g_Bitshift) >> shift) & 0x3;\r\n"
+            "\r\n"
+            "            uint local_histogram = 1 << (bin_index * 8);\r\n"
+            "            uint local_histogram_scanned = GroupScan(local_histogram, lidx);\r\n"
+            "            if(lidx == (GROUP_SIZE - 1))\r\n"
+            "                lds_scratch[0] = local_histogram_scanned + local_histogram;\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "            local_histogram = lds_scratch[0];\r\n"
+            "            local_histogram = (local_histogram << 8) +\r\n"
+            "                              (local_histogram << 16) +\r\n"
+            "                              (local_histogram << 24);\r\n"
+            "            local_histogram_scanned += local_histogram;\r\n"
+            "\r\n"
+            "            uint offset = (local_histogram_scanned >> (bin_index * 8)) & 0xFFu;\r\n"
+            "            lds_keys[offset] = key;\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "            key = lds_keys[lidx];\r\n"
+            "\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "            lds_keys[offset] = value;\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "            value = lds_keys[lidx];\r\n"
+            "            GroupMemoryBarrierWithGroupSync();\r\n"
+            "#endif\r\n"
+            "        }\r\n"
+            "\r\n"
+            "        uint bin_index = (key >> g_Bitshift) & 0xFu;\r\n"
+            "        InterlockedAdd(lds_histogram[bin_index], 1);\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "        uint histogram_value = GroupScan(lidx < NUM_BINS ? lds_histogram[lidx] : 0, lidx);\r\n"
+            "        if(lidx < NUM_BINS)\r\n"
+            "            lds_scratch[lidx] = histogram_value;\r\n"
+            "\r\n"
+            "        uint global_offset = lds_scanned_histogram[bin_index];\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "        uint local_offset = lidx - lds_scratch[bin_index];\r\n"
+            "\r\n"
+            "        if(global_offset + local_offset < GetCount())\r\n"
+            "        {\r\n"
+            "            g_OutputKeys[global_offset + local_offset] = key;\r\n"
+            "#ifdef SORT_VALUES\r\n"
+            "            g_OutputValues[global_offset + local_offset] = value;\r\n"
+            "#endif\r\n"
+            "        }\r\n"
+            "        GroupMemoryBarrierWithGroupSync();\r\n"
+            "\r\n"
+            "        if(lidx < NUM_BINS)\r\n"
+            "            lds_scanned_histogram[lidx] += lds_histogram[lidx];\r\n"
+            "    }\r\n"
+            "}\r\n"
+            "\r\n"
             "[numthreads(GROUP_SIZE, 1, 1)]\r\n"
             "void BitHistogram(in uint gidx : SV_DispatchThreadID,\r\n"
             "                  in uint lidx : SV_GroupThreadID,\r\n"
@@ -5568,6 +5679,7 @@ private:
         char const *sort_values_defines[] = { "SORT_VALUES" };
         sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram");
         sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0);
+        sort_kernels.scatter_kernel_ = createComputeKernel(sort_kernels.sort_program_, "Scatter", sort_values_defines, sort_values ? 1 : 0);
         // TODO: ... (gboisse)
         return sort_kernels;
     }
