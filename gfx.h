@@ -1113,13 +1113,21 @@ public:
             if(!adapters[i]) break; else
             if(SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device))))
                 break;
-        if(!device)
+        if(device == nullptr)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
         if(!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils_))) ||
            !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
            !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
+        {
+            device->Release();
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXC compiler");
+        }
         device->QueryInterface(IID_PPV_ARGS(&device_));
+        if(device_ == nullptr)
+        {
+            device->Release();
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to query DXR-capable device");
+        }
         SetDebugName(device_, "gfx_Device");
         device->Release();
 

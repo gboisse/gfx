@@ -181,7 +181,8 @@ public:
 
     GfxResult terminate()
     {
-        ImGui::DestroyContext();
+        if(ImGui::GetCurrentContext() != nullptr)
+            ImGui::DestroyContext();
         if(gfx_)
         {
             GFX_TRY(gfxDestroyTexture(gfx_, font_buffer_));
