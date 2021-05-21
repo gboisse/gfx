@@ -390,11 +390,12 @@ class GfxInternal
     HWND window_ = {};
     uint32_t window_width_ = 0;
     uint32_t window_height_ = 0;
-    bool raytracing_support_ = false;
 
-    ID3D12Device5 *device_ = nullptr;
+    ID3D12Device *device_ = nullptr;
+    ID3D12Device5 *dxr_device_ = nullptr;
     ID3D12CommandQueue *command_queue_ = nullptr;
-    ID3D12GraphicsCommandList4 *command_list_ = nullptr;
+    ID3D12GraphicsCommandList *command_list_ = nullptr;
+    ID3D12GraphicsCommandList4 *dxr_command_list_ = nullptr;
     ID3D12CommandAllocator *command_allocators_[kGfxConstant_BackBufferCount] = {};
 
     HANDLE fence_event_ = {};
@@ -1040,6 +1041,7 @@ public:
     {
         if(!window)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid window handle was supplied");
+        D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, nullptr, nullptr);
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
             ID3D12Debug1 *debug_controller = nullptr;
@@ -1108,32 +1110,22 @@ public:
         DXGIRelease const scope(factory, adapters);
 
         uint32_t i = 0;
-        ID3D12Device *device = nullptr;
         for(; i < ARRAYSIZE(adapters); ++i)
             if(!adapters[i]) break; else
-            if(SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device))))
+            if(SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 break;
-        if(device == nullptr)
+        if(device_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
         if(!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils_))) ||
            !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
            !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
-        {
-            device->Release();
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXC compiler");
-        }
-        device->QueryInterface(IID_PPV_ARGS(&device_));
-        if(device_ == nullptr)
-        {
-            device->Release();
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to query DXR-capable device");
-        }
+        device_->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         SetDebugName(device_, "gfx_Device");
-        device->Release();
 
         D3D12_FEATURE_DATA_D3D12_OPTIONS5 rt_features = {};
         device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5));
-        raytracing_support_ = (rt_features.RaytracingTier >= D3D12_RAYTRACING_TIER_1_1 ? true : false);
+        if(rt_features.RaytracingTier < D3D12_RAYTRACING_TIER_1_1) { if(dxr_device_ != nullptr) dxr_device_->Release(); dxr_device_ = nullptr; }
 
         D3D12_COMMAND_QUEUE_DESC
         queue_desc      = {};
@@ -1182,6 +1174,8 @@ public:
         }
         if(!SUCCEEDED(device_->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, *command_allocators_, nullptr, IID_PPV_ARGS(&command_list_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create command list");
+        command_list_->QueryInterface(IID_PPV_ARGS(&dxr_command_list_));
+        if(dxr_command_list_ == nullptr) { if(dxr_device_ != nullptr) dxr_device_->Release(); dxr_device_ = nullptr; }
         SetDebugName(command_list_, "gfx_CommandList");
 
         fence_event_ = CreateEvent(nullptr, false, false, nullptr);
@@ -1292,7 +1286,7 @@ public:
         context.vendor_id = adapter_desc.VendorId;
         GFX_PRINTLN("Created Direct3D12 device `%ws'", adapter_desc.Description);
         GFX_SNPRINTF(context.name, sizeof(context.name), "%ws", adapter_desc.Description);
-        if(!raytracing_support_)
+        if(dxr_device_ == nullptr)
             GFX_PRINTLN("Warning: DXR-1.1 is not supported on the selected device; no raytracing will be available");
         bound_viewport_.invalidate(); bound_scissor_rect_.invalidate();
         window_ = window;   // flag as successfully initialized
@@ -1361,10 +1355,14 @@ public:
 
         if(device_)
             device_->Release();
+        if(dxr_device_)
+            dxr_device_->Release();
         if(command_queue_)
             command_queue_->Release();
         if(command_list_)
             command_list_->Release();
+        if(dxr_command_list_)
+            dxr_command_list_->Release();
         for(uint32_t i = 0; i < ARRAYSIZE(command_allocators_); ++i)
             if(command_allocators_[i])
                 command_allocators_[i]->Release();
@@ -1809,7 +1807,7 @@ public:
     GfxAccelerationStructure createAccelerationStructure()
     {
         GfxAccelerationStructure acceleration_structure = {};
-        if(!raytracing_support_)
+        if(dxr_device_ == nullptr)
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create acceleration structure");
             return acceleration_structure;  // invalid operation
@@ -1883,7 +1881,7 @@ public:
             return kGfxResult_NoError;
         }
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_info = {};
-        device_->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_info);
+        dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_info);
         uint64_t const scratch_data_size = GFX_MAX(tlas_info.ScratchDataSizeInBytes, tlas_info.UpdateScratchDataSizeInBytes);
         GFX_TRY(allocateRaytracingScratch(scratch_data_size));  // ensure scratch is large enough
         uint64_t const bvh_data_size = GFX_ALIGN(tlas_info.ResultDataMaxSizeInBytes, 65536);
@@ -1908,7 +1906,8 @@ public:
         if((tlas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
             build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
-        command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+        GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
+        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
         return kGfxResult_NoError;
     }
 
@@ -4074,10 +4073,11 @@ private:
         D3D12_ROOT_SIGNATURE_DESC root_signature_desc = {};
         root_signature_desc.pParameters = root_parameters.data();
         root_signature_desc.NumParameters = (uint32_t) root_parameters.size();
-        root_signature_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS   |
+        root_signature_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+                                  /*D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS   |
                                     D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS   |
                                     D3D12_ROOT_SIGNATURE_FLAG_DENY_DOMAIN_SHADER_ROOT_ACCESS |
-                                    D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS;
+                                    D3D12_ROOT_SIGNATURE_FLAG_DENY_AMPLIFICATION_SHADER_ROOT_ACCESS;*/
         root_signature_desc.Flags |= (kernel.vs_bytecode_ != nullptr ? D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT
                                                                      : D3D12_ROOT_SIGNATURE_FLAG_DENY_VERTEX_SHADER_ROOT_ACCESS);
         root_signature_desc.Flags |= (kernel.gs_bytecode_ != nullptr ? D3D12_ROOT_SIGNATURE_FLAG_ALLOW_STREAM_OUTPUT
@@ -5246,7 +5246,7 @@ private:
         if(update)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
-        device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
+        dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
         uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
         GFX_TRY(allocateRaytracingScratch(scratch_data_size));  // ensure scratch is large enough
         uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, 65536);
@@ -5274,7 +5274,8 @@ private:
         if((blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
             build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
-        command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+        GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
+        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
         return kGfxResult_NoError;
     }
 
@@ -5914,7 +5915,7 @@ private:
                 }
                 break;
             case Kernel::Parameter::kType_AccelerationStructure:
-                if(raytracing_support_)
+                if(dxr_device_ != nullptr)
                 {
                     D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                     srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
@@ -6066,7 +6067,7 @@ private:
             "gs_",
             "ps_"
         };
-        char const *shader_model = (raytracing_support_ ? "6_5" : "6_2");
+        char const *shader_model = (dxr_device_ != nullptr ? "6_5" : "6_0");
         static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < ARRAYSIZE(shader_profiles); ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), shader_model);
 
