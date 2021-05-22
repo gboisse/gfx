@@ -5318,7 +5318,7 @@ private:
             break;
         default:
             data_type_str = "float";
-            identity_str = (op_type == kOpType_Min ? "3.402823466e+38f" : op_type == kOpType_Max ? "1.175494351e-38f" : "0.0f");
+            identity_str = (op_type == kOpType_Min ? "3.402823466e+38f" : op_type == kOpType_Max ? "-3.402823466e+38f" : "0.0f");
             break;
         }
         std::string scan_program_source;
