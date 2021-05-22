@@ -1041,7 +1041,6 @@ public:
     {
         if(!window)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid window handle was supplied");
-        D3D12EnableExperimentalFeatures(1, &D3D12ExperimentalShaderModels, nullptr, nullptr);
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
             ID3D12Debug1 *debug_controller = nullptr;
