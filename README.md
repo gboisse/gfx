@@ -8,7 +8,8 @@ It supports:
 - Internal management of descriptor heaps, resource views, memory allocation, etc.
 - "Garbage collection" defers the release of freed resources to ensure the GPU is done with it; you can create and destroy anything at any time without worrying about synchronization.
 - Automatic placement of pipeline barriers and resource transitions.
-- Runtime shader reloading; call the `gfxKernelReloadAll()` function.
+- Runtime shader reloading; simply call the `gfxKernelReloadAll()` function.
+- Basic GPU-based parallel primitives (min/max/sum scans and reductions as well as key-only/key-value pairs sorting for various data types).
 
 On top of `gfx.h`, two optional layers are available:
 
