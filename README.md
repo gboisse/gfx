@@ -11,7 +11,7 @@ It supports:
 - Runtime shader reloading; simply call the `gfxKernelReloadAll()` function.
 - Basic GPU-based parallel primitives (min/max/sum scans and reductions as well as key-only/key-value pair sorting for various data types).
 
-On top of `gfx.h`, two optional layers are available:
+On top of `gfx.h`, three optional layers are available:
 
 - `gfx_imgui.h`: adds `ImGui` support.
 - `gfx_scene.h`: supports loading `.obj` files (`.gltf` coming soon).
