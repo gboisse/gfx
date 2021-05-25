@@ -10,10 +10,11 @@ It supports:
 - Automatic placement of pipeline barriers and resource transitions.
 - Runtime shader reloading; simply call the `gfxKernelReloadAll()` function.
 - Basic GPU-based parallel primitives (min/max/sum scans and reductions as well as key-only/key-value pair sorting for various data types).
+- DXR-1.1 raytracing (i.e. using `RayQuery<>` object); also known as [inline raytracing](https://microsoft.github.io/DirectX-Specs/d3d/Raytracing.html#inline-raytracing).
 
 On top of `gfx.h`, three optional layers are available:
 
-- `gfx_imgui.h`: adds `ImGui` support.
+- `gfx_imgui.h`: adds [Dear ImGui](https://github.com/ocornut/imgui) support.
 - `gfx_scene.h`: supports loading `.obj` files (`.gltf` coming soon).
 - `gfx_window.h`: window creation and basic event management.
 
