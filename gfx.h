@@ -5820,10 +5820,11 @@ private:
     void populateRootConstants(Program const &program, Kernel::Parameter &parameter, uint32_t *root_constants)
     {
         memset(root_constants, 0, parameter.variable_size_);
+        static uint64_t const dispatch_id_parameter = Hash("gfx_DispatchID");
         for(uint32_t i = 0; i < parameter.variable_count_; ++i)
         {
             Kernel::Parameter::Variable &variable = parameter.variables_[i];
-            if(variable.parameter_ == nullptr)
+            if(variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter)
             {
                 Program::Parameters::const_iterator const it = program.parameters_.find(variable.parameter_id_);
                 if(it != program.parameters_.end()) variable.parameter_ = &(*it).second;
