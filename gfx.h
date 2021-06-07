@@ -301,7 +301,8 @@ GfxResult gfxCommandDrawIndexed(GfxContext context, uint32_t index_count, uint32
 GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);          // expects a buffer of D3D12_DRAW_ARGUMENTS elements
 GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);   // expects a buffer of D3D12_DRAW_INDEXED_ARGUMENTS elements
 GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
-GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);    // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
+GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);                                // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
+GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);      // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 
 //!
 //! Debug/profile API.
@@ -2754,6 +2755,42 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult encodeMultiDispatchIndirect(GfxBuffer args_buffer, uint32_t args_count)
+    {
+        if(args_count == 0)
+            return kGfxResult_NoError;  // nothing to dispatch
+        if(!buffer_handles_.has_handle(args_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid arguments buffer object");
+        if(args_buffer.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using an arguments buffer object with read CPU access");
+        if(!kernel_handles_.has_handle(bound_kernel_.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
+        Kernel &kernel = kernels_[bound_kernel_];
+        if(!kernel.isCompute())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a graphics kernel object");
+        if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
+            return kGfxResult_NoError;  // skip multi-dispatch call
+        Buffer &gfx_buffer = buffers_[args_buffer];
+        SetObjectName(gfx_buffer, args_buffer.name);
+        // TODO: might need multiple resource state flags... (gboisse)
+        GFX_TRY(installShaderState(kernel));
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        submitPipelineBarriers();   // transition our resources if needed
+        static uint64_t const dispatch_id_parameter = Hash("gfx_DispatchID");
+        for(uint32_t dispatch_id = 0; dispatch_id < args_count; ++dispatch_id)
+        {
+            if(dispatch_id > 0)
+                for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
+                    if(kernel.parameters_[i].type_ == Kernel::Parameter::kType_Constants)
+                        for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
+                            if(kernel.parameters_[i].variables_[j].parameter_id_ == dispatch_id_parameter)
+                                command_list_->SetComputeRoot32BitConstant(i, dispatch_id, kernel.parameters_[i].variables_[j].data_start_ / sizeof(uint32_t));
+            command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_ + dispatch_id * sizeof(D3D12_DISPATCH_ARGUMENTS), nullptr, 0);
+        }
+        return kGfxResult_NoError;
+    }
+
     GfxTimestampQuery createTimestampQuery()
     {
         GfxTimestampQuery timestamp_query = {};
@@ -4125,7 +4162,7 @@ private:
         GFX_ASSERT(kernel.pipeline_state_ == nullptr);
         std::vector<D3D12_INPUT_ELEMENT_DESC> input_layout;
         if(kernel.root_signature_ == nullptr) return kGfxResult_NoError;
-        if(kernel.vs_reflection_)
+        if(kernel.vs_reflection_ != nullptr)
         {
             D3D12_SHADER_DESC shader_desc = {};
             GFX_ASSERT(kernel.vertex_stride_ == 0);
@@ -6845,6 +6882,13 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatchIndirect(args_buffer);
+}
+
+GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeMultiDispatchIndirect(args_buffer, args_count);
 }
 
 GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
