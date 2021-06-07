@@ -2785,7 +2785,11 @@ public:
                     if(kernel.parameters_[i].type_ == Kernel::Parameter::kType_Constants)
                         for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
                             if(kernel.parameters_[i].variables_[j].parameter_id_ == dispatch_id_parameter)
+                            {
                                 command_list_->SetComputeRoot32BitConstant(i, dispatch_id, kernel.parameters_[i].variables_[j].data_start_ / sizeof(uint32_t));
+                                i = kernel.parameter_count_;
+                                break;  // updated "gfx_DispatchID"
+                            }
             command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_ + dispatch_id * sizeof(D3D12_DISPATCH_ARGUMENTS), nullptr, 0);
         }
         return kGfxResult_NoError;
