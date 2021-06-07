@@ -2777,19 +2777,29 @@ public:
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
+        uint32_t root_parameter_index = 0xFFFFFFFFu, destination_offset;
         static uint64_t const dispatch_id_parameter = Hash("gfx_DispatchID");
+        for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
+            if(kernel.parameters_[i].type_ == Kernel::Parameter::kType_Constants)
+                for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
+                    if(kernel.parameters_[i].variables_[j].parameter_id_ == dispatch_id_parameter)
+                    {
+                        root_parameter_index = i;   // found root parameter
+                        destination_offset = kernel.parameters_[i].variables_[j].data_start_ / sizeof(uint32_t);
+                        i = kernel.parameter_count_;
+                        break;  // located "gfx_DispatchID"
+                    }
+        if(root_parameter_index == 0xFFFFFFFFu)
+        {
+            static bool warned;
+            if(!warned)
+                GFX_PRINTLN("Warning: unable to locate `gfx_DispatchID' root constant for multi-dispatch call");
+            warned = true;  // user was warned
+        }
         for(uint32_t dispatch_id = 0; dispatch_id < args_count; ++dispatch_id)
         {
-            if(dispatch_id > 0)
-                for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
-                    if(kernel.parameters_[i].type_ == Kernel::Parameter::kType_Constants)
-                        for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
-                            if(kernel.parameters_[i].variables_[j].parameter_id_ == dispatch_id_parameter)
-                            {
-                                command_list_->SetComputeRoot32BitConstant(i, dispatch_id, kernel.parameters_[i].variables_[j].data_start_ / sizeof(uint32_t));
-                                i = kernel.parameter_count_;
-                                break;  // updated "gfx_DispatchID"
-                            }
+            if(dispatch_id > 0 && root_parameter_index != 0xFFFFFFFFu)  // <- patch root constants
+                command_list_->SetComputeRoot32BitConstant(root_parameter_index, dispatch_id, destination_offset);
             command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_ + dispatch_id * sizeof(D3D12_DISPATCH_ARGUMENTS), nullptr, 0);
         }
         return kGfxResult_NoError;
