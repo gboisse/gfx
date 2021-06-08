@@ -18,12 +18,6 @@ On top of `gfx.h`, three optional layers are available:
 - `gfx_scene.h`: supports loading `.obj` files (`.gltf` coming soon).
 - `gfx_window.h`: window creation and basic event management.
 
-## Building
-
-Make sure to install the **Windows 10 SDK** prior to compiling:
-
-https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk/
-
 ## Usage
 
 Include the header corresponding to the desired level of functionality.
