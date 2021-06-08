@@ -962,6 +962,7 @@ class GfxInternal
             uint64_t parameter_id_ = 0;
             uint32_t descriptor_count_ = 0;
             uint32_t descriptor_slot_ = 0xFFFFFFFFu;
+            std::vector<ID3D12Resource *> bound_textures_;
             Program::Parameter const *parameter_ = nullptr;
 
             struct Variable
@@ -4619,6 +4620,7 @@ private:
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                             if(j >= parameter.parameter_->data_.image_.texture_count)
                             {
@@ -4645,7 +4647,8 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
                                 D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
@@ -4654,6 +4657,7 @@ private:
                                 srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
                     }
                     break;
@@ -4687,13 +4691,16 @@ private:
                         Texture &gfx_texture = textures_[texture];
                         SetObjectName(gfx_texture, texture.name);
                         transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        if(!invalidate_descriptor) break;   // already up to date
+                        parameter.bound_textures_.resize(1);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[0])
+                            break;   // already up to date
                         D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                         uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                         uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
                         uav_desc.Texture2D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
                         device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                        parameter.bound_textures_[0] = gfx_texture.resource_;   // cache resource pointer
                     }
                     break;
                 case Kernel::Parameter::kType_Texture2DArray:
@@ -4710,6 +4717,7 @@ private:
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                             if(j >= parameter.parameter_->data_.image_.texture_count)
                             {
@@ -4736,7 +4744,8 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
                                 D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
@@ -4746,6 +4755,7 @@ private:
                                 srv_desc.Texture2DArray.MipLevels = 0xFFFFFFFFu;    // select all mipmaps from MostDetailedMip on down to least detailed
                                 srv_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
                     }
                     break;
@@ -4779,7 +4789,9 @@ private:
                         Texture &gfx_texture = textures_[texture];
                         SetObjectName(gfx_texture, texture.name);
                         transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        if(!invalidate_descriptor) break;   // already up to date
+                        parameter.bound_textures_.resize(1);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[0])
+                            break;   // already up to date
                         D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                         uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
@@ -4787,6 +4799,7 @@ private:
                         uav_desc.Texture2DArray.MipSlice = parameter.parameter_->data_.image_.mip_level_;
                         uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                         device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                        parameter.bound_textures_[0] = gfx_texture.resource_;   // cache resource pointer
                     }
                     break;
                 case Kernel::Parameter::kType_Texture3D:
@@ -4803,6 +4816,7 @@ private:
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                             if(j >= parameter.parameter_->data_.image_.texture_count)
                             {
@@ -4829,7 +4843,8 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
                                 D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
@@ -4838,6 +4853,7 @@ private:
                                 srv_desc.Texture3D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.Texture3D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
                     }
                     break;
@@ -4871,7 +4887,9 @@ private:
                         Texture &gfx_texture = textures_[texture];
                         SetObjectName(gfx_texture, texture.name);
                         transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        if(!invalidate_descriptor) break;   // already up to date
+                        parameter.bound_textures_.resize(1);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[0])
+                            break;   // already up to date
                         D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                         uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
@@ -4879,6 +4897,7 @@ private:
                         uav_desc.Texture3D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
                         uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
                         device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                        parameter.bound_textures_[0] = gfx_texture.resource_;   // cache resource pointer
                     }
                     break;
                 case Kernel::Parameter::kType_TextureCube:
@@ -4895,6 +4914,7 @@ private:
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                             if(j >= parameter.parameter_->data_.image_.texture_count)
                             {
@@ -4921,7 +4941,8 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
                                 D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
@@ -4930,6 +4951,7 @@ private:
                                 srv_desc.TextureCube.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.TextureCube.MipLevels = 0xFFFFFFFFu;   // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
                     }
                     break;
@@ -6356,10 +6378,8 @@ private:
         GFX_TRY(acquireSwapChainBuffers());
         if(!SUCCEEDED(hr))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to resize the swap chain buffers");
-        window_width_ = window_width;
+        window_width_  = window_width;
         window_height_ = window_height;
-        for(uint32_t i = 0; i < kernels_.size(); ++i)
-            kernels_.data()[i].descriptor_heap_id_ = 0;
         return kGfxResult_NoError;
     }
 };
