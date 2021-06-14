@@ -4085,12 +4085,19 @@ private:
                 descriptor_range.RegisterSpace = resource_desc.Space;
 
                 if(resource_desc.BindCount == 0)
-                    switch(descriptor_range.RangeType)
+                    switch(kernel_parameter.type_)
                     {
-                    case D3D12_DESCRIPTOR_RANGE_TYPE_SRV:
+                    case Kernel::Parameter::kType_Texture2D:
+                    case Kernel::Parameter::kType_RWTexture2D:
+                    case Kernel::Parameter::kType_Texture2DArray:
+                    case Kernel::Parameter::kType_RWTexture2DArray:
+                    case Kernel::Parameter::kType_Texture3D:
+                    case Kernel::Parameter::kType_RWTexture3D:
+                    case Kernel::Parameter::kType_TextureCube:
                         descriptor_range.NumDescriptors = kGfxConstant_NumBindlessSlots;
                         break;
                     default:
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Bindless is only supported for texture objets");
                         break;
                     }
                 kernel_parameter.descriptor_count_ = descriptor_range.NumDescriptors;
@@ -4609,23 +4616,18 @@ private:
                     break;
                 case Kernel::Parameter::kType_Texture2D:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
                         D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                         parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
                             {
                                 if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                 device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             }
                             else
@@ -4635,7 +4637,9 @@ private:
                                 {
                                     if(texture.handle != 0)
                                         GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
                                     continue;   // user set an invalid texture object
                                 }
                                 if(!texture.is2D())
@@ -4664,65 +4668,67 @@ private:
                     break;
                 case Kernel::Parameter::kType_RWTexture2D:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        GfxTexture const &texture = *parameter.parameter_->data_.image_.textures_;
-                        if(!texture_handles_.has_handle(texture.handle))
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid texture object
-                        }
-                        if(!texture.is2D())
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid texture object for shader UAV
-                        }
-                        Texture &gfx_texture = textures_[texture];
-                        SetObjectName(gfx_texture, texture.name);
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        parameter.bound_textures_.resize(1);
-                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[0])
-                            break;   // already up to date
-                        D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                        uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                        uav_desc.Texture2D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
-                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
-                        parameter.bound_textures_[0] = gfx_texture.resource_;   // cache resource pointer
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.is2D())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader UAV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                                uav_desc.Texture2D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                                device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_Texture2DArray:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
                         D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                         parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
                             {
                                 if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                 device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             }
                             else
@@ -4732,7 +4738,9 @@ private:
                                 {
                                     if(texture.handle != 0)
                                         GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
                                     continue;   // user set an invalid texture object
                                 }
                                 if(!texture.is2DArray())
@@ -4762,66 +4770,68 @@ private:
                     break;
                 case Kernel::Parameter::kType_RWTexture2DArray:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        GfxTexture const &texture = *parameter.parameter_->data_.image_.textures_;
-                        if(!texture_handles_.has_handle(texture.handle))
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid texture object
-                        }
-                        if(!texture.is2DArray() && !texture.isCube())
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid texture object for shader UAV
-                        }
-                        Texture &gfx_texture = textures_[texture];
-                        SetObjectName(gfx_texture, texture.name);
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        parameter.bound_textures_.resize(1);
-                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[0])
-                            break;   // already up to date
-                        D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                        uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                        uav_desc.Texture2DArray.MipSlice = parameter.parameter_->data_.image_.mip_level_;
-                        uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
-                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
-                        parameter.bound_textures_[0] = gfx_texture.resource_;   // cache resource pointer
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.is2DArray() && !texture.isCube())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader UAV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                                uav_desc.Texture2DArray.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                                uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
+                                device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_Texture3D:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
                         D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                         parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
                             {
                                 if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                 device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             }
                             else
@@ -4831,7 +4841,9 @@ private:
                                 {
                                     if(texture.handle != 0)
                                         GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
                                     continue;   // user set an invalid texture object
                                 }
                                 if(!texture.is3D())
@@ -4860,66 +4872,68 @@ private:
                     break;
                 case Kernel::Parameter::kType_RWTexture3D:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        GfxTexture const &texture = *parameter.parameter_->data_.image_.textures_;
-                        if(!texture_handles_.has_handle(texture.handle))
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid texture object
-                        }
-                        if(!texture.is3D())
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid texture object for shader UAV
-                        }
-                        Texture &gfx_texture = textures_[texture];
-                        SetObjectName(gfx_texture, texture.name);
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        parameter.bound_textures_.resize(1);
-                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[0])
-                            break;   // already up to date
-                        D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                        uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                        uav_desc.Texture3D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
-                        uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
-                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
-                        parameter.bound_textures_[0] = gfx_texture.resource_;   // cache resource pointer
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+                        parameter.bound_textures_.resize(parameter.descriptor_count_);
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            {
+                                if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                                if(!texture_handles_.has_handle(texture.handle))
+                                {
+                                    if(texture.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                                    continue;   // user set an invalid texture object
+                                }
+                                if(!texture.is3D())
+                                {
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid texture object for shader UAV
+                                }
+                                Texture &gfx_texture = textures_[texture];
+                                SetObjectName(gfx_texture, texture.name);
+                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                                    continue;    // already up to date
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+                                uav_desc.Texture3D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                                uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
+                                device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_TextureCube:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
                         D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                         dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                         dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
                         parameter.bound_textures_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count)
+                            if(j >= parameter.parameter_->data_.image_.texture_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
                             {
                                 if(!invalidate_descriptor) continue;    // already up to date
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                 device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             }
                             else
@@ -4929,7 +4943,9 @@ private:
                                 {
                                     if(texture.handle != 0)
                                         GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
                                     continue;   // user set an invalid texture object
                                 }
                                 if(!texture.isCube())
