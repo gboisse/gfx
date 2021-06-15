@@ -3803,7 +3803,7 @@ private:
             descriptor_heap_desc.NumDescriptors += ((descriptor_heap_desc.NumDescriptors + 2) >> 1);
             descriptor_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
             device_->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap));
-            if(descriptor_heap == nullptr) return 0xFFFFFFFFu;  // allocation failed
+            if(descriptor_heap == nullptr) { freelist_descriptors_.free_slot(descriptor_slot); return 0xFFFFFFFFu; };
             descriptors_.descriptor_handle_size_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
             SetDebugName(descriptor_heap, "gfx_CBVSRVUAVDescriptorHeap");
             collect(descriptors_);  // free previous descriptor heap
@@ -3829,7 +3829,7 @@ private:
             descriptor_heap_desc.NumDescriptors = freelist_dsv_descriptors_.size();
             descriptor_heap_desc.NumDescriptors += ((descriptor_heap_desc.NumDescriptors + 2) >> 1);
             device_->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap));
-            if(descriptor_heap == nullptr) return 0xFFFFFFFFu;  // allocation failed
+            if(descriptor_heap == nullptr) { freelist_dsv_descriptors_.free_slot(dsv_slot); return 0xFFFFFFFFu; };
             if(size > 0) device_->CopyDescriptorsSimple(size, descriptor_heap->GetCPUDescriptorHandleForHeapStart(),
                 dsv_descriptors_.descriptor_heap_->GetCPUDescriptorHandleForHeapStart(), D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
             dsv_descriptors_.descriptor_handle_size_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_DSV);
@@ -3857,7 +3857,7 @@ private:
             descriptor_heap_desc.NumDescriptors = freelist_rtv_descriptors_.size();
             descriptor_heap_desc.NumDescriptors += ((descriptor_heap_desc.NumDescriptors + 2) >> 1);
             device_->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap));
-            if(descriptor_heap == nullptr) return 0xFFFFFFFFu;  // allocation failed
+            if(descriptor_heap == nullptr) { freelist_rtv_descriptors_.free_slot(rtv_slot); return 0xFFFFFFFFu; };
             if(size > 0) device_->CopyDescriptorsSimple(size, descriptor_heap->GetCPUDescriptorHandleForHeapStart(),
                 rtv_descriptors_.descriptor_heap_->GetCPUDescriptorHandleForHeapStart(), D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
             rtv_descriptors_.descriptor_handle_size_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
@@ -3886,7 +3886,7 @@ private:
             descriptor_heap_desc.NumDescriptors += ((descriptor_heap_desc.NumDescriptors + 2) >> 1);
             descriptor_heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
             device_->CreateDescriptorHeap(&descriptor_heap_desc, IID_PPV_ARGS(&descriptor_heap));
-            if(descriptor_heap == nullptr) return 0xFFFFFFFFu;  // allocation failed
+            if(descriptor_heap == nullptr) { freelist_sampler_descriptors_.free_slot(sampler_slot); return 0xFFFFFFFFu; };
             sampler_descriptors_.descriptor_handle_size_ = device_->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);
             uint32_t const dummy_descriptor = (sampler_descriptors_.descriptor_heap_ == nullptr ? sampler_slot : dummy_descriptors_[Kernel::Parameter::kType_Sampler]);
             collect(sampler_descriptors_);  // free previous descriptor heap
