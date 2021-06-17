@@ -235,6 +235,7 @@ GfxResult gfxDestroyProgram(GfxContext context, GfxProgram program);
 GfxResult gfxProgramSetBuffer(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer buffer);
 GfxResult gfxProgramSetTexture(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture texture, uint32_t mip_level = 0);
 GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count);
+GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count);
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state);
 GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size);
@@ -246,6 +247,7 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
 template<typename TYPE>
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, TYPE const &value);
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count) { return gfxProgramSetTextures(context, program, parameter_name, textures, texture_count); }
+inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count) { return gfxProgramSetTextures(context, program, parameter_name, textures, mip_levels, texture_count); }
 
 template<> inline GfxResult gfxProgramSetParameter<GfxBuffer>(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const &value) { return gfxProgramSetBuffer(context, program, parameter_name, value); }
 template<> inline GfxResult gfxProgramSetParameter<GfxTexture>(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const &value) { return gfxProgramSetTexture(context, program, parameter_name, value); }
@@ -748,7 +750,7 @@ class GfxInternal
             union
             {
                 GfxBuffer buffer_;
-                struct { GfxTexture *textures_; uint32_t texture_count; uint32_t mip_level_; } image_;
+                struct { GfxTexture *textures_; uint32_t texture_count; uint32_t mip_level_; uint32_t *mip_levels_; } image_;
                 GfxSamplerState sampler_state_;
                 struct { GfxAccelerationStructure bvh_; GfxBuffer bvh_buffer_; } acceleration_structure_;
                 void *constants_;
@@ -790,7 +792,7 @@ class GfxInternal
                 data_.image_.mip_level_ = mip_level;
             }
 
-            void set(GfxTexture const *textures, uint32_t texture_count)
+            void set(GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
             {
                 GFX_ASSERT(textures != nullptr && texture_count > 1);
                 if(type_ == kType_Image && data_.image_.texture_count == texture_count)
@@ -802,13 +804,19 @@ class GfxInternal
                     data_.image_.texture_count = texture_count;
                     data_size_ = texture_count * sizeof(*textures);
                     data_.image_.textures_ = (GfxTexture *)malloc(texture_count * sizeof(GfxTexture));
-                    if(data_.image_.textures_ == nullptr)
+                    data_.image_.mip_levels_ = (uint32_t *)(mip_levels != nullptr ? malloc(texture_count * sizeof(uint32_t)) : nullptr);
+                    if(data_.image_.textures_ == nullptr || (mip_levels != nullptr && data_.image_.mip_levels_ == nullptr))
                     {
                         GFX_ASSERT(0);  // out of memory
                         unset(); return;
                     }
                 }
-                for(uint32_t i = 0; i < texture_count; ++i) data_.image_.textures_[i] = textures[i];
+                for(uint32_t i = 0; i < texture_count; ++i)
+                {
+                    data_.image_.textures_[i] = textures[i];
+                    if(mip_levels != nullptr)
+                        data_.image_.mip_levels_[i] = mip_levels[i];
+                }
             }
 
             void set(GfxSamplerState const &sampler_state)
@@ -857,6 +865,7 @@ class GfxInternal
                 {
                 case kType_Image:
                     free(data_.image_.textures_);
+                    free(data_.image_.mip_levels_);
                     break;
                 case kType_Constants:
                     free(data_.constants_);
@@ -2102,7 +2111,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult setProgramTextures(GfxProgram const &program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count)
+    GfxResult setProgramTextures(GfxProgram const &program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
     {
         if(!program_handles_.has_handle(program.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
@@ -2120,7 +2129,7 @@ public:
             gfx_program.insertParameter(parameter_name).set(*textures, 0);
             break;
         default:
-            gfx_program.insertParameter(parameter_name).set(textures, texture_count);
+            gfx_program.insertParameter(parameter_name).set(textures, mip_levels, texture_count);
             break;
         }
         return kGfxResult_NoError;
@@ -3496,6 +3505,15 @@ private:
         return result;
     }
 
+    uint32_t GetMipLevel(Program::Parameter const &parameter, uint32_t texture_index)
+    {
+        GFX_ASSERT(parameter.type_ == Program::Parameter::kType_Image);
+        if(parameter.type_ != Program::Parameter::kType_Image) return 0;
+        GFX_ASSERT(texture_index < parameter.data_.image_.texture_count);
+        return (parameter.data_.image_.mip_levels_ != nullptr ?
+            parameter.data_.image_.mip_levels_[texture_index] : parameter.data_.image_.mip_level_);
+    }
+
     static inline D3D12_GRAPHICS_PIPELINE_STATE_DESC GetDefaultPSODesc()
     {
         D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
@@ -4659,7 +4677,7 @@ private:
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2D.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4709,7 +4727,7 @@ private:
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                                uav_desc.Texture2D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                                uav_desc.Texture2D.MipSlice = GetMipLevel(*parameter.parameter_, j);
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
@@ -4760,7 +4778,7 @@ private:
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2DArray.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2DArray.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.Texture2DArray.MipLevels = 0xFFFFFFFFu;    // select all mipmaps from MostDetailedMip on down to least detailed
                                 srv_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
@@ -4811,7 +4829,7 @@ private:
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                                uav_desc.Texture2DArray.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                                uav_desc.Texture2DArray.MipSlice = GetMipLevel(*parameter.parameter_, j);
                                 uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4863,7 +4881,7 @@ private:
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture3D.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture3D.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.Texture3D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4913,7 +4931,7 @@ private:
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                                uav_desc.Texture3D.MipSlice = parameter.parameter_->data_.image_.mip_level_;
+                                uav_desc.Texture3D.MipSlice = GetMipLevel(*parameter.parameter_, j);
                                 uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4965,7 +4983,7 @@ private:
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.TextureCube.MostDetailedMip = GFX_MIN(parameter.parameter_->data_.image_.mip_level_, GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.TextureCube.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 srv_desc.TextureCube.MipLevels = 0xFFFFFFFFu;   // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -6729,7 +6747,14 @@ GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char con
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->setProgramTextures(program, parameter_name, textures, texture_count);
+    return gfx->setProgramTextures(program, parameter_name, textures, nullptr, texture_count);
+}
+
+GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setProgramTextures(program, parameter_name, textures, mip_levels, texture_count);
 }
 
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state)
