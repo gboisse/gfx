@@ -4727,7 +4727,7 @@ private:
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                                uav_desc.Texture2D.MipSlice = GetMipLevel(*parameter.parameter_, j);
+                                uav_desc.Texture2D.MipSlice = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
@@ -4829,7 +4829,7 @@ private:
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                                uav_desc.Texture2DArray.MipSlice = GetMipLevel(*parameter.parameter_, j);
+                                uav_desc.Texture2DArray.MipSlice = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4931,7 +4931,7 @@ private:
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                                uav_desc.Texture3D.MipSlice = GetMipLevel(*parameter.parameter_, j);
+                                uav_desc.Texture3D.MipSlice = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
                                 uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
