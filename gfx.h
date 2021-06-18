@@ -6361,10 +6361,21 @@ private:
         {
             if(resource_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
-                D3D12_RESOURCE_BARRIER resource_barrier = {};
-                resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-                resource_barrier.UAV.pResource = texture.resource_;
-                resource_barriers_.push_back(resource_barrier);
+                bool already_has_uav_barrier = false;
+                for(std::vector<D3D12_RESOURCE_BARRIER>::iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
+                    if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == texture.resource_) ||
+                       ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == texture.resource_))
+                    {
+                        already_has_uav_barrier = true;
+                        break;  // already has a UAV barrier
+                    }
+                if(!already_has_uav_barrier)
+                {
+                    D3D12_RESOURCE_BARRIER resource_barrier = {};
+                    resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+                    resource_barrier.UAV.pResource = texture.resource_;
+                    resource_barriers_.push_back(resource_barrier);
+                }
             }
             return; // no need to transition
         }
