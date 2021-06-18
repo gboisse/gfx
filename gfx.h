@@ -4662,22 +4662,30 @@ private:
                                 }
                                 if(!texture.is2D())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader SRV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2D.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2D.MostDetailedMip = mip_level;
                                 srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4713,21 +4721,29 @@ private:
                                 }
                                 if(!texture.is2D())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader UAV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                                uav_desc.Texture2D.MipSlice = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                uav_desc.Texture2D.MipSlice = mip_level;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
                             }
@@ -4763,22 +4779,30 @@ private:
                                 }
                                 if(!texture.is2DArray())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D sampler array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D sampler array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader SRV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2DArray.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture2DArray.MostDetailedMip = mip_level;
                                 srv_desc.Texture2DArray.MipLevels = 0xFFFFFFFFu;    // select all mipmaps from MostDetailedMip on down to least detailed
                                 srv_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
@@ -4815,21 +4839,29 @@ private:
                                 }
                                 if(!texture.is2DArray() && !texture.isCube())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader UAV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                                uav_desc.Texture2DArray.MipSlice = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                uav_desc.Texture2DArray.MipSlice = mip_level;
                                 uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4866,22 +4898,30 @@ private:
                                 }
                                 if(!texture.is3D())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader SRV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture3D.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.Texture3D.MostDetailedMip = mip_level;
                                 srv_desc.Texture3D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4917,21 +4957,29 @@ private:
                                 }
                                 if(!texture.is3D())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader UAV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                                 uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                                uav_desc.Texture3D.MipSlice = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                uav_desc.Texture3D.MipSlice = mip_level;
                                 uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
@@ -4968,22 +5016,30 @@ private:
                                 }
                                 if(!texture.isCube())
                                 {
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-cube texture object as a cubemap sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-cube texture object as a cubemap sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid texture object for shader SRV
                                 }
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
+                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                                {
+                                    if(!invalidate_descriptor) continue;    // already up to date
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of cube texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // out of bounds mip level
+                                }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                                 srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
                                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                                 srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.TextureCube.MostDetailedMip = GFX_MIN(GetMipLevel(*parameter.parameter_, j), GFX_MAX((uint32_t)resource_desc.MipLevels, 1u) - 1);
+                                srv_desc.TextureCube.MostDetailedMip = mip_level;
                                 srv_desc.TextureCube.MipLevels = 0xFFFFFFFFu;   // select all mipmaps from MostDetailedMip on down to least detailed
                                 device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                 parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
