@@ -2091,8 +2091,6 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        if(!buffer_handles_.has_handle(buffer.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid buffer object");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(buffer);
         return kGfxResult_NoError;
@@ -2104,8 +2102,6 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        if(!texture_handles_.has_handle(texture.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid texture object");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(texture, mip_level);
         return kGfxResult_NoError;
@@ -2126,7 +2122,7 @@ public:
             gfx_program.eraseParameter(parameter_name);
             break;
         case 1:
-            gfx_program.insertParameter(parameter_name).set(*textures, 0);
+            gfx_program.insertParameter(parameter_name).set(*textures, mip_levels != nullptr ? *mip_levels : 0);
             break;
         default:
             gfx_program.insertParameter(parameter_name).set(textures, mip_levels, texture_count);
@@ -2141,8 +2137,6 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        if(!sampler_state_handles_.has_handle(sampler_state.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid sampler state object");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(sampler_state);
         return kGfxResult_NoError;
@@ -2154,8 +2148,6 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid acceleration structure object");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(acceleration_structure);
         return kGfxResult_NoError;
@@ -4492,7 +4484,10 @@ private:
                             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a sampler state object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                     }
                     else if(!sampler_state_handles_.has_handle(parameter.parameter_->data_.sampler_state_.handle))
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid sampler state object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    {
+                        if(parameter.parameter_->data_.sampler_state_.handle != 0)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid sampler state object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    }
                     else
                     {
                         SamplerState const &sampler_state = sampler_states_[parameter.parameter_->data_.sampler_state_];
@@ -4531,7 +4526,8 @@ private:
                         GfxBuffer const &buffer = parameter.parameter_->data_.buffer_;
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(buffer.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                             descriptor_slot = dummy_descriptors_[parameter.type_];
                             freeDescriptor(parameter.descriptor_slot_);
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
@@ -4589,7 +4585,8 @@ private:
                         GfxBuffer const &buffer = parameter.parameter_->data_.buffer_;
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(buffer.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                             descriptor_slot = dummy_descriptors_[parameter.type_];
                             freeDescriptor(parameter.descriptor_slot_);
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
@@ -5059,7 +5056,8 @@ private:
                         GfxAccelerationStructure const &acceleration_structure = parameter.parameter_->data_.acceleration_structure_.bvh_;
                         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
                         {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid acceleration structure object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(acceleration_structure.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid acceleration structure object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                             descriptor_slot = dummy_descriptors_[parameter.type_];
                             freeDescriptor(parameter.descriptor_slot_);
                             parameter.descriptor_slot_ = 0xFFFFFFFFu;
@@ -5109,7 +5107,8 @@ private:
                             GfxBuffer const &buffer = parameter.parameter_->data_.buffer_;
                             if(!buffer_handles_.has_handle(buffer.handle))
                             {
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                if(buffer.handle != 0)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                 descriptor_slot = dummy_descriptors_[parameter.type_];
                                 freeDescriptor(parameter.descriptor_slot_);
                                 parameter.descriptor_slot_ = 0xFFFFFFFFu;
@@ -5174,7 +5173,11 @@ private:
             {
                 D3D12_INDEX_BUFFER_VIEW ibv_desc = {};
                 if(!buffer_handles_.has_handle(bound_index_buffer_.handle))
+                {
                     bound_index_buffer_ = {};
+                    if(bound_index_buffer_.handle != 0)
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for use as index buffer");
+                }
                 else
                 {
                     Buffer &gfx_buffer = buffers_[bound_index_buffer_];
@@ -5194,7 +5197,11 @@ private:
             {
                 D3D12_VERTEX_BUFFER_VIEW vbv_desc = {};
                 if(!buffer_handles_.has_handle(bound_vertex_buffer_.handle))
+                {
                     bound_vertex_buffer_ = {};
+                    if(bound_vertex_buffer_.handle != 0)
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for use as vertex buffer");
+                }
                 else
                 {
                     Buffer &gfx_buffer = buffers_[bound_vertex_buffer_];

@@ -24,10 +24,11 @@ SOFTWARE.
 
 float4x4 ViewProjectionMatrix;
 
+// Need to match host-side structure
 struct Vertex
 {
-    float3 position : POSITION;
-    float3 normal   : NORMAL;
+    float4 position : POSITION;
+    float4 normal   : NORMAL;
     float2 uv       : TEXCOORDS;
 };
 
@@ -36,14 +37,16 @@ struct Params
     float4 position : SV_Position;
     float3 normal   : NORMAL;
     float3 world    : POSITION;
+    float2 uv       : TEXCOORDS;
 };
 
 Params Trace(in Vertex vertex)
 {
     Params params;
-    params.position = mul(ViewProjectionMatrix, float4(vertex.position, 1.0f));
-    params.normal   = vertex.normal;
-    params.world    = vertex.position;
+    params.position = mul(ViewProjectionMatrix, float4(vertex.position.xyz, 1.0f));
+    params.normal   = vertex.normal.xyz;
+    params.world    = vertex.position.xyz;
+    params.uv       = vertex.uv;
     return params;
 }
 

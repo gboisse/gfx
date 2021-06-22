@@ -556,7 +556,7 @@ private:
         if(!obj_reader.ParseFromFile(asset_file, obj_reader_config))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to load obj file `%s'", obj_reader.Error().c_str());
         if(!obj_reader.Warning().empty())
-            GFX_PRINTLN("Parse obj file `%s' with warnings:\r\n%s", asset_file, obj_reader.Warning().c_str());
+            GFX_PRINTLN("Parsed obj file `%s' with warnings:\r\n%s", asset_file, obj_reader.Warning().c_str());
         char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));    // retrieve file name
         std::string const texture_path = (file == nullptr ? "./" : std::string(asset_file, file - asset_file + 1));
         auto const LoadImage = [&](std::string const &texname, GfxConstRef<GfxImage> &image)

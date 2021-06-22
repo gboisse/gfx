@@ -28,6 +28,14 @@ SOFTWARE.
 #include "glm/gtc/matrix_transform.hpp"
 #include "samplerBlueNoiseErrorDistribution_128x128_OptimizedFor_2d2d2d2d_1spp.cpp"
 
+// Need to match shader-side structure
+struct Vertex
+{
+    glm::vec4 position;
+    glm::vec4 normal;
+    glm::vec2 uv;
+};
+
 float CalculateHaltonNumber(uint32_t index, uint32_t base)
 {
     float f      = 1.0f;
@@ -53,21 +61,57 @@ int32_t main()
     // Upload the scene to GPU memory
     GfxArray<GfxBuffer> index_buffers;
     GfxArray<GfxBuffer> vertex_buffers;
+    GfxArray<GfxTexture> albedo_buffers;
 
-    gfxSceneImport(scene, "cornellbox.obj");    // import our scene
+    gfxSceneImport(scene, "data/sponza.obj");   // import our scene
 
     uint32_t const mesh_count     = gfxSceneGetMeshCount(scene);
+    uint32_t const material_count = gfxSceneGetMaterialCount(scene);
     uint32_t const instance_count = gfxSceneGetInstanceCount(scene);
 
     for(uint32_t i = 0; i < mesh_count; ++i)
     {
         GfxConstRef<GfxMesh> mesh_ref = gfxSceneGetMeshHandle(scene, i);
 
-        GfxBuffer index_buffer  = gfxCreateBuffer<uint32_t>(gfx, (uint32_t)mesh_ref->indices.size(), mesh_ref->indices.data());
-        GfxBuffer vertex_buffer = gfxCreateBuffer<GfxVertex>(gfx, (uint32_t)mesh_ref->vertices.size(), mesh_ref->vertices.data());
+        uint32_t const index_count  = (uint32_t)mesh_ref->indices.size();
+        uint32_t const vertex_count = (uint32_t)mesh_ref->vertices.size();
+
+        std::vector<Vertex> vertices(vertex_count);
+
+        for(uint32_t v = 0; v < vertex_count; ++v)
+        {
+            vertices[v].position = glm::vec4(mesh_ref->vertices[v].position, 1.0f);
+            vertices[v].normal   = glm::vec4(mesh_ref->vertices[v].normal,   0.0f);
+            vertices[v].uv       = glm::vec2(mesh_ref->vertices[v].uv);
+        }
+
+        GfxBuffer index_buffer  = gfxCreateBuffer<uint32_t>(gfx, index_count, mesh_ref->indices.data());
+        GfxBuffer vertex_buffer = gfxCreateBuffer<Vertex>(gfx, vertex_count, vertices.data());
 
         index_buffers.insert(mesh_ref, index_buffer);
         vertex_buffers.insert(mesh_ref, vertex_buffer);
+    }
+
+    for(uint32_t i = 0; i < material_count; ++i)
+    {
+        GfxConstRef<GfxMaterial> material_ref = gfxSceneGetMaterialHandle(scene, i);
+
+        GfxTexture albedo_buffer;
+
+        if(material_ref->albedo_map)
+        {
+            GfxImage const &albedo_map = *material_ref->albedo_map;
+            uint32_t const mip_count   = gfxCalculateMipCount(albedo_map.width, albedo_map.height);
+
+            albedo_buffer = gfxCreateTexture2D(gfx, albedo_map.width, albedo_map.height, gfxImageGetFormat(albedo_map), mip_count);
+
+            GfxBuffer upload_buffer = gfxCreateBuffer(gfx, albedo_map.width * albedo_map.height * albedo_map.channel_count, albedo_map.data.data());
+            gfxCommandCopyBufferToTexture(gfx, albedo_buffer, upload_buffer);
+            gfxCommandGenerateMips(gfx, albedo_buffer);
+            gfxDestroyBuffer(gfx, upload_buffer);
+        }
+
+        albedo_buffers.insert(material_ref, albedo_buffer);
     }
 
     GfxAccelerationStructure rt_scene = gfxCreateAccelerationStructure(gfx);
@@ -77,14 +121,14 @@ int32_t main()
         GfxConstRef<GfxInstance> instance_ref = gfxSceneGetInstanceHandle(scene, i);
         GfxRaytracingPrimitive   rt_mesh      = gfxCreateRaytracingPrimitive(gfx, rt_scene);
 
-        gfxRaytracingPrimitiveBuild(gfx, rt_mesh, index_buffers[instance_ref->mesh], vertex_buffers[instance_ref->mesh], sizeof(GfxVertex));
+        gfxRaytracingPrimitiveBuild(gfx, rt_mesh, index_buffers[instance_ref->mesh], vertex_buffers[instance_ref->mesh]);
     }
 
     gfxAccelerationStructureUpdate(gfx, rt_scene);
 
     // Create our raytracing render targets
-    GfxTexture ao_buffer    = gfxCreateTexture2D(gfx, DXGI_FORMAT_R32_FLOAT);
-    GfxTexture accum_buffer = gfxCreateTexture2D(gfx, DXGI_FORMAT_R32G32_FLOAT);
+    GfxTexture color_buffer = gfxCreateTexture2D(gfx, DXGI_FORMAT_R16G16B16A16_FLOAT);
+    GfxTexture accum_buffer = gfxCreateTexture2D(gfx, DXGI_FORMAT_R32G32B32A32_FLOAT);
     GfxTexture depth_buffer = gfxCreateTexture2D(gfx, DXGI_FORMAT_D32_FLOAT);
 
     // And our blue noise sampler
@@ -94,7 +138,7 @@ int32_t main()
 
     // Compile our ambient occlusion shaders
     GfxDrawState trace_draw_state;
-    gfxDrawStateSetColorTarget(trace_draw_state, 0, ao_buffer);
+    gfxDrawStateSetColorTarget(trace_draw_state, 0, color_buffer);
     gfxDrawStateSetDepthStencilTarget(trace_draw_state, depth_buffer);
 
     GfxDrawState accumulate_draw_state;
@@ -106,7 +150,7 @@ int32_t main()
     GfxKernel  accumulate_kernel = gfxCreateGraphicsKernel(gfx, rtao_program, accumulate_draw_state, "Accumulate");
     GfxKernel  resolve_kernel    = gfxCreateGraphicsKernel(gfx, rtao_program, "Resolve");
 
-    gfxProgramSetParameter(gfx, rtao_program, "AoBuffer", ao_buffer);
+    gfxProgramSetParameter(gfx, rtao_program, "ColorBuffer", color_buffer);
     gfxProgramSetParameter(gfx, rtao_program, "AccumBuffer", accum_buffer);
 
     gfxProgramSetParameter(gfx, rtao_program, "SobolBuffer", sobol_buffer);
@@ -115,10 +159,15 @@ int32_t main()
 
     gfxProgramSetParameter(gfx, rtao_program, "Scene", rt_scene);
 
+    // Enable anisotropic texture filtering
+    GfxSamplerState texture_sampler = gfxCreateSamplerState(gfx, D3D12_FILTER_ANISOTROPIC, D3D12_TEXTURE_ADDRESS_MODE_WRAP, D3D12_TEXTURE_ADDRESS_MODE_WRAP);
+
+    gfxProgramSetParameter(gfx, rtao_program, "TextureSampler", texture_sampler);
+
     // Run application loop
     glm::mat4 previous_view_projection_matrix;
 
-    float previous_ao_radius = 0.0f, ao_radius = 0.5f;
+    float previous_ao_radius = 0.0f, ao_radius = 5.0f;
 
     for(uint32_t frame_index = 0; !gfxWindowIsCloseRequested(window); ++frame_index)
     {
@@ -127,17 +176,17 @@ int32_t main()
         // Show the GUI options
         if(ImGui::Begin("gfx - rtao"))
         {
-            ImGui::DragFloat("AO radius", &ao_radius, 2e-3f, 0.0f, 1.0f);
+            ImGui::DragFloat("AO radius", &ao_radius, 1e-2f, 0.0f, 10.0f, "%.2f");
         }
         ImGui::End();
 
         // Calculate our camera matrices
         float const aspect_ratio = gfxGetBackBufferWidth(gfx) / (float)gfxGetBackBufferHeight(gfx);
 
-        glm::mat4 view_matrix       = glm::lookAt(glm::vec3(0.0f, 1.0f, 5.0f), glm::vec3(0.0f, 1.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 view_matrix       = glm::lookAt(glm::vec3(15.0f, 2.5f, 0.0f), glm::vec3(0.0f, 2.5f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         glm::mat4 projection_matrix = glm::perspective(0.6f, aspect_ratio, 1e-1f, 1e4f);
 
-        if (ao_radius != previous_ao_radius || projection_matrix * view_matrix != previous_view_projection_matrix)
+        if(ao_radius != previous_ao_radius || projection_matrix * view_matrix != previous_view_projection_matrix)
         {
             gfxCommandClearTexture(gfx, accum_buffer);
 
@@ -160,12 +209,17 @@ int32_t main()
         // Perform our occlusion tracing
         gfxCommandBindKernel(gfx, trace_kernel);
 
-        gfxCommandClearTexture(gfx, ao_buffer);
+        gfxCommandClearTexture(gfx, color_buffer);
         gfxCommandClearTexture(gfx, depth_buffer);
 
         for(uint32_t i = 0; i < instance_count; ++i)
         {
             GfxInstance const &instance = gfxSceneGetInstances(scene)[i];
+
+            if(instance.mesh->material)
+                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[instance.mesh->material]);
+            else
+                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", GfxTexture());    // will return black
 
             gfxCommandBindIndexBuffer(gfx, index_buffers[instance.mesh]);
             gfxCommandBindVertexBuffer(gfx, vertex_buffers[instance.mesh]);
@@ -189,7 +243,7 @@ int32_t main()
     }
 
     // Release resources on termination
-    gfxDestroyTexture(gfx, ao_buffer);
+    gfxDestroyTexture(gfx, color_buffer);
     gfxDestroyTexture(gfx, accum_buffer);
     gfxDestroyTexture(gfx, depth_buffer);
 
@@ -202,12 +256,15 @@ int32_t main()
     gfxDestroyKernel(gfx, resolve_kernel);
     gfxDestroyProgram(gfx, rtao_program);
 
+    gfxDestroySamplerState(gfx, texture_sampler);
     gfxDestroyAccelerationStructure(gfx, rt_scene);
 
     for(uint32_t i = 0; i < index_buffers.size(); ++i)
         gfxDestroyBuffer(gfx, index_buffers.data()[i]);
     for(uint32_t i = 0; i < vertex_buffers.size(); ++i)
         gfxDestroyBuffer(gfx, vertex_buffers.data()[i]);
+    for(uint32_t i = 0; i < albedo_buffers.size(); ++i)
+        gfxDestroyTexture(gfx, albedo_buffers.data()[i]);
 
     gfxImGuiTerminate();
     gfxDestroyScene(scene);
