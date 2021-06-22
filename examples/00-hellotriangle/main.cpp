@@ -30,27 +30,27 @@ int32_t main()
     GfxContext gfx = gfxCreateContext(window);
     gfxImGuiInitialize(gfx);
 
-    float vertices[] = {  0.5f, -0.5f, 0.0f,
-                          0.0f,  0.7f, 0.0f,
-                         -0.5f, -0.5f, 0.0f };
+    float const vertices[] = {  0.5f, -0.5f, 0.0f,
+                                0.0f,  0.7f, 0.0f,
+                               -0.5f, -0.5f, 0.0f };
     GfxBuffer vertex_buffer = gfxCreateBuffer(gfx, sizeof(vertices), vertices);
 
     GfxProgram program = gfxCreateProgram(gfx, "triangle");
     GfxKernel kernel = gfxCreateGraphicsKernel(gfx, program);
 
-    for (float time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
+    for(float time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
     {
         gfxWindowPumpEvents(window);
 
-        if (ImGui::Begin("gfx - hellotriangle"))
+        if(ImGui::Begin("gfx - hellotriangle"))
         {
             ImGui::Text("A minimalist and easy to use graphics API.");
         }
         ImGui::End();
 
-        float color[] = { 0.5f * cosf(time) + 0.5f,
-                          0.5f * sinf(time) + 0.5f,
-                          1.0f };
+        float const color[] = { 0.5f * cosf(time) + 0.5f,
+                                0.5f * sinf(time) + 0.5f,
+                                1.0f };
         gfxProgramSetParameter(gfx, program, "Color", color);
 
         gfxCommandBindKernel(gfx, kernel);
