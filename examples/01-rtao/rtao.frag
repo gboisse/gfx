@@ -108,7 +108,7 @@ float3 MapToHemisphere(in float2 s, in float3 n, in float e)
 
 float4 Trace(in Params params) : SV_Target
 {
-    float2 s = BlueNoise_Sample2D(uint2(params.position.xy), FrameIndex, 0);
+    float2 s = BlueNoise_Sample2D(params.position.xy, FrameIndex, 0);
 
     RayDesc ray_desc;
     ray_desc.Direction = MapToHemisphere(s, params.normal, 1.0f);
