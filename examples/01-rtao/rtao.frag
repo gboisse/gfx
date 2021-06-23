@@ -121,7 +121,7 @@ float4 Trace(in Params params) : SV_Target
     ray_query.Proceed();
 
     float  ao_value = (ray_query.CommittedStatus() == COMMITTED_TRIANGLE_HIT ? 0.0f : 1.0f);
-    float3 albedo   = AlbedoBuffer.Sample(TextureSampler, params.uv).xyz;
+    float3 albedo   = pow(AlbedoBuffer.Sample(TextureSampler, params.uv).xyz, 2.2f);
 
     return float4(albedo * ao_value, 1.0f);
 }
@@ -136,5 +136,5 @@ float4 Resolve(in float4 pos : SV_Position) : SV_Target
     float4 color_sample = AccumBuffer.Load(int3(pos.xy, 0));
     float3 color_value  = color_sample.xyz / max(color_sample.w - 1.0f, 1.0f);
 
-    return float4(color_value, 1.0f);
+    return float4(pow(color_value, 1.0f / 2.2f), 1.0f);
 }
