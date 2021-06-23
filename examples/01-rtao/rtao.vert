@@ -43,7 +43,7 @@ struct Params
 Params Trace(in Vertex vertex)
 {
     Params params;
-    params.position = mul(ViewProjectionMatrix, float4(vertex.position.xyz, 1.0f));
+    params.position = mul(ViewProjectionMatrix, vertex.position);
     params.normal   = vertex.normal.xyz;
     params.world    = vertex.position.xyz;
     params.uv       = vertex.uv;

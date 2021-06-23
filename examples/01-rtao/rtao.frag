@@ -111,7 +111,7 @@ float4 Trace(in Params params) : SV_Target
     float2 s = BlueNoise_Sample2D(uint2(params.position.xy), FrameIndex, 0);
 
     RayDesc ray_desc;
-    ray_desc.Direction = normalize(MapToHemisphere(s, params.normal, 1.0f));
+    ray_desc.Direction = MapToHemisphere(s, params.normal, 1.0f);
     ray_desc.Origin    = params.world;
     ray_desc.TMin      = 1e-3f;
     ray_desc.TMax      = AoRadius;
