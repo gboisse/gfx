@@ -196,8 +196,8 @@ int32_t main()
         }
 
         // Apply anti-aliasing jitter
-        projection_matrix[2][0] = (2.0f * CalculateHaltonNumber(frame_index, 2) - 1.0f) / gfxGetBackBufferWidth(gfx);
-        projection_matrix[2][1] = (2.0f * CalculateHaltonNumber(frame_index, 3) - 1.0f) / gfxGetBackBufferHeight(gfx);
+        projection_matrix[2][0] = (2.0f * CalculateHaltonNumber(frame_index & 255, 2) - 1.0f) / gfxGetBackBufferWidth(gfx);
+        projection_matrix[2][1] = (2.0f * CalculateHaltonNumber(frame_index & 255, 3) - 1.0f) / gfxGetBackBufferHeight(gfx);
 
         glm::mat4 view_projection_matrix = projection_matrix * view_matrix;
 
