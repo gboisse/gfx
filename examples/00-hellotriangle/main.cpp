@@ -22,52 +22,37 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
 #include "gfx_window.h"
-#include "gfx_imgui.h"
 
 int32_t main()
 {
-    GfxWindow window = gfxCreateWindow(1280, 720, "gfx - hellotriangle");
-    GfxContext gfx = gfxCreateContext(window);
-    gfxImGuiInitialize(gfx);
+    auto window = gfxCreateWindow(1280, 720, "gfx - hellotriangle");
+    auto gfx = gfxCreateContext(window);
 
-    float const vertices[] = {  0.5f, -0.5f, 0.0f,
-                                0.0f,  0.7f, 0.0f,
-                               -0.5f, -0.5f, 0.0f };
-    GfxBuffer vertex_buffer = gfxCreateBuffer(gfx, sizeof(vertices), vertices);
+    float vertices[] = {  0.5f, -0.5f, 0.0f,
+                          0.0f,  0.7f, 0.0f,
+                         -0.5f, -0.5f, 0.0f };
+    auto vertex_buffer = gfxCreateBuffer(gfx, sizeof(vertices), vertices);
 
-    GfxProgram program = gfxCreateProgram(gfx, "triangle");
-    GfxKernel kernel = gfxCreateGraphicsKernel(gfx, program);
+    auto program = gfxCreateProgram(gfx, "triangle");
+    auto kernel = gfxCreateGraphicsKernel(gfx, program);
 
-    for(float time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
+    for(auto time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
     {
         gfxWindowPumpEvents(window);
 
-        if(ImGui::Begin("gfx - hellotriangle"))
-        {
-            ImGui::Text("A minimalist and easy to use graphics API.");
-        }
-        ImGui::End();
-
-        float const color[] = { 0.5f * cosf(time) + 0.5f,
-                                0.5f * sinf(time) + 0.5f,
-                                1.0f };
+        float color[] = { 0.5f * cosf(time) + 0.5f,
+                          0.5f * sinf(time) + 0.5f,
+                          1.0f };
         gfxProgramSetParameter(gfx, program, "Color", color);
 
         gfxCommandBindKernel(gfx, kernel);
         gfxCommandBindVertexBuffer(gfx, vertex_buffer);
 
-        gfxCommandClearBackBuffer(gfx);
         gfxCommandDraw(gfx, 3);
 
-        gfxImGuiRender();
         gfxFrame(gfx);
     }
 
-    gfxDestroyKernel(gfx, kernel);
-    gfxDestroyProgram(gfx, program);
-    gfxDestroyBuffer(gfx, vertex_buffer);
-
-    gfxImGuiTerminate();
     gfxDestroyContext(gfx);
     gfxDestroyWindow(window);
 
