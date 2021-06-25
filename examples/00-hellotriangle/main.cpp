@@ -23,7 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 #include "gfx_window.h"
 
-int32_t main()
+int main()
 {
     auto window = gfxCreateWindow(1280, 720, "gfx - hellotriangle");
     auto gfx = gfxCreateContext(window);
