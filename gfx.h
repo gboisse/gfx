@@ -796,7 +796,8 @@ class GfxInternal
             {
                 GFX_ASSERT(textures != nullptr && texture_count > 1);
                 if(type_ == kType_Image && data_.image_.texture_count == texture_count)
-                    for(uint32_t i = 0; i < texture_count; ++i) { if(textures[i].handle != data_.image_.textures_[i].handle) { ++id_; break; } }
+                    for(uint32_t i = 0; i < texture_count; ++i) { if(textures[i].handle != data_.image_.textures_[i].handle ||
+                                                                    (data_.image_.mip_levels_ != nullptr ? data_.image_.mip_levels_[i] : data_.image_.mip_level_) != (mip_levels != nullptr ? mip_levels[i] : 0)) { ++id_; break; } }
                 else
                 {
                     unset();
