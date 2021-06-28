@@ -41,7 +41,8 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 
 enum GfxCreateContextFlag
 {
-    kGfxCreateContextFlag_EnableDebugLayer = 1 << 0
+    kGfxCreateContextFlag_EnableDebugLayer       = 1 << 0,
+    kGfxCreateContextFlag_EnableStablePowerState = 1 << 1
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -1128,6 +1129,13 @@ public:
                 break;
         if(device_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
+        if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && device_->SetStablePowerState(TRUE) != S_OK)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to enable stable power state, is developer mode enabled?");
+            device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
+            if(!SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
+        }
         if(!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils_))) ||
            !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
            !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
