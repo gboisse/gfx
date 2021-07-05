@@ -53,6 +53,8 @@ uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);
 uint32_t gfxGetBackBufferIndex(GfxContext context);
 
+bool gfxIsRaytracingSupported(GfxContext context);
+
 //!
 //! Buffer resources.
 //!
@@ -1432,6 +1434,11 @@ public:
         return fence_index_;
     }
 
+    inline bool isRaytracingSupported() const
+    {
+        return (dxr_device_ != nullptr ? true : false);
+    }
+
     GfxBuffer createBuffer(uint64_t size, void const *data, GfxCpuAccess cpu_access, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_COPY_DEST)
     {
         GfxBuffer buffer = {};
@@ -1852,6 +1859,8 @@ public:
     GfxResult updateAccelerationStructure(GfxAccelerationStructure const &acceleration_structure)
     {
         void *data = nullptr;
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid acceleration structure object");
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
@@ -1933,6 +1942,7 @@ public:
 
     uint32_t getAccelerationStructureRaytracingPrimitiveCount(GfxAccelerationStructure const &acceleration_structure)
     {
+        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
@@ -1944,6 +1954,7 @@ public:
 
     GfxRaytracingPrimitive const *getAccelerationStructureRaytracingPrimitives(GfxAccelerationStructure const &acceleration_structure)
     {
+        if(dxr_device_ == nullptr) return nullptr;  // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
@@ -1956,6 +1967,8 @@ public:
     GfxRaytracingPrimitive createRaytracingPrimitive(GfxAccelerationStructure const &acceleration_structure)
     {
         GfxRaytracingPrimitive raytracing_primitive = {};
+        if(dxr_device_ == nullptr)
+            return raytracing_primitive;    // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
@@ -1990,6 +2003,8 @@ public:
 
     GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
         if(!buffer_handles_.has_handle(vertex_buffer.handle))
@@ -2007,6 +2022,8 @@ public:
 
     GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
         if(!buffer_handles_.has_handle(index_buffer.handle))
@@ -2031,6 +2048,8 @@ public:
 
     GfxResult setRaytracingPrimitiveTransform(GfxRaytracingPrimitive const &raytracing_primitive, float const *row_major_4x4_transform)
     {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set transform on an invalid raytracing primitive object");
         if(row_major_4x4_transform == nullptr)
@@ -2043,6 +2062,8 @@ public:
 
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
     {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid raytracing primitive object");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
@@ -6570,6 +6591,13 @@ uint32_t gfxGetBackBufferIndex(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBackBufferIndex();
+}
+
+bool gfxIsRaytracingSupported(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;  // invalid context
+    return gfx->isRaytracingSupported();
 }
 
 GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data, GfxCpuAccess cpu_access)
