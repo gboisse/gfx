@@ -1131,7 +1131,7 @@ public:
                 break;
         if(device_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
-        if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && device_->SetStablePowerState(TRUE) != S_OK)
+        if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
         {
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
             device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
