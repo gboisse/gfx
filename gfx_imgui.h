@@ -30,7 +30,7 @@ SOFTWARE.
 //! ImGui initialization/termination.
 //!
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, ImGuiConfigFlags flags = 0);
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const *font_filename = nullptr, ImGuiConfigFlags flags = 0);
 GfxResult gfxImGuiTerminate();
 GfxResult gfxImGuiRender();
 
@@ -67,7 +67,7 @@ public:
     GfxImGuiInternal() {}
     ~GfxImGuiInternal() { terminate(); }
 
-    GfxResult initialize(GfxContext const &gfx, ImGuiConfigFlags flags)
+    GfxResult initialize(GfxContext const &gfx, char const *font_filename, ImGuiConfigFlags flags)
     {
         if(!gfx)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
@@ -84,6 +84,8 @@ public:
 
         uint8_t *font_data;
         int32_t font_width, font_height;
+        if(font_filename != nullptr)
+            io.Fonts->AddFontFromFileTTF(font_filename, 16.0f);
         io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
         GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
         font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -307,12 +309,12 @@ public:
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, ImGuiConfigFlags flags)
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const *font_filename, ImGuiConfigFlags flags)
 {
     GfxResult result;
     GfxImGuiInternal *gfx_imgui = new GfxImGuiInternal();
     if(!gfx_imgui) return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to initialize ImGui");
-    result = gfx_imgui->initialize(gfx, flags);
+    result = gfx_imgui->initialize(gfx, font_filename, flags);
     if(result != kGfxResult_NoError)
     {
         delete gfx_imgui;
