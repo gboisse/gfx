@@ -30,7 +30,7 @@ SOFTWARE.
 //! ImGui initialization/termination.
 //!
 
-GfxResult gfxImGuiInitialize(GfxContext gfx);
+GfxResult gfxImGuiInitialize(GfxContext gfx, ImGuiConfigFlags flags = 0);
 GfxResult gfxImGuiTerminate();
 GfxResult gfxImGuiRender();
 
@@ -67,7 +67,7 @@ public:
     GfxImGuiInternal() {}
     ~GfxImGuiInternal() { terminate(); }
 
-    GfxResult initialize(GfxContext const &gfx)
+    GfxResult initialize(GfxContext const &gfx, ImGuiConfigFlags flags)
     {
         if(!gfx)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
@@ -77,6 +77,7 @@ public:
         ImGui::CreateContext();
         ImGui::StyleColorsDark();
         ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags |= flags;    // config flags
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData = this; // set magic number
@@ -306,12 +307,12 @@ public:
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx)
+GfxResult gfxImGuiInitialize(GfxContext gfx, ImGuiConfigFlags flags)
 {
     GfxResult result;
     GfxImGuiInternal *gfx_imgui = new GfxImGuiInternal();
     if(!gfx_imgui) return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to initialize ImGui");
-    result = gfx_imgui->initialize(gfx);
+    result = gfx_imgui->initialize(gfx, flags);
     if(result != kGfxResult_NoError)
     {
         delete gfx_imgui;
