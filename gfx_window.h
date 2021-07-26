@@ -183,7 +183,7 @@ private:
 
     inline void resetKeyBindings()
     {
-        if(is_imgui_initialized_)
+        if(gfxImGuiIsInitialized())
         {
             ImGuiIO &io = ImGui::GetIO();
             for(uint32_t i = 0; i < ARRAYSIZE(io.KeysDown); ++i)
