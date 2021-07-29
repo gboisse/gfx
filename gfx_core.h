@@ -707,6 +707,7 @@ public:
     inline bool empty() const;
 
     inline uint64_t allocate_handle();
+    inline uint64_t get_handle(uint32_t index) const;
     inline bool has_handle(uint64_t handle) const;
     inline bool free_handle(uint64_t handle);
 
@@ -762,6 +763,13 @@ uint64_t GfxHandles::allocate_handle()
     next_handle_ = static_cast<uint32_t>(next_handle & 0xFFFFFFFFull);
     GFX_ASSERT(handle != 0);    // should never happen
     return handle;
+}
+
+uint64_t GfxHandles::get_handle(uint32_t index) const
+{
+    GFX_ASSERT(index < capacity_); if(index >= capacity_) return 0;
+    uint32_t const handle_age = static_cast<uint32_t>(handles_[index] >> 32);
+    return (static_cast<uint64_t>(handle_age) << 32) | static_cast<uint64_t>(index);
 }
 
 bool GfxHandles::has_handle(uint64_t handle) const

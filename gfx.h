@@ -6519,6 +6519,16 @@ private:
                     texture.rtv_descriptor_slots_[j][k] = 0xFFFFFFFFu;
             }
             texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+            GfxTexture
+            gfx_texture            = {};
+            gfx_texture.handle     = texture_handles_.get_handle(textures_.get_index(i));
+            gfx_texture.width      = (uint32_t)resource_desc.Width;
+            gfx_texture.height     = (uint32_t)resource_desc.Height;
+            gfx_texture.depth      = 1; // auto-resize only supported for 2D textures
+            gfx_texture.format     = resource_desc.Format;
+            gfx_texture.mip_levels = 1;
+            gfx_texture.type       = GfxTexture::kType_2D;
+            encodeClearImage(gfx_texture, 0, 0);
         }
         for(uint32_t i = 0; i < ARRAYSIZE(back_buffers_); ++i) { collect(back_buffers_[i]); back_buffers_[i] = nullptr; }
         for(uint32_t i = 0; i < ARRAYSIZE(back_buffer_rtvs_); ++i) { freeRTVDescriptor(back_buffer_rtvs_[i]); back_buffer_rtvs_[i] = 0xFFFFFFFFu; }
