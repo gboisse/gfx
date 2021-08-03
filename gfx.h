@@ -292,6 +292,7 @@ GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
 
+GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
 GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture);   // expects mip level 0 to be populated, generates the others
 
@@ -506,6 +507,8 @@ class GfxInternal
 
     GfxKernel generate_mips_kernel_ = {};
     GfxProgram generate_mips_program_ = {};
+    GfxKernel copy_to_backbuffer_kernel_ = {};
+    GfxProgram copy_to_backbuffer_program_ = {};
 
     struct ScanKernels
     {
@@ -1303,6 +1306,13 @@ public:
         if(!generate_mips_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the compute kernel for generating the texture mips");
 
+        GfxDrawState const default_draw_state = {};
+        GfxProgramDesc copy_to_backbuffer_program_desc = {};
+        copy_to_backbuffer_program_desc.vs = "float4 main(in uint idx : SV_VertexID) : SV_POSITION { return 1.0f - float4(4.0f * (idx & 1), 4.0f * (idx >> 1), 1.0f, 0.0f); }";
+        copy_to_backbuffer_program_desc.ps = "Texture2D InputBuffer; float4 main(in float4 pos : SV_Position) : SV_Target { return InputBuffer.Load(int3(pos.xy, 0)); }";
+        copy_to_backbuffer_program_ = createProgram(copy_to_backbuffer_program_desc, "gfx_CopyToBackBufferProgram");
+        copy_to_backbuffer_kernel_ = createGraphicsKernel(copy_to_backbuffer_program_, default_draw_state, "main", nullptr, 0);
+
         DXGI_ADAPTER_DESC1 adapter_desc = {};
         adapters[i]->GetDesc1(&adapter_desc);
         context.vendor_id = adapter_desc.VendorId;
@@ -1323,6 +1333,8 @@ public:
         destroyProgram(clear_buffer_program_);
         destroyKernel(generate_mips_kernel_);
         destroyProgram(generate_mips_program_);
+        destroyKernel(copy_to_backbuffer_kernel_);
+        destroyProgram(copy_to_backbuffer_program_);
         destroyBuffer(texture_upload_buffer_);
         destroyBuffer(raytracing_scratch_buffer_);
         destroyBuffer(sort_scratch_buffer_);
@@ -2480,6 +2492,30 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult encodeCopyTextureToBackBuffer(GfxTexture const &texture)
+    {
+        GfxResult result;
+        if(!texture_handles_.has_handle(texture.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid texture object");
+        if(!texture.is2D())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from a non-2D texture object");
+        Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
+        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        if(window_width_ != (uint32_t)resource_desc.Width || window_height_ != (uint32_t)resource_desc.Height)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy texture objects that do not have the same dimensions");
+        GfxKernel const bound_kernel = bound_kernel_;
+        GFX_TRY(encodeBindKernel(copy_to_backbuffer_kernel_));
+        setProgramTexture(copy_to_backbuffer_program_, "InputBuffer", texture, 0);
+        result = encodeDraw(3, 1, 0, 0);    // copy to backbuffer
+        if(kernel_handles_.has_handle(bound_kernel.handle))
+            encodeBindKernel(bound_kernel);
+        else
+            bound_kernel_ = bound_kernel;
+        if(result != kGfxResult_NoError)
+            return GFX_SET_ERROR(result, "Failed to copy texture object to backbuffer");
+        return kGfxResult_NoError;
+    }
+
     GfxResult encodeCopyBufferToTexture(GfxTexture const &dst, GfxBuffer const &src)
     {
         if(!texture_handles_.has_handle(dst.handle))
@@ -2490,8 +2526,6 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-2D texture object");
         if(src.cpu_access == kGfxCpuAccess_Read)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from a buffer object with read CPU access");
-        if(src.size == 0)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to texture using an empty buffer object");
         Texture &gfx_texture = textures_[dst]; SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
@@ -2572,8 +2606,6 @@ public:
         if(!texture.is2D()) // TODO: implement for the other texture types (gboisse)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot generate mips of a non-2D texture object");
         if(texture.mip_levels <= 1) return kGfxResult_NoError;  // nothing to generate
-        Texture &gfx_texture = textures_[texture];
-        SetObjectName(gfx_texture, texture.name);
         GfxKernel const bound_kernel = bound_kernel_;
         GFX_TRY(encodeBindKernel(generate_mips_kernel_));
         for(uint32_t mip_level = 1; mip_level < texture.mip_levels; ++mip_level)
@@ -6990,6 +7022,13 @@ GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t 
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeClearImage(texture, mip_level, slice);
+}
+
+GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeCopyTextureToBackBuffer(texture);
 }
 
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src)
