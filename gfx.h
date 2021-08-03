@@ -1312,6 +1312,8 @@ public:
         copy_to_backbuffer_program_desc.ps = "Texture2D InputBuffer; float4 main(in float4 pos : SV_Position) : SV_Target { return InputBuffer.Load(int3(pos.xy, 0)); }";
         copy_to_backbuffer_program_ = createProgram(copy_to_backbuffer_program_desc, "gfx_CopyToBackBufferProgram");
         copy_to_backbuffer_kernel_ = createGraphicsKernel(copy_to_backbuffer_program_, default_draw_state, "main", nullptr, 0);
+        if(!copy_to_backbuffer_kernel_)
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the graphics kernel for copying to the backbuffer");
 
         DXGI_ADAPTER_DESC1 adapter_desc = {};
         adapters[i]->GetDesc1(&adapter_desc);
