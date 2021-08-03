@@ -2504,7 +2504,7 @@ public:
         Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
         D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
         if(window_width_ != (uint32_t)resource_desc.Width || window_height_ != (uint32_t)resource_desc.Height)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy texture objects that do not have the same dimensions");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy between texture objects that do not have the same dimensions");
         GfxKernel const bound_kernel = bound_kernel_;
         GFX_TRY(encodeBindKernel(copy_to_backbuffer_kernel_));
         setProgramTexture(copy_to_backbuffer_program_, "InputBuffer", texture, 0);
