@@ -2443,8 +2443,12 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy to an invalid texture object");
         if(!texture_handles_.has_handle(src.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid texture object");
+        if(dst.type != src.type)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy between texture objects of different types");
         Texture &dst_texture = textures_[dst]; SetObjectName(dst_texture, dst.name);
         Texture &src_texture = textures_[src]; SetObjectName(src_texture, src.name);
+        if(dst_texture.resource_ == src_texture.resource_)
+            return kGfxResult_NoError;  // nothing to be copied
         transitionResource(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST);
         transitionResource(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
         submitPipelineBarriers();   // transition our resources if needed
