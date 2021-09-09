@@ -85,7 +85,7 @@ class GfxMetadata { friend class GfxSceneInternal; bool is_valid; std::string as
                     inline bool getIsValid() const { return is_valid; }
                     inline operator bool() const { return is_valid; } };
 
-template<typename TYPE> GfxMetadata gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle);
+template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle);
 
 //!
 //! Search API.
@@ -106,6 +106,31 @@ GfxRef<TYPE> gfxSceneFindObjectByAssetFile(GfxScene scene, char const *asset_fil
     }
     return object_ref;  // not found
 }
+
+//!
+//! Animation object.
+//!
+
+struct GfxAnimation
+{
+    // Opaque type; use gfxSceneApplyAnimation() to animate the instances in the scene.
+};
+
+GfxRef<GfxAnimation> gfxSceneCreateAnimation(GfxScene scene);
+GfxResult gfxSceneDestroyAnimation(GfxScene scene, uint64_t animation_handle);
+
+GfxResult gfxSceneApplyAnimation(GfxScene scene, uint64_t animation_handle, float time_in_seconds);
+GfxResult gfxSceneResetAllAnimation(GfxScene scene);
+
+float gfxSceneGetAnimationLength(GfxScene scene, uint64_t animation_handle);    // in secs
+float gfxSceneGetAnimationStart(GfxScene scene, uint64_t animation_handle);
+float gfxSceneGetAnimationEnd(GfxScene scene, uint64_t animation_handle);
+
+uint32_t gfxSceneGetAnimationCount(GfxScene scene);
+GfxAnimation const *gfxSceneGetAnimations(GfxScene scene);
+GfxAnimation *gfxSceneGetAnimation(GfxScene scene, uint64_t animation_handle);
+GfxRef<GfxAnimation> gfxSceneGetAnimationHandle(GfxScene scene, uint32_t animation_index);
+GfxMetadata const &gfxSceneGetAnimationMetadata(GfxScene scene, uint64_t animation_handle);
 
 //!
 //! Camera object.
@@ -141,8 +166,8 @@ GfxConstRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene);
 uint32_t gfxSceneGetCameraCount(GfxScene scene);
 GfxCamera const *gfxSceneGetCameras(GfxScene scene);
 GfxCamera *gfxSceneGetCamera(GfxScene scene, uint64_t camera_handle);
-GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle);
 GfxRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index);
+GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle);
 
 //!
 //! Image object.
@@ -164,8 +189,8 @@ GfxResult gfxSceneDestroyImage(GfxScene scene, uint64_t image_handle);
 uint32_t gfxSceneGetImageCount(GfxScene scene);
 GfxImage const *gfxSceneGetImages(GfxScene scene);
 GfxImage *gfxSceneGetImage(GfxScene scene, uint64_t image_handle);
-GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle);
 GfxRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index);
+GfxMetadata const &gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle);
 
 //!
 //! Image helpers.
@@ -211,8 +236,8 @@ GfxResult gfxSceneDestroyMaterial(GfxScene scene, uint64_t material_handle);
 uint32_t gfxSceneGetMaterialCount(GfxScene scene);
 GfxMaterial const *gfxSceneGetMaterials(GfxScene scene);
 GfxMaterial *gfxSceneGetMaterial(GfxScene scene, uint64_t material_handle);
-GfxMetadata gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle);
 GfxRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index);
+GfxMetadata const &gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle);
 
 //!
 //! Material helpers.
@@ -229,9 +254,9 @@ inline bool gfxMaterialIsEmissive(GfxMaterial const &material)
 
 struct GfxVertex
 {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 uv;
+    glm::vec3 position = glm::vec3(0.0f);
+    glm::vec3 normal   = glm::vec3(0.0f);
+    glm::vec2 uv       = glm::vec3(0.0f);
 };
 
 struct GfxMesh
@@ -251,8 +276,8 @@ GfxResult gfxSceneDestroyMesh(GfxScene scene, uint64_t mesh_handle);
 uint32_t gfxSceneGetMeshCount(GfxScene scene);
 GfxMesh const *gfxSceneGetMeshes(GfxScene scene);
 GfxMesh *gfxSceneGetMesh(GfxScene scene, uint64_t mesh_handle);
-GfxMetadata gfxSceneGetMeshMetadata(GfxScene scene, uint64_t mesh_handle);
 GfxRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index);
+GfxMetadata const &gfxSceneGetMeshMetadata(GfxScene scene, uint64_t mesh_handle);
 
 //!
 //! Instance object.
@@ -271,48 +296,54 @@ GfxResult gfxSceneDestroyInstance(GfxScene scene, uint64_t instance_handle);
 uint32_t gfxSceneGetInstanceCount(GfxScene scene);
 GfxInstance const *gfxSceneGetInstances(GfxScene scene);
 GfxInstance *gfxSceneGetInstance(GfxScene scene, uint64_t instance_handle);
-GfxMetadata gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle);
 GfxRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index);
+GfxMetadata const &gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle);
 
 //!
 //! Template specializations.
 //!
 
+template<> inline uint32_t gfxSceneGetObjectCount<GfxAnimation>(GfxScene scene) { return gfxSceneGetAnimationCount(scene); }
+template<> inline GfxAnimation const *gfxSceneGetObjects<GfxAnimation>(GfxScene scene) { return gfxSceneGetAnimations(scene); }
+template<> inline GfxAnimation *gfxSceneGetObject<GfxAnimation>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetAnimation(scene, object_handle); }
+template<> inline GfxRef<GfxAnimation> gfxSceneGetObjectHandle<GfxAnimation>(GfxScene scene, uint32_t object_index) { return gfxSceneGetAnimationHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxAnimation>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetAnimationMetadata(scene, object_handle); }
+
 template<> inline uint32_t gfxSceneGetObjectCount<GfxCamera>(GfxScene scene) { return gfxSceneGetCameraCount(scene); }
 template<> inline GfxCamera const *gfxSceneGetObjects<GfxCamera>(GfxScene scene) { return gfxSceneGetCameras(scene); }
 template<> inline GfxCamera *gfxSceneGetObject<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCamera(scene, object_handle); }
-template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
 template<> inline GfxRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene scene, uint32_t object_index) { return gfxSceneGetCameraHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxImage>(GfxScene scene) { return gfxSceneGetImageCount(scene); }
 template<> inline GfxImage const *gfxSceneGetObjects<GfxImage>(GfxScene scene) { return gfxSceneGetImages(scene); }
 template<> inline GfxImage *gfxSceneGetObject<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImage(scene, object_handle); }
-template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImageMetadata(scene, object_handle); }
 template<> inline GfxRef<GfxImage> gfxSceneGetObjectHandle<GfxImage>(GfxScene scene, uint32_t object_index) { return gfxSceneGetImageHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImageMetadata(scene, object_handle); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxMaterial>(GfxScene scene) { return gfxSceneGetMaterialCount(scene); }
 template<> inline GfxMaterial const *gfxSceneGetObjects<GfxMaterial>(GfxScene scene) { return gfxSceneGetMaterials(scene); }
 template<> inline GfxMaterial *gfxSceneGetObject<GfxMaterial>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMaterial(scene, object_handle); }
-template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxMaterial>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMaterialMetadata(scene, object_handle); }
 template<> inline GfxRef<GfxMaterial> gfxSceneGetObjectHandle<GfxMaterial>(GfxScene scene, uint32_t object_index) { return gfxSceneGetMaterialHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxMaterial>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMaterialMetadata(scene, object_handle); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxMesh>(GfxScene scene) { return gfxSceneGetMeshCount(scene); }
 template<> inline GfxMesh const *gfxSceneGetObjects<GfxMesh>(GfxScene scene) { return gfxSceneGetMeshes(scene); }
 template<> inline GfxMesh *gfxSceneGetObject<GfxMesh>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMesh(scene, object_handle); }
-template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxMesh>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMeshMetadata(scene, object_handle); }
 template<> inline GfxRef<GfxMesh> gfxSceneGetObjectHandle<GfxMesh>(GfxScene scene, uint32_t object_index) { return gfxSceneGetMeshHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxMesh>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetMeshMetadata(scene, object_handle); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxInstance>(GfxScene scene) { return gfxSceneGetInstanceCount(scene); }
 template<> inline GfxInstance const *gfxSceneGetObjects<GfxInstance>(GfxScene scene) { return gfxSceneGetInstances(scene); }
 template<> inline GfxInstance *gfxSceneGetObject<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstance(scene, object_handle); }
-template<> inline GfxMetadata gfxSceneGetObjectMetadata<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstanceMetadata(scene, object_handle); }
 template<> inline GfxRef<GfxInstance> gfxSceneGetObjectHandle<GfxInstance>(GfxScene scene, uint32_t object_index) { return gfxSceneGetInstanceHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstanceMetadata(scene, object_handle); }
 
 template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene scene) { static_assert("Cannot get object count for unsupported object type"); }
 template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene scene) { static_assert("Cannot get object list for unsupported object type"); }
 template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get scene object for unsupported object type"); }
-template<typename TYPE> GfxMetadata gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get object metadata for unsupported object type"); }
 template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert("Cannot get object handle for unsupported object type"); }
+template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get object metadata for unsupported object type"); }
 
 //!
 //! Implementation details.
@@ -326,10 +357,63 @@ template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uin
 #include <map>                  // std::map
 #include "tiny_gltf.h"          // glTF loader
 #include "tiny_obj_loader.cc"   // obj loader
+#include "glm/gtx/quaternion.hpp"
 
 class GfxSceneInternal
 {
     GFX_NON_COPYABLE(GfxSceneInternal);
+
+    struct GltfNode
+    {
+        glm::dmat4 matrix_;
+
+        glm::dvec3 translate_;
+        glm::dquat rotate_;
+        glm::dvec3 scale_;
+
+        std::vector<uint64_t> children_;
+        std::vector<GfxRef<GfxInstance>> instances_;
+    };
+
+    struct GltfAnimatedNode
+    {
+        glm::dvec3 translate_;
+        glm::dquat rotate_;
+        glm::dvec3 scale_;
+    };
+
+    enum GltfAnimationChannelType
+    {
+        kGltfAnimationChannelType_Translate = 0,
+        kGltfAnimationChannelType_Rotate,
+        kGltfAnimationChannelType_Scale,
+
+        kGltfAnimationChannelType_Count
+    };
+
+    struct GltfAnimationChannel
+    {
+        uint64_t node_;
+        std::vector<float> keyframes_;
+        std::vector<glm::vec4> values_;
+        GltfAnimationChannelType type_;
+    };
+
+    struct GltfAnimation
+    {
+        std::vector<uint64_t> nodes_;
+        std::vector<GltfAnimationChannel> channels_;
+    };
+
+    GfxArray<GltfNode> gltf_nodes_;
+    GfxArray<GltfAnimatedNode> gltf_animated_nodes_;
+    GfxHandles gltf_node_handles_;
+    GfxArray<GltfAnimation> gltf_animations_;
+
+    GfxArray<GfxAnimation> animations_;
+    GfxArray<uint64_t> animation_refs_;
+    GfxArray<GfxMetadata> animation_metadata_;
+    GfxHandles animation_handles_;
 
     GfxArray<GfxCamera> cameras_;
     GfxArray<uint64_t> camera_refs_;
@@ -365,6 +449,11 @@ class GfxSceneInternal
     template<typename TYPE> GfxArray<GfxMetadata> &object_metadata_();
     template<typename TYPE> GfxHandles &object_handles_();
 
+    template<> inline GfxArray<GfxAnimation> &objects_<GfxAnimation>() { return animations_; }
+    template<> inline GfxArray<uint64_t> &object_refs_<GfxAnimation>() { return animation_refs_; }
+    template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxAnimation>() { return animation_metadata_; }
+    template<> inline GfxHandles &object_handles_<GfxAnimation>() { return animation_handles_; }
+
     template<> inline GfxArray<GfxCamera> &objects_<GfxCamera>() { return cameras_; }
     template<> inline GfxArray<uint64_t> &object_refs_<GfxCamera>() { return camera_refs_; }
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxCamera>() { return camera_metadata_; }
@@ -391,7 +480,7 @@ class GfxSceneInternal
     template<> inline GfxHandles &object_handles_<GfxInstance>() { return instance_handles_; }
 
 public:
-    GfxSceneInternal(GfxScene &scene) : camera_handles_("camera"), image_handles_("image")
+    GfxSceneInternal(GfxScene &scene) : animation_handles_("animation"), camera_handles_("camera"), image_handles_("image")
                                       , material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
                                       { scene.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxSceneInternal() { terminate(); }
@@ -418,6 +507,9 @@ public:
         if(CaseInsensitiveCompare(asset_extension, ".obj") ||
            CaseInsensitiveCompare(asset_extension, ".objm"))
             GFX_TRY(importObj(scene, asset_file));
+        else if(CaseInsensitiveCompare(asset_extension, ".glb") ||
+                CaseInsensitiveCompare(asset_extension, ".gltf"))
+            GFX_TRY(importGltf(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".hdr"))
             GFX_TRY(importHdr(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||
@@ -432,6 +524,7 @@ public:
 
     GfxResult clear()
     {
+        clearObjects<GfxAnimation>();
         clearObjects<GfxCamera>();
         clearObjects<GfxImage>();
         clearObjects<GfxMaterial>();
@@ -439,6 +532,132 @@ public:
         clearObjects<GfxInstance>();
 
         return kGfxResult_NoError;
+    }
+
+    GfxResult applyAnimation(uint64_t animation_handle, float time_in_seconds)
+    {
+        if(!animation_handles_.has_handle(animation_handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot apply animation of an invalid object");
+        GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(animation_handle));
+        if(gltf_animation != nullptr)
+        {
+            for(size_t i = 0; i < gltf_animation->channels_.size(); ++i)
+            {
+                double interpolate = 0.0;
+                glm::dvec4 previous_value, next_value;
+                GltfAnimationChannel const &animation_channel = gltf_animation->channels_[i];
+                if(!gltf_node_handles_.has_handle(animation_channel.node_)) continue;   // invalid target node
+                GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(animation_channel.node_));
+                if(animated_node == nullptr) { GFX_ASSERT(0); continue; }   // should never happen
+                uint32_t const keyframe = (uint32_t)(std::lower_bound(animation_channel.keyframes_.data(),
+                                                                      animation_channel.keyframes_.data() + animation_channel.keyframes_.size(), time_in_seconds)
+                                                                    - animation_channel.keyframes_.data());
+                if(keyframe == 0)
+                    previous_value = next_value = glm::dvec4(animation_channel.values_.front());
+                else if(keyframe >= (uint32_t)animation_channel.keyframes_.size())
+                    previous_value = next_value = glm::dvec4(animation_channel.values_.back());
+                else
+                {
+                    interpolate = ((double)time_in_seconds                        - (double)animation_channel.keyframes_[keyframe - 1])
+                                / ((double)animation_channel.keyframes_[keyframe] - (double)animation_channel.keyframes_[keyframe - 1]);
+                    previous_value = glm::dvec4(animation_channel.values_[keyframe - 1]);
+                    next_value     = glm::dvec4(animation_channel.values_[keyframe]);
+                }
+                switch(animation_channel.type_)
+                {
+                case kGltfAnimationChannelType_Translate:
+                    animated_node->translate_ = glm::mix(glm::dvec3(previous_value.x, previous_value.y, previous_value.z),
+                                                         glm::dvec3(next_value.x,     next_value.y,     next_value.z), interpolate);
+                    break;
+                case kGltfAnimationChannelType_Rotate:
+                    animated_node->rotate_ = glm::slerp(glm::dquat(previous_value.w, previous_value.x, previous_value.y, previous_value.z),
+                                                        glm::dquat(next_value.w,     next_value.x,     next_value.y,     next_value.z), interpolate);
+                    break;
+                case kGltfAnimationChannelType_Scale:
+                    animated_node->scale_ = glm::mix(glm::dvec3(previous_value.x, previous_value.y, previous_value.z),
+                                                     glm::dvec3(next_value.x,     next_value.y,     next_value.z), interpolate);
+                    break;
+                default:
+                    GFX_ASSERT(0);
+                    break;  // should never happen
+                }
+            }
+            std::function<void(uint64_t, glm::dmat4 const &)> VisitNode;
+            VisitNode = [&](uint64_t node_handle, glm::dmat4 const &parent_transform)
+            {
+                glm::dmat4 transform;
+                if(!gltf_node_handles_.has_handle(node_handle)) return;
+                GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
+                GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(node_handle));
+                if(animated_node == nullptr)
+                    transform = parent_transform * node.matrix_;
+                else
+                {
+                    glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), animated_node->translate_);
+                    glm::dmat4 const rotate = glm::toMat4(animated_node->rotate_);
+                    glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), animated_node->scale_);
+                    transform = parent_transform * translate * rotate * scale;
+                    animated_node->translate_ = node.translate_;
+                    animated_node->rotate_ = node.rotate_;
+                    animated_node->scale_ = node.scale_;
+                }
+                for(size_t i = 0; i < node.children_.size(); ++i)
+                    VisitNode(node.children_[i], transform);
+                for(size_t i = 0; i < node.instances_.size(); ++i)
+                    if(node.instances_[i])
+                        node.instances_[i]->transform = glm::mat4(transform);
+            };
+            for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
+                VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult resetAllAnimation()
+    {
+        return kGfxResult_NoError;
+    }
+
+    float getAnimationLength(uint64_t animation_handle)
+    {
+        if(!animation_handles_.has_handle(animation_handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the duration of an invalid animation object");
+            return 0.0f;    // invalid operation
+        }
+        return GFX_MAX(getAnimationEnd(animation_handle) - getAnimationStart(animation_handle), 0.0f);
+    }
+
+    float getAnimationStart(uint64_t animation_handle)
+    {
+        float animation_start = 0.0f;
+        if(!animation_handles_.has_handle(animation_handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the start of an invalid animation object");
+            return animation_start; // invalid operation
+        }
+        GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(animation_handle));
+        if(gltf_animation != nullptr)
+            for(size_t i = 0; i < gltf_animation->channels_.size(); ++i)
+                if(!gltf_animation->channels_[i].keyframes_.empty())
+                    animation_start = GFX_MIN(animation_start, gltf_animation->channels_[i].keyframes_.front());
+        return animation_start;
+    }
+
+    float getAnimationEnd(uint64_t animation_handle)
+    {
+        float animation_end = 0.0f;
+        if(!animation_handles_.has_handle(animation_handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the end of an invalid animation object");
+            return animation_end;   // invalid operation
+        }
+        GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(animation_handle));
+        if(gltf_animation != nullptr)
+            for(size_t i = 0; i < gltf_animation->channels_.size(); ++i)
+                if(!gltf_animation->channels_[i].keyframes_.empty())
+                    animation_end = GFX_MAX(animation_end, gltf_animation->channels_[i].keyframes_.back());
+        return animation_end;
     }
 
     GfxResult setActiveCamera(GfxScene const &scene, uint64_t camera_handle)
@@ -509,15 +728,6 @@ public:
     }
 
     template<typename TYPE>
-    GfxMetadata getObjectMetadata(uint64_t object_handle)
-    {
-        GfxMetadata const metadata = {};
-        if(!object_handles_<TYPE>().has_handle(object_handle))
-            return metadata;    // invalid object handle
-        return object_metadata_<TYPE>()[GetObjectIndex(object_handle)];
-    }
-
-    template<typename TYPE>
     GfxRef<TYPE> getObjectHandle(GfxScene const &scene, uint32_t object_index)
     {
         GfxRef<TYPE> object_ref = {};
@@ -526,6 +736,15 @@ public:
         object_ref.handle = object_refs_<TYPE>()[object_refs_<TYPE>().get_index(object_index)];
         object_ref.scene = scene;
         return object_ref;
+    }
+
+    template<typename TYPE>
+    GfxMetadata const &getObjectMetadata(uint64_t object_handle)
+    {
+        static GfxMetadata const metadata = {};
+        if(!object_handles_<TYPE>().has_handle(object_handle))
+            return metadata;    // invalid object handle
+        return object_metadata_<TYPE>()[GetObjectIndex(object_handle)];
     }
 
     static inline GfxSceneInternal *GetGfxScene(GfxScene scene) { return reinterpret_cast<GfxSceneInternal *>(scene.handle); }
@@ -589,7 +808,7 @@ private:
         {
             uint32_t first_index = 0;
             tinyobj::shape_t const &obj_shape = obj_reader.GetShapes()[i];
-            if(obj_shape.mesh.indices.empty()) continue;    // only support meshes for now
+            if(obj_shape.mesh.indices.empty()) continue;    // only support indexed meshes for now
             typedef std::map<std::tuple<int32_t, int32_t, int32_t>, std::pair<uint32_t, GfxVertex>> VertexMap;
             std::map<uint32_t, VertexMap> mesh_map; // based on material index
             std::map<uint32_t, std::vector<uint32_t>> index_map;
@@ -675,6 +894,405 @@ private:
                     instance_metadata.object_name += ".";
                     instance_metadata.object_name += std::to_string(mesh_id);
                 }
+            }
+        }
+        return kGfxResult_NoError;
+    }
+
+    struct GltfBuffer
+    {
+        uint32_t type_;
+        uint32_t count_;
+        uint32_t stride_;
+        uint32_t normalize_;
+        uint8_t const *data_;
+        uint32_t component_type_;
+    };
+
+    template<typename TYPE>
+    struct GltfComponent {};
+
+    template<> struct GltfComponent<float>    { typedef float    Type; };
+    template<> struct GltfComponent<int32_t>  { typedef int32_t  Type; };
+    template<> struct GltfComponent<uint32_t> { typedef uint32_t Type; };
+
+    template<> struct GltfComponent<glm::vec2> { typedef float Type; };
+    template<> struct GltfComponent<glm::vec3> { typedef float Type; };
+    template<> struct GltfComponent<glm::vec4> { typedef float Type; };
+
+    template<> struct GltfComponent<glm::mat2> { typedef float Type; };
+    template<> struct GltfComponent<glm::mat3> { typedef float Type; };
+    template<> struct GltfComponent<glm::mat4> { typedef float Type; };
+
+    template<typename TYPE>
+    TYPE ReadAs(GltfBuffer const &buffer, uint32_t index)
+    {
+        TYPE value = {};
+        if(index >= buffer.count_) return value;
+        using ComponentType = GltfComponent<TYPE>::Type;
+        uint8_t const *data = (buffer.data_ + index * buffer.stride_);
+        uint32_t const num_components = tinygltf::GetNumComponentsInType(buffer.type_);
+        uint32_t const component_size = tinygltf::GetComponentSizeInBytes(buffer.component_type_);
+        GFX_ASSERT((buffer.type_ != TINYGLTF_TYPE_MAT2 || component_size != 1) &&
+                   (buffer.type_ != TINYGLTF_TYPE_MAT3 || component_size != 1) &&
+                   (buffer.type_ != TINYGLTF_TYPE_MAT3 || component_size != 2));    // unsupported alignment
+        for(uint32_t i = 0; i < num_components; ++i)
+        {
+            if((i + 1) * component_size > buffer.stride_) break;
+            if((i + 1) * sizeof(ComponentType) > sizeof(TYPE)) break;
+            ComponentType &output = ((ComponentType *)((void *)&value))[i];
+            switch(buffer.component_type_)
+            {
+            case TINYGLTF_COMPONENT_TYPE_BYTE:
+                {
+                    int8_t const t = ((int8_t *)data)[i];
+                    if(buffer.normalize_) output = (ComponentType)GFX_MAX(t / 127.0, -1.0);
+                                     else output = (ComponentType)(t);
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
+                {
+                    uint8_t const t = ((uint8_t *)data)[i];
+                    if(buffer.normalize_) output = (ComponentType)(t / 255.0);
+                                     else output = (ComponentType)(t);
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_SHORT:
+                {
+                    int16_t const t = ((int16_t *)data)[i];
+                    if(buffer.normalize_) output = (ComponentType)GFX_MAX(t / 32727.0, -1.0);
+                                     else output = (ComponentType)(t);
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+                {
+                    uint16_t const t = ((uint16_t *)data)[i];
+                    if(buffer.normalize_) output = (ComponentType)(t / 65535.0);
+                                     else output = (ComponentType)(t);
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_INT:
+                {
+                    GFX_ASSERT(!buffer.normalize_);
+                    output = (ComponentType)((int32_t *)data)[i];
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+                {
+                    GFX_ASSERT(!buffer.normalize_);
+                    output = (ComponentType)((uint32_t *)data)[i];
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_FLOAT:
+                {
+                    GFX_ASSERT(!buffer.normalize_);
+                    output = (ComponentType)((float *)data)[i];
+                }
+                break;
+            case TINYGLTF_COMPONENT_TYPE_DOUBLE:
+                {
+                    GFX_ASSERT(!buffer.normalize_);
+                    output = (ComponentType)((double *)data)[i];
+                }
+                break;
+            default:
+                GFX_ASSERT(0);
+                break;  // unsupported component type
+            }
+        }
+        return value;
+    }
+
+    GfxResult importGltf(GfxScene const &scene, char const *asset_file)
+    {
+        bool result;
+        tinygltf::Model gltf_model;
+        std::string errors, warnings;
+        tinygltf::TinyGLTF gltf_reader;
+        GFX_ASSERT(asset_file != nullptr);
+        char const *asset_extension = strrchr(asset_file, '.');
+        GFX_ASSERT(asset_extension != nullptr);
+        if(CaseInsensitiveCompare(asset_extension, ".glb"))
+            result = gltf_reader.LoadBinaryFromFile(&gltf_model, &errors, &warnings, asset_file);
+        else
+            result = gltf_reader.LoadASCIIFromFile(&gltf_model, &errors, &warnings, asset_file);
+        if(!result)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to load gltf file `%s'", errors.c_str());
+        if(!warnings.empty())
+            GFX_PRINTLN("Parsed gltf file `%s' with warnings:\r\n%s", asset_file, warnings.c_str());
+        if(gltf_model.scenes.empty())
+            return kGfxResult_NoError;  // nothing needs loading
+        auto const GetBuffer = [&](int32_t accessor_index)
+        {
+            GltfBuffer buffer = {};
+            if(accessor_index < 0 || accessor_index >= (int32_t)gltf_model.accessors.size())
+                return buffer;  // out of bounds
+            tinygltf::Accessor const &gltf_accessor = gltf_model.accessors[accessor_index];
+            if(gltf_accessor.sparse.isSparse) { GFX_ASSERT(0); return buffer; } // sparse accessors aren't supported yet
+            if(tinygltf::GetNumComponentsInType((uint32_t)gltf_accessor.type) < 0 ||
+               tinygltf::GetComponentSizeInBytes((uint32_t)gltf_accessor.componentType) < 0)
+                return buffer;  // unrecognized data type
+            if(gltf_accessor.bufferView < 0 || gltf_accessor.bufferView >= (int32_t)gltf_model.bufferViews.size())
+                return buffer;  // out of bounds
+            tinygltf::BufferView const &gltf_buffer_view = gltf_model.bufferViews[gltf_accessor.bufferView];
+            if(gltf_buffer_view.buffer < 0 || gltf_buffer_view.buffer >= (int32_t)gltf_model.buffers.size())
+                return buffer;  // ouf of bounds
+            tinygltf::Buffer const &gltf_buffer = gltf_model.buffers[gltf_buffer_view.buffer];
+            if(gltf_buffer_view.byteOffset + gltf_buffer_view.byteLength > gltf_buffer.data.size())
+                return buffer;  // out of bounds
+            if(gltf_accessor.byteOffset +
+               tinygltf::GetNumComponentsInType((uint32_t)gltf_accessor.type) *
+               tinygltf::GetComponentSizeInBytes((uint32_t)gltf_accessor.componentType) *
+               gltf_accessor.count > gltf_buffer_view.byteLength)
+                return buffer;  // out of bounds
+            buffer.type_ = (uint32_t)gltf_accessor.type;
+            buffer.count_ = (uint32_t)gltf_accessor.count;
+            buffer.normalize_ = (gltf_accessor.normalized ? 1 : 0);
+            buffer.data_ = gltf_buffer.data.data() + gltf_buffer_view.byteOffset + gltf_accessor.byteOffset;
+            buffer.stride_ = (uint32_t)gltf_buffer_view.byteStride;
+            buffer.component_type_ = (uint32_t)gltf_accessor.componentType;
+            if(buffer.stride_ == 0)
+                buffer.stride_ = tinygltf::GetNumComponentsInType(buffer.type_)
+                               * tinygltf::GetComponentSizeInBytes(buffer.component_type_);
+            return buffer;
+        };
+        std::map<int32_t, std::vector<GfxConstRef<GfxMesh>>> meshes;
+        for(size_t i = 0; i < gltf_model.meshes.size(); ++i)
+        {
+            tinygltf::Mesh const &gltf_mesh = gltf_model.meshes[i];
+            std::vector<GfxConstRef<GfxMesh>> &mesh_list = meshes[(int32_t)i];
+            for(size_t j = 0; j < gltf_mesh.primitives.size(); ++j)
+            {
+                std::map<std::string, int>::const_iterator it;
+                static std::string const position_attribute = "POSITION";
+                static std::string const normal_attribute   = "NORMAL";
+                static std::string const uv_attribute       = "TEXCOORD_0";
+                tinygltf::Primitive const &gltf_primitive = gltf_mesh.primitives[j];
+                if(!gltf_primitive.targets.empty()) continue;   // morph targets aren't supported
+                if(gltf_primitive.mode != TINYGLTF_MODE_TRIANGLES) continue;    // only support triangle meshes
+                GltfBuffer const index_buffer = GetBuffer(gltf_primitive.indices);
+                it = gltf_primitive.attributes.find(position_attribute);    // locate position stream
+                GltfBuffer const position_buffer = GetBuffer(it != gltf_primitive.attributes.end() ? (*it).second : -1);
+                it = gltf_primitive.attributes.find(normal_attribute);  // locate normal stream
+                GltfBuffer const normal_buffer = GetBuffer(it != gltf_primitive.attributes.end() ? (*it).second : -1);
+                it = gltf_primitive.attributes.find(uv_attribute);  // locate uv stream
+                GltfBuffer const uv_buffer = GetBuffer(it != gltf_primitive.attributes.end() ? (*it).second : -1);
+                if(!index_buffer.data_ || !position_buffer.data_) continue; // invalid mesh primitive
+                GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
+                mesh_list.push_back(mesh_ref);
+                GfxMesh &mesh = *mesh_ref;
+                std::map<uint32_t, uint32_t> indices;
+                for(uint32_t k = 0; k < index_buffer.count_; ++k)
+                {
+                    uint32_t const gltf_index = ReadAs<uint32_t>(index_buffer, k);
+                    std::map<uint32_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
+                    if(it2 != indices.end())
+                        mesh.indices.push_back((*it2).second);
+                    else
+                    {
+                        GfxVertex vertex = {};
+                        vertex.position = ReadAs<glm::vec3>(position_buffer, gltf_index);
+                        vertex.normal   = ReadAs<glm::vec3>(normal_buffer, gltf_index);
+                        vertex.uv       = ReadAs<glm::vec2>(uv_buffer, gltf_index);
+                        uint32_t const index = (uint32_t)mesh.vertices.size();
+                        if(index == 0)
+                        {
+                            mesh.bounds_min = vertex.position;
+                            mesh.bounds_max = vertex.position;
+                        }
+                        else
+                        {
+                            mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
+                            mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
+                        }
+                        mesh.vertices.push_back(vertex);
+                        mesh.indices.push_back(index);
+                        indices[gltf_index] = index;
+                    }
+                }
+                GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
+                mesh_metadata.asset_file = asset_file;  // set up metadata
+                mesh_metadata.object_name = gltf_mesh.name;
+                if(j > 0)
+                {
+                    mesh_metadata.object_name += ".";
+                    mesh_metadata.object_name += std::to_string(j);
+                }
+            }
+        }
+        std::map<int32_t, uint64_t> animated_nodes;
+        std::map<size_t, GfxConstRef<GfxAnimation>> animations;
+        for(size_t i = 0; i < gltf_model.animations.size(); ++i)
+        {
+            GfxRef<GfxAnimation> animation_ref;
+            GltfAnimation *animation_object = nullptr;
+            tinygltf::Animation const &gltf_animation = gltf_model.animations[i];
+            for(size_t j = 0; j < gltf_animation.channels.size(); ++j)
+            {
+                uint64_t animated_node_handle;
+                tinygltf::AnimationChannel const &gltf_animation_channel = gltf_animation.channels[j];
+                if(gltf_animation_channel.target_node < 0 || gltf_animation_channel.target_node >= (int32_t)gltf_model.nodes.size()) continue;
+                GltfAnimationChannelType type = kGltfAnimationChannelType_Count;
+                     if(gltf_animation_channel.target_path == "translation") type = kGltfAnimationChannelType_Translate;
+                else if(gltf_animation_channel.target_path == "rotation")    type = kGltfAnimationChannelType_Rotate;
+                else if(gltf_animation_channel.target_path == "scale")       type = kGltfAnimationChannelType_Scale;
+                if(type == kGltfAnimationChannelType_Count) continue;   // unsupported animation channel type
+                if(gltf_animation_channel.sampler < 0 || gltf_animation_channel.sampler >= (int32_t)gltf_animation.samplers.size()) continue;
+                tinygltf::AnimationSampler const &gltf_animation_sampler = gltf_animation.samplers[gltf_animation_channel.sampler];
+                GltfBuffer const input_buffer  = GetBuffer(gltf_animation_sampler.input);
+                GltfBuffer const output_buffer = GetBuffer(gltf_animation_sampler.output);
+                if(!input_buffer.data_ || !output_buffer.data_ || input_buffer.count_ != output_buffer.count_)
+                    continue;   // invalid animation sampler
+                std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(gltf_animation_channel.target_node);
+                if(it != animated_nodes.end())
+                    animated_node_handle = (*it).second;
+                else
+                {
+                    animated_node_handle = gltf_node_handles_.allocate_handle();
+                    animated_nodes[gltf_animation_channel.target_node] = animated_node_handle;
+                    gltf_nodes_.insert(GetObjectIndex(animated_node_handle)) = {};  // flag animated node
+                    gltf_animated_nodes_.insert(GetObjectIndex(animated_node_handle)) = {};
+                }
+                if(!animation_ref)
+                {
+                    animation_ref = gfxSceneCreateAnimation(scene);
+                    animations[i] = animation_ref;  // insert into map
+                    animation_object = &gltf_animations_.insert(GetObjectIndex(animation_ref));
+                    GfxMetadata &animation_metadata = animation_metadata_[animation_ref];
+                    animation_metadata.asset_file = asset_file; // set up metadata
+                    animation_metadata.object_name = gltf_animation.name;
+                }
+                GFX_ASSERT(animation_object != nullptr);
+                GltfAnimationChannel &animation_channel = animation_object->channels_.emplace_back();
+                animation_channel.keyframes_.resize(input_buffer.count_);
+                for(uint32_t k = 0; k < input_buffer.count_; ++k)
+                    animation_channel.keyframes_[k] = ReadAs<float>(input_buffer, k);
+                animation_channel.values_.resize(output_buffer.count_);
+                for(uint32_t k = 0; k < output_buffer.count_; ++k)
+                    animation_channel.values_[k]    = ReadAs<glm::vec4>(output_buffer, k);
+                animation_channel.node_ = animated_node_handle;
+                animation_channel.type_ = type;
+            }
+        }
+        std::function<bool(int32_t, glm::dmat4 const &, bool)> VisitNode;
+        VisitNode = [&](int32_t node_index, glm::dmat4 const &parent_transform, bool is_parent_animated)
+        {
+            glm::dvec3 T(0.0), S(1.0);
+            glm::dquat R(1.0, 0.0, 0.0, 0.0);
+            glm::dmat4 local_transform(1.0);    // default to identity
+            if(node_index < 0 || node_index >= (int32_t)gltf_model.nodes.size())
+                return false;   // out of bounds
+            tinygltf::Node const &gltf_node = gltf_model.nodes[node_index];
+            if(!gltf_node.matrix.empty())
+            {
+                for(uint32_t col = 0; col < 4; ++col)
+                    for(uint32_t row = 0; row < 4; ++row)
+                        if(4 * col + row < gltf_node.matrix.size())
+                            local_transform[col][row] = gltf_node.matrix[4 * col + row];
+            }
+            else
+            {
+                glm::dmat4 translate(1.0), rotate(1.0), scale(1.0);
+                if(!gltf_node.translation.empty())
+                {
+                    for(uint32_t i = 0; i < 3; ++i)
+                        if(i < (uint32_t)gltf_node.translation.size())
+                            T[i] = gltf_node.translation[i];
+                    translate = glm::translate(glm::dmat4(1.0), T);
+                }
+                if(!gltf_node.rotation.empty())
+                {
+                    for(uint32_t i = 0; i < 4; ++i)
+                        if(i < (uint32_t)gltf_node.rotation.size())
+                            R[i] = gltf_node.rotation[i];
+                    rotate = glm::toMat4(R);
+                }
+                if(!gltf_node.scale.empty())
+                {
+                    for(uint32_t i = 0; i < 3; ++i)
+                        if(i < (uint32_t)gltf_node.scale.size())
+                            S[i] = gltf_node.scale[i];
+                    scale = glm::scale(glm::dmat4(1.0), S);
+                }
+                local_transform = translate * rotate * scale;
+            }
+            std::vector<GfxRef<GfxInstance>> instances;
+            glm::dmat4 const transform = parent_transform * local_transform;
+            if(gltf_node.mesh >= 0 && gltf_node.weights.empty())
+            {
+                std::map<int32_t, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node.mesh);
+                if(it != meshes.end())
+                    for(size_t i = 0; i < (*it).second.size(); ++i)
+                    {
+                        GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
+                        instances.push_back(instance_ref);
+                        instance_ref->mesh = (*it).second[i];
+                        instance_ref->transform = glm::mat4(transform);
+                        GfxMetadata &instance_metadata = instance_metadata_[instance_ref];
+                        GfxMetadata const *mesh_metadata = mesh_metadata_.at((*it).second[i]);
+                        if(mesh_metadata != nullptr)
+                            instance_metadata = *mesh_metadata; // set up metadata
+                        else
+                            instance_metadata.asset_file = asset_file;
+                    }
+            }
+            bool is_any_children_animated = false;
+            std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(node_index);
+            bool is_node_animated = (is_parent_animated || it != animated_nodes.end());
+            for(size_t i = 0; i < gltf_node.children.size(); ++i)
+                is_any_children_animated = (VisitNode(gltf_node.children[i], transform, is_node_animated) || is_any_children_animated);
+            is_node_animated = (is_node_animated || is_any_children_animated);
+            if(is_node_animated)
+            {
+                GltfNode *node = nullptr;
+                std::vector<uint64_t> children;
+                GltfAnimatedNode *animated_node = nullptr;
+                for(size_t i = 0; i < gltf_node.children.size(); ++i)
+                {
+                    std::map<int32_t, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node.children[i]);
+                    if(it2 != animated_nodes.end()) children.push_back((*it2).second);
+                }
+                if(it != animated_nodes.end())
+                {
+                    node = &gltf_nodes_[GetObjectIndex((*it).second)];
+                    animated_node = gltf_animated_nodes_.at(GetObjectIndex((*it).second));
+                }
+                else
+                {
+                    uint64_t const animated_node_handle = gltf_node_handles_.allocate_handle();
+                    node = &gltf_nodes_.insert(GetObjectIndex(animated_node_handle));
+                    animated_nodes[node_index] = animated_node_handle;
+                    *node = {};
+                }
+                if(animated_node != nullptr)
+                {
+                    animated_node->scale_ = S;
+                    animated_node->rotate_ = R;
+                    animated_node->translate_ = T;
+                }
+                GFX_ASSERT(node != nullptr);
+                node->scale_ = S;
+                node->rotate_ = R;
+                node->translate_ = T;
+                node->matrix_ = local_transform;
+                std::swap(node->children_, children);
+                std::swap(node->instances_, instances);
+            }
+            return is_node_animated;
+        };
+        tinygltf::Scene const &gltf_scene = gltf_model.scenes[glm::clamp(gltf_model.defaultScene, 0, (int32_t)gltf_model.scenes.size() - 1)];
+        for(size_t i = 0; i < gltf_scene.nodes.size(); ++i)
+            VisitNode(gltf_scene.nodes[i], glm::dmat4(1.0), false);
+        for(size_t i = 0; i < gltf_model.animations.size(); ++i)
+        {
+            std::map<size_t, GfxConstRef<GfxAnimation>>::const_iterator const it = animations.find(i);
+            if(it == animations.end()) continue;    // not a valid animation
+            GltfAnimation &animation_object = gltf_animations_[GetObjectIndex((*it).second)];
+            for(size_t j = 0; j < gltf_scene.nodes.size(); ++j)
+            {
+                std::map<int32_t, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_scene.nodes[j]);
+                if(it2 != animated_nodes.end())
+                    animation_object.nodes_.push_back((*it2).second);
             }
         }
         return kGfxResult_NoError;
@@ -789,6 +1407,93 @@ GfxResult gfxSceneClear(GfxScene scene)
     return gfx_scene->clear();
 }
 
+GfxRef<GfxAnimation> gfxSceneCreateAnimation(GfxScene scene)
+{
+    GfxRef<GfxAnimation> const animation_ref = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return animation_ref;    // invalid parameter
+    return gfx_scene->createObject<GfxAnimation>(scene);
+}
+
+GfxResult gfxSceneDestroyAnimation(GfxScene scene, uint64_t animation_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->destroyObject<GfxAnimation>(animation_handle);
+}
+
+GfxResult gfxSceneApplyAnimation(GfxScene scene, uint64_t animation_handle, float time_in_seconds)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->applyAnimation(animation_handle, time_in_seconds);
+}
+
+GfxResult gfxSceneResetAllAnimation(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->resetAllAnimation();
+}
+
+float gfxSceneGetAnimationLength(GfxScene scene, uint64_t animation_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return 0.0f; // invalid parameter
+    return gfx_scene->getAnimationLength(animation_handle);
+}
+
+float gfxSceneGetAnimationStart(GfxScene scene, uint64_t animation_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return 0.0f; // invalid parameter
+    return gfx_scene->getAnimationStart(animation_handle);
+}
+
+float gfxSceneGetAnimationEnd(GfxScene scene, uint64_t animation_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return 0.0f; // invalid parameter
+    return gfx_scene->getAnimationEnd(animation_handle);
+}
+
+uint32_t gfxSceneGetAnimationCount(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return 0;    // invalid parameter
+    return gfx_scene->getObjectCount<GfxAnimation>();
+}
+
+GfxAnimation const *gfxSceneGetAnimations(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObjects<GfxAnimation>();
+}
+
+GfxAnimation *gfxSceneGetAnimation(GfxScene scene, uint64_t animation_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObject<GfxAnimation>(animation_handle);
+}
+
+GfxRef<GfxAnimation> gfxSceneGetAnimationHandle(GfxScene scene, uint32_t animation_index)
+{
+    GfxRef<GfxAnimation> const animation_ref = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return animation_ref;    // invalid parameter
+    return gfx_scene->getObjectHandle<GfxAnimation>(scene, animation_index);
+}
+
+GfxMetadata const &gfxSceneGetAnimationMetadata(GfxScene scene, uint64_t animation_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxAnimation>(animation_handle);
+}
+
 GfxRef<GfxCamera> gfxSceneCreateCamera(GfxScene scene)
 {
     GfxRef<GfxCamera> const camera_ref = {};
@@ -840,20 +1545,20 @@ GfxCamera *gfxSceneGetCamera(GfxScene scene, uint64_t camera_handle)
     return gfx_scene->getObject<GfxCamera>(camera_handle);
 }
 
-GfxMetadata gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle)
-{
-    GfxMetadata const metadata = {};
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxCamera>(camera_handle);
-}
-
 GfxRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index)
 {
     GfxRef<GfxCamera> const camera_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return camera_ref;   // invalid parameter
     return gfx_scene->getObjectHandle<GfxCamera>(scene, camera_index);
+}
+
+GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxCamera>(camera_handle);
 }
 
 GfxRef<GfxImage> gfxSceneCreateImage(GfxScene scene)
@@ -892,20 +1597,20 @@ GfxImage *gfxSceneGetImage(GfxScene scene, uint64_t image_handle)
     return gfx_scene->getObject<GfxImage>(image_handle);
 }
 
-GfxMetadata gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle)
-{
-    GfxMetadata const metadata = {};
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxImage>(image_handle);
-}
-
 GfxRef<GfxImage> gfxSceneGetImageHandle(GfxScene scene, uint32_t image_index)
 {
     GfxRef<GfxImage> const image_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return image_ref;    // invalid parameter
     return gfx_scene->getObjectHandle<GfxImage>(scene, image_index);
+}
+
+GfxMetadata const &gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxImage>(image_handle);
 }
 
 GfxRef<GfxMaterial> gfxSceneCreateMaterial(GfxScene scene)
@@ -944,20 +1649,20 @@ GfxMaterial *gfxSceneGetMaterial(GfxScene scene, uint64_t material_handle)
     return gfx_scene->getObject<GfxMaterial>(material_handle);
 }
 
-GfxMetadata gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle)
-{
-    GfxMetadata const metadata = {};
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxMaterial>(material_handle);
-}
-
 GfxRef<GfxMaterial> gfxSceneGetMaterialHandle(GfxScene scene, uint32_t material_index)
 {
     GfxRef<GfxMaterial> const material_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return material_ref; // invalid parameter
     return gfx_scene->getObjectHandle<GfxMaterial>(scene, material_index);
+}
+
+GfxMetadata const &gfxSceneGetMaterialMetadata(GfxScene scene, uint64_t material_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxMaterial>(material_handle);
 }
 
 GfxRef<GfxMesh> gfxSceneCreateMesh(GfxScene scene)
@@ -996,20 +1701,20 @@ GfxMesh *gfxSceneGetMesh(GfxScene scene, uint64_t mesh_handle)
     return gfx_scene->getObject<GfxMesh>(mesh_handle);
 }
 
-GfxMetadata gfxSceneGetMeshMetadata(GfxScene scene, uint64_t mesh_handle)
-{
-    GfxMetadata const metadata = {};
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxMesh>(mesh_handle);
-}
-
 GfxRef<GfxMesh> gfxSceneGetMeshHandle(GfxScene scene, uint32_t mesh_index)
 {
     GfxRef<GfxMesh> const mesh_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return mesh_ref; // invalid parameter
     return gfx_scene->getObjectHandle<GfxMesh>(scene, mesh_index);
+}
+
+GfxMetadata const &gfxSceneGetMeshMetadata(GfxScene scene, uint64_t mesh_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxMesh>(mesh_handle);
 }
 
 GfxRef<GfxInstance> gfxSceneCreateInstance(GfxScene scene)
@@ -1048,20 +1753,20 @@ GfxInstance *gfxSceneGetInstance(GfxScene scene, uint64_t instance_handle)
     return gfx_scene->getObject<GfxInstance>(instance_handle);
 }
 
-GfxMetadata gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle)
-{
-    GfxMetadata const metadata = {};
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxInstance>(instance_handle);
-}
-
 GfxRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index)
 {
     GfxRef<GfxInstance> const instance_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return instance_ref; // invalid parameter
     return gfx_scene->getObjectHandle<GfxInstance>(scene, instance_index);
+}
+
+GfxMetadata const &gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxInstance>(instance_handle);
 }
 
 #endif //! GFX_IMPLEMENTATION_DEFINE
