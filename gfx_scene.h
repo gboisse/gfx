@@ -1225,41 +1225,45 @@ private:
                 }
                 else
                 {
-                    tinygltf::Texture const &gltf_texture = gltf_model.textures[metallicity_roughness_map];
-                    tinygltf::Image const &gltf_image = gltf_model.images[gltf_texture.source];
-                    GfxRef<GfxImage> metallicity_map_ref = gfxSceneCreateImage(scene);
-                    GfxRef<GfxImage> roughness_map_ref = gfxSceneCreateImage(scene);
-                    GfxMetadata const &image_metadata = image_metadata_[(*it).second];
-                    GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
-                    GfxMetadata &roughness_map_metadata = image_metadata_[roughness_map_ref];   // set up metadata
-                    metallicity_map_metadata = image_metadata;
-                    metallicity_map_metadata.asset_file += ".x";
-                    metallicity_map_metadata.object_name += ".x";
-                    roughness_map_metadata = image_metadata;
-                    roughness_map_metadata.asset_file += ".y";
-                    roughness_map_metadata.object_name += ".y";
-                    GfxImage &metallicity_map = *metallicity_map_ref;
-                    GfxImage &roughness_map = *roughness_map_ref;
-                    GfxImage const &image = *(*it).second;
-                    metallicity_map.width = image.width;
-                    metallicity_map.height = image.height;
-                    metallicity_map.channel_count = 1;
-                    metallicity_map.bytes_per_channel = image.bytes_per_channel;
-                    metallicity_map.data.resize(metallicity_map.width * metallicity_map.height * metallicity_map.bytes_per_channel);
-                    roughness_map.width = image.width;
-                    roughness_map.height = image.height;
-                    roughness_map.channel_count = 1;
-                    roughness_map.bytes_per_channel = image.bytes_per_channel;
-                    roughness_map.data.resize(roughness_map.width * roughness_map.height * roughness_map.bytes_per_channel);
-                    uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
-                    uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
-                    for(uint32_t j = 0; j < texel_count; ++j)
+                    std::string const metallicity_map_file = image_metadata_[(*it).second].asset_file + ".x";
+                    std::string const roughness_map_file = image_metadata_[(*it).second].asset_file + ".y";
+                    GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
+                    GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
+                    if(!metallicity_map_ref || !roughness_map_ref)
                     {
-                        uint32_t index = j * byte_stride;
-                        for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                            metallicity_map.data[j * image.bytes_per_channel + k] = image.data[index++];
-                        for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                            roughness_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                        metallicity_map_ref = gfxSceneCreateImage(scene);
+                        roughness_map_ref = gfxSceneCreateImage(scene);
+                        GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
+                        metallicity_map_metadata = image_metadata_[(*it).second];   // set up metadata
+                        metallicity_map_metadata.asset_file = metallicity_map_file;
+                        metallicity_map_metadata.object_name += ".x";
+                        GfxMetadata &roughness_map_metadata = image_metadata_[roughness_map_ref];
+                        roughness_map_metadata = image_metadata_[(*it).second];
+                        roughness_map_metadata.asset_file = roughness_map_file;
+                        roughness_map_metadata.object_name += ".y";
+                        GfxImage &metallicity_map = *metallicity_map_ref;
+                        GfxImage &roughness_map = *roughness_map_ref;
+                        GfxImage const &image = *(*it).second;
+                        metallicity_map.width = image.width;
+                        metallicity_map.height = image.height;
+                        metallicity_map.channel_count = 1;
+                        metallicity_map.bytes_per_channel = image.bytes_per_channel;
+                        metallicity_map.data.resize(metallicity_map.width * metallicity_map.height * metallicity_map.bytes_per_channel);
+                        roughness_map.width = image.width;
+                        roughness_map.height = image.height;
+                        roughness_map.channel_count = 1;
+                        roughness_map.bytes_per_channel = image.bytes_per_channel;
+                        roughness_map.data.resize(roughness_map.width * roughness_map.height * roughness_map.bytes_per_channel);
+                        uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
+                        uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
+                        for(uint32_t j = 0; j < texel_count; ++j)
+                        {
+                            uint32_t index = j * byte_stride;
+                            for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
+                                metallicity_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                            for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
+                                roughness_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                        }
                     }
                     material.roughness_map = roughness_map_ref;
                     material.metallicity_map = metallicity_map_ref;
