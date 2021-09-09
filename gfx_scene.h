@@ -1120,13 +1120,6 @@ private:
             if(gltf_texture.source < 0 || gltf_texture.source >= (int32_t)gltf_model.images.size()) continue;
             tinygltf::Image const &gltf_image = gltf_model.images[gltf_texture.source];
             if(gltf_image.image.empty()) continue;  // failed to load image
-            GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
-            image_ref->data = gltf_image.image;
-            image_ref->width = gltf_image.width;
-            image_ref->height = gltf_image.height;
-            image_ref->channel_count = gltf_image.component;
-            image_ref->bytes_per_channel = (gltf_image.bits >> 3);
-            image_ref->data.resize(image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel);
             char const *image_name = gltf_texture.name.c_str();
             std::string image_file = asset_file;
             if(!gltf_image.uri.empty())
@@ -1138,9 +1131,20 @@ private:
                 image_name  = (filename != nullptr ? filename + 1 : gltf_image.uri.c_str());
                 image_file += gltf_image.uri.c_str();
             }
-            GfxMetadata &image_metadata = image_metadata_[image_ref];
-            image_metadata.asset_file = image_file; // set up metadata
-            image_metadata.object_name = image_name;
+            GfxRef<GfxImage> image_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
+            if(!image_ref)
+            {
+                image_ref = gfxSceneCreateImage(scene);
+                image_ref->data = gltf_image.image;
+                image_ref->width = gltf_image.width;
+                image_ref->height = gltf_image.height;
+                image_ref->channel_count = gltf_image.component;
+                image_ref->bytes_per_channel = (gltf_image.bits >> 3);
+                image_ref->data.resize(image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel);
+                GfxMetadata &image_metadata = image_metadata_[image_ref];
+                image_metadata.asset_file = image_file; // set up metadata
+                image_metadata.object_name = image_name;
+            }
             images[(int32_t)i] = image_ref;
         }
         auto const GetParameter = [&](tinygltf::Material const &gltf_material, char const *parameter_name) -> std::pair<bool, glm::vec4>
