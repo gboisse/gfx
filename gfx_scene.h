@@ -756,7 +756,8 @@ public:
                 if(node_ref == nullptr || --(*node_ref) == 0)
                 {
                     gltf_node_handles_.free_handle(node_handle);
-                    gltf_nodes_.erase(GetObjectIndex(node_handle));
+                    if(gltf_nodes_.has(GetObjectIndex(node_handle)))
+                        gltf_nodes_.erase(GetObjectIndex(node_handle));
                     if(gltf_node_refs_.has(GetObjectIndex(node_handle)))
                         gltf_node_refs_.erase(GetObjectIndex(node_handle));
                     if(gltf_animated_nodes_.has(GetObjectIndex(node_handle)))
@@ -1425,7 +1426,6 @@ private:
                     animation_metadata.object_name = gltf_animation.name;
                 }
                 GFX_ASSERT(animation_object != nullptr);
-                gltf_node_refs_.insert(GetObjectIndex(animated_node_handle), (uint32_t)animations.size());
                 GltfAnimationChannel &animation_channel = animation_object->channels_.emplace_back();
                 animation_channel.keyframes_.resize(input_buffer.count_);
                 for(uint32_t k = 0; k < input_buffer.count_; ++k)
@@ -1520,10 +1520,12 @@ private:
                 {
                     node = &gltf_nodes_[GetObjectIndex((*it).second)];
                     animated_node = gltf_animated_nodes_.at(GetObjectIndex((*it).second));
+                    gltf_node_refs_.insert(GetObjectIndex((*it).second), (uint32_t)animations.size());
                 }
                 else
                 {
                     uint64_t const animated_node_handle = gltf_node_handles_.allocate_handle();
+                    gltf_node_refs_.insert(GetObjectIndex(animated_node_handle), (uint32_t)animations.size());
                     node = &gltf_nodes_.insert(GetObjectIndex(animated_node_handle));
                     animated_nodes[node_index] = animated_node_handle;
                     *node = {};
