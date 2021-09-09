@@ -418,6 +418,7 @@ class GfxSceneInternal
     };
 
     GfxArray<GltfNode> gltf_nodes_;
+    GfxArray<uint32_t> gltf_node_refs_;
     GfxArray<GltfAnimatedNode> gltf_animated_nodes_;
     GfxHandles gltf_node_handles_;
     GfxArray<GltfAnimation> gltf_animations_;
@@ -732,12 +733,51 @@ public:
     }
 
     template<typename TYPE>
+    GfxResult destroyObjectCallback(uint64_t object_handle);
+
+    template<>
+    GfxResult destroyObjectCallback<GfxAnimation>(uint64_t object_handle)
+    {
+        GFX_ASSERT(animation_handles_.has_handle(object_handle));
+        GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(object_handle));
+        if(gltf_animation != nullptr)
+        {
+            std::function<void(uint64_t)> VisitNode;
+            VisitNode = [&](uint64_t node_handle)
+            {
+                if(!gltf_node_handles_.has_handle(node_handle)) return;
+                uint32_t const children_count = (uint32_t)gltf_nodes_[GetObjectIndex(node_handle)].children_.size();
+                for(size_t i = 0; i < children_count; ++i)
+                {
+                    GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
+                    VisitNode(node.children_[i]);   // release child nodes
+                }
+                uint32_t *node_ref = gltf_node_refs_.at(GetObjectIndex(node_handle));
+                if(node_ref == nullptr || --(*node_ref) == 0)
+                {
+                    gltf_node_handles_.free_handle(node_handle);
+                    gltf_nodes_.erase(GetObjectIndex(node_handle));
+                    if(gltf_node_refs_.has(GetObjectIndex(node_handle)))
+                        gltf_node_refs_.erase(GetObjectIndex(node_handle));
+                    if(gltf_animated_nodes_.has(GetObjectIndex(node_handle)))
+                        gltf_animated_nodes_.erase(GetObjectIndex(node_handle));
+                }
+            };
+            for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
+                VisitNode(gltf_animation->nodes_[i]);
+            gltf_animations_.erase(GetObjectIndex(object_handle));
+        }
+        return kGfxResult_NoError;
+    }
+
+    template<typename TYPE>
     GfxResult destroyObject(uint64_t object_handle)
     {
         if(object_handle == 0)
             return kGfxResult_NoError;
         if(!object_handles_<TYPE>().has_handle(object_handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid scene object");
+        destroyObjectCallback<TYPE>(object_handle);
         objects_<TYPE>().erase(GetObjectIndex(object_handle));
         object_refs_<TYPE>().erase(GetObjectIndex(object_handle));
         object_metadata_<TYPE>().erase(GetObjectIndex(object_handle));
@@ -1385,6 +1425,7 @@ private:
                     animation_metadata.object_name = gltf_animation.name;
                 }
                 GFX_ASSERT(animation_object != nullptr);
+                gltf_node_refs_.insert(GetObjectIndex(animated_node_handle), (uint32_t)animations.size());
                 GltfAnimationChannel &animation_channel = animation_object->channels_.emplace_back();
                 animation_channel.keyframes_.resize(input_buffer.count_);
                 for(uint32_t k = 0; k < input_buffer.count_; ++k)
@@ -1593,6 +1634,14 @@ private:
 
 GfxArray<GfxScene> GfxSceneInternal::scenes_;
 GfxHandles         GfxSceneInternal::scene_handles_("scene");
+
+template<typename TYPE>
+GfxResult GfxSceneInternal::destroyObjectCallback(uint64_t object_handle)
+{
+    (void)object_handle;
+
+    return kGfxResult_NoError;
+}
 
 GfxScene gfxCreateScene()
 {
