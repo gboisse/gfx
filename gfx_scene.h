@@ -358,6 +358,7 @@ template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene sc
 #define STB_IMAGE_IMPLEMENTATION
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <map>                  // std::map
+#include <set>                  // std::set
 #include "tiny_gltf.h"          // glTF loader
 #include "tiny_obj_loader.cc"   // obj loader
 #include "glm/gtx/quaternion.hpp"
@@ -752,14 +753,12 @@ public:
                     GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
                     VisitNode(node.children_[i]);   // release child nodes
                 }
-                uint32_t *node_ref = gltf_node_refs_.at(GetObjectIndex(node_handle));
-                if(node_ref == nullptr || --(*node_ref) == 0)
+                uint32_t &node_ref = gltf_node_refs_[GetObjectIndex(node_handle)];
+                if(--node_ref == 0)
                 {
                     gltf_node_handles_.free_handle(node_handle);
-                    if(gltf_nodes_.has(GetObjectIndex(node_handle)))
-                        gltf_nodes_.erase(GetObjectIndex(node_handle));
-                    if(gltf_node_refs_.has(GetObjectIndex(node_handle)))
-                        gltf_node_refs_.erase(GetObjectIndex(node_handle));
+                    gltf_nodes_.erase(GetObjectIndex(node_handle));
+                    gltf_node_refs_.erase(GetObjectIndex(node_handle));
                     if(gltf_animated_nodes_.has(GetObjectIndex(node_handle)))
                         gltf_animated_nodes_.erase(GetObjectIndex(node_handle));
                 }
@@ -1387,6 +1386,7 @@ private:
                 }
             }
         }
+        std::set<uint64_t> unparented_nodes;
         std::map<int32_t, uint64_t> animated_nodes;
         std::map<size_t, GfxConstRef<GfxAnimation>> animations;
         for(size_t i = 0; i < gltf_model.animations.size(); ++i)
@@ -1423,6 +1423,7 @@ private:
                     animated_nodes[gltf_animation_channel.target_node] = animated_node_handle;
                     gltf_nodes_.insert(GetObjectIndex(animated_node_handle)) = {};  // flag animated node
                     gltf_animated_nodes_.insert(GetObjectIndex(animated_node_handle)) = {};
+                    unparented_nodes.insert(animated_node_handle);
                 }
                 if(!animation_ref)
                 {
@@ -1526,6 +1527,7 @@ private:
                 }
                 if(it != animated_nodes.end())
                 {
+                    unparented_nodes.erase((*it).second);
                     node = &gltf_nodes_[GetObjectIndex((*it).second)];
                     animated_node = gltf_animated_nodes_.at(GetObjectIndex((*it).second));
                     gltf_node_refs_.insert(GetObjectIndex((*it).second), (uint32_t)animations.size());
@@ -1557,6 +1559,12 @@ private:
         tinygltf::Scene const &gltf_scene = gltf_model.scenes[glm::clamp(gltf_model.defaultScene, 0, (int32_t)gltf_model.scenes.size() - 1)];
         for(size_t i = 0; i < gltf_scene.nodes.size(); ++i)
             VisitNode(gltf_scene.nodes[i], glm::dmat4(1.0), false);
+        for(std::set<uint64_t>::const_iterator it = unparented_nodes.begin(); it != unparented_nodes.end(); ++it)
+        {
+            gltf_node_handles_.free_handle(*it);
+            gltf_nodes_.erase(GetObjectIndex(*it));
+            gltf_animated_nodes_.erase(GetObjectIndex(*it));
+        }
         for(size_t i = 0; i < gltf_model.animations.size(); ++i)
         {
             std::map<size_t, GfxConstRef<GfxAnimation>>::const_iterator const it = animations.find(i);
