@@ -707,6 +707,7 @@ public:
     inline bool empty() const;
 
     inline uint64_t allocate_handle();
+    inline bool acquire_handle(uint64_t handle);
     inline uint64_t get_handle(uint32_t index) const;
     inline bool has_handle(uint64_t handle) const;
     inline bool free_handle(uint64_t handle);
@@ -763,6 +764,25 @@ uint64_t GfxHandles::allocate_handle()
     next_handle_ = static_cast<uint32_t>(next_handle & 0xFFFFFFFFull);
     GFX_ASSERT(handle != 0);    // should never happen
     return handle;
+}
+
+bool GfxHandles::acquire_handle(uint64_t handle)
+{
+    uint32_t const target_handle = static_cast<uint32_t>(handle & 0xFFFFFFFFull);
+    if(!handle || !(handle >> 32) || target_handle >= capacity_) return false;  // invalid handle
+    for(uint32_t previous_handle = 0xFFFFFFFFu, next_handle = next_handle_; next_handle != 0xFFFFFFFFu;
+        previous_handle = next_handle, next_handle = static_cast<uint32_t>(handles_[next_handle] & 0xFFFFFFFFull))
+        if(next_handle == target_handle)
+        {
+            uint32_t const free_handle = static_cast<uint32_t>(handles_[next_handle] & 0xFFFFFFFFull);
+            handles_[next_handle] = ((handle >> 32) << 32) | static_cast<uint64_t>(free_handle);
+            if(previous_handle == 0xFFFFFFFFu)
+                next_handle_ = free_handle;
+            else
+                handles_[previous_handle] = ((handles_[previous_handle] >> 32) << 32) | static_cast<uint64_t>(free_handle);
+            return true;
+        }
+    return false;
 }
 
 uint64_t GfxHandles::get_handle(uint32_t index) const
