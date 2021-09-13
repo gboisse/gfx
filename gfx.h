@@ -756,7 +756,7 @@ class GfxInternal
             union
             {
                 GfxBuffer buffer_;
-                struct { GfxTexture *textures_; uint32_t texture_count; uint32_t mip_level_; uint32_t *mip_levels_; } image_;
+                struct { GfxTexture *textures_; uint32_t *mip_levels_; uint32_t texture_count; } image_;
                 GfxSamplerState sampler_state_;
                 struct { GfxAccelerationStructure bvh_; GfxBuffer bvh_buffer_; } acceleration_structure_;
                 void *constants_;
@@ -777,42 +777,21 @@ class GfxInternal
                 data_.buffer_ = buffer;
             }
 
-            void set(GfxTexture const &texture, uint32_t mip_level)
-            {
-                if(type_ == kType_Image && data_.image_.texture_count == 1)
-                    id_ += (texture.handle != data_.image_.textures_->handle || mip_level != data_.image_.mip_level_);
-                else
-                {
-                    unset();
-                    type_ = kType_Image;
-                    data_size_ = sizeof(texture);
-                    data_.image_.texture_count = 1;
-                    data_.image_.textures_ = (GfxTexture *)malloc(sizeof(GfxTexture));
-                    if(data_.image_.textures_ == nullptr)
-                    {
-                        GFX_ASSERT(0);  // out of memory
-                        unset(); return;
-                    }
-                }
-                *data_.image_.textures_ = texture;
-                data_.image_.mip_level_ = mip_level;
-            }
-
             void set(GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
             {
-                GFX_ASSERT(textures != nullptr && texture_count > 1);
+                GFX_ASSERT(textures != nullptr || texture_count == 0);
                 if(type_ == kType_Image && data_.image_.texture_count == texture_count)
                     for(uint32_t i = 0; i < texture_count; ++i) { if(textures[i].handle != data_.image_.textures_[i].handle ||
-                                                                    (data_.image_.mip_levels_ != nullptr ? data_.image_.mip_levels_[i] : data_.image_.mip_level_) != (mip_levels != nullptr ? mip_levels[i] : 0)) { ++id_; break; } }
+                                                                    (data_.image_.mip_levels_ != nullptr ? data_.image_.mip_levels_[i] : 0) != (mip_levels != nullptr ? mip_levels[i] : 0)) { ++id_; break; } }
                 else
                 {
                     unset();
                     type_ = kType_Image;
                     data_.image_.texture_count = texture_count;
-                    data_size_ = texture_count * sizeof(*textures);
-                    data_.image_.textures_ = (GfxTexture *)malloc(texture_count * sizeof(GfxTexture));
-                    data_.image_.mip_levels_ = (uint32_t *)(mip_levels != nullptr ? malloc(texture_count * sizeof(uint32_t)) : nullptr);
-                    if(data_.image_.textures_ == nullptr || (mip_levels != nullptr && data_.image_.mip_levels_ == nullptr))
+                    data_size_ = texture_count * sizeof(GfxTexture);
+                    data_.image_.textures_ = (GfxTexture *)(texture_count > 0 ? malloc(texture_count * sizeof(GfxTexture)) : nullptr);
+                    data_.image_.mip_levels_ = (uint32_t *)(texture_count > 0 && mip_levels != nullptr ? malloc(texture_count * sizeof(uint32_t)) : nullptr);
+                    if(texture_count > 0 && (data_.image_.textures_ == nullptr || (mip_levels != nullptr && data_.image_.mip_levels_ == nullptr)))
                     {
                         GFX_ASSERT(0);  // out of memory
                         unset(); return;
@@ -921,14 +900,6 @@ class GfxInternal
                 return parameter;
             }
             return (*it).second;
-        }
-
-        void eraseParameter(char const *parameter_name)
-        {
-            uint64_t const parameter_id = Hash(parameter_name);
-            Parameters::iterator const it = parameters_.find(parameter_id);
-            GFX_ASSERT(parameter_name != nullptr && *parameter_name != '\0');
-            if(it != parameters_.end()) { (*it).second.unset(); parameters_.erase(it); }
         }
 
         String cs_;
@@ -2147,7 +2118,7 @@ public:
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
         Program &gfx_program = programs_[program];  // get hold of program object
-        gfx_program.insertParameter(parameter_name).set(texture, mip_level);
+        gfx_program.insertParameter(parameter_name).set(&texture, &mip_level, 1);
         return kGfxResult_NoError;
     }
 
@@ -2160,18 +2131,7 @@ public:
         if(textures == nullptr && texture_count > 0)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid array of textures");
         Program &gfx_program = programs_[program];  // get hold of program object
-        switch(texture_count)
-        {
-        case 0:
-            gfx_program.eraseParameter(parameter_name);
-            break;
-        case 1:
-            gfx_program.insertParameter(parameter_name).set(*textures, mip_levels != nullptr ? *mip_levels : 0);
-            break;
-        default:
-            gfx_program.insertParameter(parameter_name).set(textures, mip_levels, texture_count);
-            break;
-        }
+        gfx_program.insertParameter(parameter_name).set(textures, mip_levels, texture_count);
         return kGfxResult_NoError;
     }
 
@@ -3571,7 +3531,7 @@ private:
         if(parameter.type_ != Program::Parameter::kType_Image) return 0;
         GFX_ASSERT(texture_index < parameter.data_.image_.texture_count);
         return (parameter.data_.image_.mip_levels_ != nullptr ?
-            parameter.data_.image_.mip_levels_[texture_index] : parameter.data_.image_.mip_level_);
+            parameter.data_.image_.mip_levels_[texture_index] : 0);
     }
 
     static inline D3D12_GRAPHICS_PIPELINE_STATE_DESC GetDefaultPSODesc()
