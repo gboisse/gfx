@@ -118,6 +118,7 @@ struct GfxAnimation
 
 GfxRef<GfxAnimation> gfxSceneCreateAnimation(GfxScene scene);
 GfxResult gfxSceneDestroyAnimation(GfxScene scene, uint64_t animation_handle);
+GfxResult gfxSceneDestroyAllAnimations(GfxScene scene);
 
 GfxResult gfxSceneApplyAnimation(GfxScene scene, uint64_t animation_handle, float time_in_seconds);
 GfxResult gfxSceneResetAllAnimation(GfxScene scene);
@@ -159,6 +160,7 @@ struct GfxCamera
 
 GfxRef<GfxCamera> gfxSceneCreateCamera(GfxScene scene);
 GfxResult gfxSceneDestroyCamera(GfxScene scene, uint64_t camera_handle);
+GfxResult gfxSceneDestroyAllCameras(GfxScene scene);
 
 GfxResult gfxSceneSetActiveCamera(GfxScene scene, uint64_t camera_handle);
 GfxConstRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene);
@@ -185,6 +187,7 @@ struct GfxImage
 
 GfxRef<GfxImage> gfxSceneCreateImage(GfxScene scene);
 GfxResult gfxSceneDestroyImage(GfxScene scene, uint64_t image_handle);
+GfxResult gfxSceneDestroyAllImages(GfxScene scene);
 
 uint32_t gfxSceneGetImageCount(GfxScene scene);
 GfxImage const *gfxSceneGetImages(GfxScene scene);
@@ -235,6 +238,7 @@ struct GfxMaterial
 
 GfxRef<GfxMaterial> gfxSceneCreateMaterial(GfxScene scene);
 GfxResult gfxSceneDestroyMaterial(GfxScene scene, uint64_t material_handle);
+GfxResult gfxSceneDestroyAllMaterials(GfxScene scene);
 
 uint32_t gfxSceneGetMaterialCount(GfxScene scene);
 GfxMaterial const *gfxSceneGetMaterials(GfxScene scene);
@@ -275,6 +279,7 @@ struct GfxMesh
 
 GfxRef<GfxMesh> gfxSceneCreateMesh(GfxScene scene);
 GfxResult gfxSceneDestroyMesh(GfxScene scene, uint64_t mesh_handle);
+GfxResult gfxSceneDestroyAllMeshes(GfxScene scene);
 
 uint32_t gfxSceneGetMeshCount(GfxScene scene);
 GfxMesh const *gfxSceneGetMeshes(GfxScene scene);
@@ -295,6 +300,7 @@ struct GfxInstance
 
 GfxRef<GfxInstance> gfxSceneCreateInstance(GfxScene scene);
 GfxResult gfxSceneDestroyInstance(GfxScene scene, uint64_t instance_handle);
+GfxResult gfxSceneDestroyAllInstances(GfxScene scene);
 
 uint32_t gfxSceneGetInstanceCount(GfxScene scene);
 GfxInstance const *gfxSceneGetInstances(GfxScene scene);
@@ -1712,6 +1718,13 @@ GfxResult gfxSceneDestroyAnimation(GfxScene scene, uint64_t animation_handle)
     return gfx_scene->destroyObject<GfxAnimation>(animation_handle);
 }
 
+GfxResult gfxSceneDestroyAllAnimations(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxAnimation>();
+}
+
 GfxResult gfxSceneApplyAnimation(GfxScene scene, uint64_t animation_handle, float time_in_seconds)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
@@ -1799,6 +1812,13 @@ GfxResult gfxSceneDestroyCamera(GfxScene scene, uint64_t camera_handle)
     return gfx_scene->destroyObject<GfxCamera>(camera_handle);
 }
 
+GfxResult gfxSceneDestroyAllCameras(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxCamera>();
+}
+
 GfxResult gfxSceneSetActiveCamera(GfxScene scene, uint64_t camera_handle)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
@@ -1866,6 +1886,13 @@ GfxResult gfxSceneDestroyImage(GfxScene scene, uint64_t image_handle)
     return gfx_scene->destroyObject<GfxImage>(image_handle);
 }
 
+GfxResult gfxSceneDestroyAllImages(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxImage>();
+}
+
 uint32_t gfxSceneGetImageCount(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
@@ -1916,6 +1943,13 @@ GfxResult gfxSceneDestroyMaterial(GfxScene scene, uint64_t material_handle)
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
     return gfx_scene->destroyObject<GfxMaterial>(material_handle);
+}
+
+GfxResult gfxSceneDestroyAllMaterials(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxMaterial>();
 }
 
 uint32_t gfxSceneGetMaterialCount(GfxScene scene)
@@ -1970,6 +2004,13 @@ GfxResult gfxSceneDestroyMesh(GfxScene scene, uint64_t mesh_handle)
     return gfx_scene->destroyObject<GfxMesh>(mesh_handle);
 }
 
+GfxResult gfxSceneDestroyAllMeshes(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxMesh>();
+}
+
 uint32_t gfxSceneGetMeshCount(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
@@ -2020,6 +2061,13 @@ GfxResult gfxSceneDestroyInstance(GfxScene scene, uint64_t instance_handle)
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
     return gfx_scene->destroyObject<GfxInstance>(instance_handle);
+}
+
+GfxResult gfxSceneDestroyAllInstances(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxInstance>();
 }
 
 uint32_t gfxSceneGetInstanceCount(GfxScene scene)
