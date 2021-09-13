@@ -797,7 +797,7 @@ bool GfxHandles::has_handle(uint64_t handle) const
 {
     if(!handle) return false;   // invalid handle
     uint32_t const next_handle = static_cast<uint32_t>(handle & 0xFFFFFFFFull);
-    if(next_handle >= capacity_) return false;  // handle is out of bounds
+    GFX_ASSERT(next_handle < capacity_); if(next_handle >= capacity_) return false;
     uint32_t const handle_age = static_cast<uint32_t>(handles_[next_handle] >> 32);
     return handle_age == static_cast<uint32_t>(handle >> 32);
 }
