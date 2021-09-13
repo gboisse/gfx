@@ -715,7 +715,7 @@ public:
     inline uint32_t calculate_free_handle_count() const;
 
 protected:
-    inline void grow();
+    inline void grow(uint32_t handle_count = 1);
 
     char *name_;
     uint64_t *handles_;
@@ -768,8 +768,9 @@ uint64_t GfxHandles::allocate_handle()
 
 bool GfxHandles::acquire_handle(uint64_t handle)
 {
+    if(!handle || !(handle >> 32)) return false;    // invalid handle
     uint32_t const target_handle = static_cast<uint32_t>(handle & 0xFFFFFFFFull);
-    if(!handle || !(handle >> 32) || target_handle >= capacity_) return false;  // invalid handle
+    if(target_handle >= capacity_) grow(target_handle - capacity_ + 1); // grow our capacity
     for(uint32_t previous_handle = 0xFFFFFFFFu, next_handle = next_handle_; next_handle != 0xFFFFFFFFu;
         previous_handle = next_handle, next_handle = static_cast<uint32_t>(handles_[next_handle] & 0xFFFFFFFFull))
         if(next_handle == target_handle)
@@ -796,7 +797,7 @@ bool GfxHandles::has_handle(uint64_t handle) const
 {
     if(!handle) return false;   // invalid handle
     uint32_t const next_handle = static_cast<uint32_t>(handle & 0xFFFFFFFFull);
-    GFX_ASSERT(next_handle < capacity_); if(next_handle >= capacity_) return false;
+    if(next_handle >= capacity_) return false;  // handle is out of bounds
     uint32_t const handle_age = static_cast<uint32_t>(handles_[next_handle] >> 32);
     return handle_age == static_cast<uint32_t>(handle >> 32);
 }
@@ -824,16 +825,23 @@ uint32_t GfxHandles::calculate_free_handle_count() const
     return free_handle_count;
 }
 
-void GfxHandles::grow()
+void GfxHandles::grow(uint32_t handle_count)
 {
-    GFX_ASSERT(next_handle_ == 0xFFFFFFFFu);    // can only grow when empty
-    uint32_t const capacity = capacity_ + ((capacity_ + 2) >> 1);
+    uint32_t previous_handle = 0xFFFFFFFFu;
+    uint32_t capacity = capacity_ + handle_count;
+    capacity += ((capacity + 2) >> 1);  // grow by half capacity
     uint64_t *handles = (uint64_t *)malloc(capacity * sizeof(uint64_t));
     memcpy(handles, handles_, capacity_ * sizeof(uint64_t));
     for(uint32_t i = capacity_; i < capacity; ++i)
         handles[i] = (1ull << 32) | static_cast<uint64_t>(i + 1 < capacity ? i + 1 : 0xFFFFFFFFu);
+    for(uint32_t next_handle = next_handle_; next_handle != 0xFFFFFFFFu;
+        next_handle = static_cast<uint32_t>(handles[next_handle] & 0xFFFFFFFFull))
+        previous_handle = next_handle;
+    if(previous_handle == 0xFFFFFFFFu)
+        next_handle_ = capacity_;
+    else
+        handles[previous_handle] = ((handles[previous_handle] >> 32) << 32) | capacity_;
     free(handles_);
     handles_ = handles;
-    next_handle_ = capacity_;
     capacity_ = capacity;
 }
