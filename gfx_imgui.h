@@ -297,7 +297,15 @@ public:
 
         io.MouseWheel  = mouse_wheel;
         io.MouseWheelH = mouse_wheelh;
-        if(g_hWnd != 0) ImGui_ImplWin32_NewFrame();
+        if(g_hWnd != 0)
+        {
+            POINT pos = {};
+            GetCursorPos(&pos);
+            ImGui_ImplWin32_NewFrame();
+            ScreenToClient(g_hWnd, &pos);
+            io.MousePos.x = (float)GFX_MIN(GFX_MAX(pos.x, (LONG)0), (LONG)gfxGetBackBufferWidth(gfx_)  - 1);
+            io.MousePos.y = (float)GFX_MIN(GFX_MAX(pos.y, (LONG)0), (LONG)gfxGetBackBufferHeight(gfx_) - 1);
+        }
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         ImGui::NewFrame();  // can start recording new commands again
