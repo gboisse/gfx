@@ -1441,7 +1441,8 @@ private:
                     animation_metadata.object_name = gltf_animation.name;
                 }
                 GFX_ASSERT(animation_object != nullptr);
-                GltfAnimationChannel &animation_channel = animation_object->channels_.emplace_back();
+                animation_object->channels_.emplace_back();
+                GltfAnimationChannel &animation_channel = animation_object->channels_.back();
                 animation_channel.keyframes_.resize(input_buffer.count_);
                 for(uint32_t k = 0; k < input_buffer.count_; ++k)
                     animation_channel.keyframes_[k] = ReadAs<float>(input_buffer, k);
