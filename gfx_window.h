@@ -43,6 +43,8 @@ GfxResult gfxDestroyWindow(GfxWindow window);
 GfxResult gfxWindowPumpEvents(GfxWindow window);
 
 bool gfxWindowIsKeyDown(GfxWindow window, uint32_t key_code);   // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
+bool gfxWindowIsKeyPressed(GfxWindow window, uint32_t key_code);
+bool gfxWindowIsKeyReleased(GfxWindow window, uint32_t key_code);
 bool gfxWindowIsCloseRequested(GfxWindow window);
 bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
@@ -66,6 +68,7 @@ class GfxWindowInternal
     bool is_close_requested_ = false;
     bool is_imgui_initialized_ = false;
     bool is_key_down_[VK_OEM_CLEAR] = {};
+    bool is_previous_key_down_[VK_OEM_CLEAR] = {};
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
@@ -127,6 +130,7 @@ public:
     GfxResult pumpEvents()
     {
         MSG msg = {};
+        memcpy(is_previous_key_down_, is_key_down_, sizeof(is_key_down_));
         while(PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
         {
             TranslateMessage(&msg);
@@ -138,6 +142,16 @@ public:
     inline bool getIsKeyDown(uint32_t key_code) const
     {
         return (key_code < ARRAYSIZE(is_key_down_) ? is_key_down_[key_code] : false);
+    }
+
+    inline bool getIsKeyPressed(uint32_t key_code) const
+    {
+        return (key_code < ARRAYSIZE(is_key_down_) ? is_key_down_[key_code] && !is_previous_key_down_[key_code] : false);
+    }
+
+    inline bool getIsKeyReleased(uint32_t key_code) const
+    {
+        return (key_code < ARRAYSIZE(is_key_down_) ? !is_key_down_[key_code] && is_previous_key_down_[key_code] : false);
     }
 
     inline bool getIsCloseRequested() const
@@ -277,6 +291,20 @@ bool gfxWindowIsKeyDown(GfxWindow window, uint32_t key_code)
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
     if(!gfx_window) return false;   // invalid window handle
     return gfx_window->getIsKeyDown(key_code);
+}
+
+bool gfxWindowIsKeyPressed(GfxWindow window, uint32_t key_code)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return false;   // invalid window handle
+    return gfx_window->getIsKeyPressed(key_code);
+}
+
+bool gfxWindowIsKeyReleased(GfxWindow window, uint32_t key_code)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return false;   // invalid window handle
+    return gfx_window->getIsKeyReleased(key_code);
 }
 
 bool gfxWindowIsCloseRequested(GfxWindow window)
