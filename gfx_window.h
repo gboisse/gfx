@@ -186,7 +186,7 @@ private:
         default:
             return;
         }
-        if(is_imgui_initialized_)
+        if(gfxImGuiIsInitialized())
         {
             ImGuiIO &io = ImGui::GetIO();
             if(key_code < ARRAYSIZE(io.KeysDown))
