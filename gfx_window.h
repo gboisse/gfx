@@ -37,7 +37,13 @@ class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; pu
                   inline HWND getHWND() const { return hwnd; }
                   inline operator HWND() const { return hwnd; } };
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr);
+enum GfxCreateWindowFlag
+{
+    kGfxCreateWindowFlag_MaximizeWindow = 1 << 0
+};
+typedef uint32_t GfxCreateWindowFlags;
+
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0);
 GfxResult gfxDestroyWindow(GfxWindow window);
 
 GfxResult gfxWindowPumpEvents(GfxWindow window);
@@ -74,7 +80,7 @@ public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxWindowInternal() { terminate(); }
 
-    GfxResult initialize(GfxWindow &window, uint32_t window_width, uint32_t window_height, char const *window_title)
+    GfxResult initialize(GfxWindow &window, uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags)
     {
         window_title = (!window_title ? "gfx" : window_title);
 
@@ -110,7 +116,7 @@ public:
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
 
-        ShowWindow(window_, SW_SHOWMAXIMIZED);
+        ShowWindow(window_, (flags & kGfxCreateWindowFlag_MaximizeWindow) != 0 ? SW_SHOWMAXIMIZED : SW_SHOWDEFAULT);
 
         window.hwnd = window_;
 
@@ -257,13 +263,13 @@ private:
     }
 };
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title)
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags)
 {
     GfxResult result;
     GfxWindow window = {};
     GfxWindowInternal *gfx_window = new GfxWindowInternal(window);
     if(!gfx_window) return window;  // out of memory
-    result = gfx_window->initialize(window, window_width, window_height, window_title);
+    result = gfx_window->initialize(window, window_width, window_height, window_title, flags);
     if(result != kGfxResult_NoError)
     {
         window = {};
