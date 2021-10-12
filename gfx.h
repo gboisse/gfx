@@ -249,6 +249,7 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
 
 template<typename TYPE>
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, TYPE const &value);
+inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const &texture, uint32_t mip_level) { return gfxProgramSetTexture(context, program, parameter_name, texture, mip_level); }
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count) { return gfxProgramSetTextures(context, program, parameter_name, textures, texture_count); }
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count) { return gfxProgramSetTextures(context, program, parameter_name, textures, mip_levels, texture_count); }
 
