@@ -30,6 +30,7 @@ struct Material
 {
     glm::vec4 albedo;
     glm::vec4 metallicity_roughness;
+    glm::vec4 ao_normal_emissivity;
 };
 
 struct Instance
@@ -61,6 +62,9 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
         material.albedo                = glm::vec4(glm::vec3(material_ref->albedo),     glm::uintBitsToFloat((uint32_t)material_ref->albedo_map));
         material.metallicity_roughness = glm::vec4(          material_ref->metallicity, glm::uintBitsToFloat((uint32_t)material_ref->metallicity_map),
                                                              material_ref->roughness,   glm::uintBitsToFloat((uint32_t)material_ref->roughness_map));
+        material.ao_normal_emissivity  = glm::vec4(glm::uintBitsToFloat((uint32_t)material_ref->ao_map),
+                                                   glm::uintBitsToFloat((uint32_t)material_ref->normal_map),
+                                                   glm::uintBitsToFloat((uint32_t)material_ref->emissivity_map), 0.0f);
 
         uint32_t const material_id = (uint32_t)material_ref;
 
@@ -206,7 +210,7 @@ void ReleaseGpuScene(GfxContext gfx, GpuScene const &gpu_scene)
     gfxDestroyBuffer(gfx, gpu_scene.transform_buffer);
     gfxDestroyBuffer(gfx, gpu_scene.previous_transform_buffer);
 
-    for (GfxBuffer upload_transform_buffer : gpu_scene.upload_transform_buffers)
+    for(GfxBuffer upload_transform_buffer : gpu_scene.upload_transform_buffers)
     {
         gfxDestroyBuffer(gfx, upload_transform_buffer);
     }
@@ -227,7 +231,7 @@ void UpdateGpuScene(GfxContext gfx, GfxScene scene, GpuScene &gpu_scene)
 
     uint32_t const instance_count = gfxSceneGetInstanceCount(scene);
 
-    for (uint32_t i = 0; i < instance_count; ++i)
+    for(uint32_t i = 0; i < instance_count; ++i)
     {
         GfxConstRef<GfxInstance> const instance_ref = gfxSceneGetInstanceHandle(scene, i);
 

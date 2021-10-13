@@ -27,8 +27,10 @@ SOFTWARE.
 
 struct IBL
 {
+    GfxTexture brdf_buffer;
     GfxTexture irradiance_buffer;
+    GfxTexture environment_buffer;
 };
 
-IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_buffer);
+IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_map);
 void ReleaseIBL(GfxContext gfx, IBL const &ibl);

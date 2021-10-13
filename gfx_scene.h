@@ -1230,8 +1230,8 @@ private:
                 }
                 else
                 {
-                    std::string const metallicity_map_file = image_metadata_[(*it).second].asset_file + ".x";
-                    std::string const roughness_map_file = image_metadata_[(*it).second].asset_file + ".y";
+                    std::string const metallicity_map_file = image_metadata_[(*it).second].asset_file + ".b";
+                    std::string const roughness_map_file = image_metadata_[(*it).second].asset_file + ".g";
                     GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
                     GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                     if(!metallicity_map_ref || !roughness_map_ref)
@@ -1241,11 +1241,11 @@ private:
                         GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
                         metallicity_map_metadata = image_metadata_[(*it).second];   // set up metadata
                         metallicity_map_metadata.asset_file = metallicity_map_file;
-                        metallicity_map_metadata.object_name += ".x";
+                        metallicity_map_metadata.object_name += ".b";
                         GfxMetadata &roughness_map_metadata = image_metadata_[roughness_map_ref];
                         roughness_map_metadata = image_metadata_[(*it).second];
                         roughness_map_metadata.asset_file = roughness_map_file;
-                        roughness_map_metadata.object_name += ".y";
+                        roughness_map_metadata.object_name += ".g";
                         GfxImage &metallicity_map = *metallicity_map_ref;
                         GfxImage &roughness_map = *roughness_map_ref;
                         GfxImage const &image = *(*it).second;
@@ -1263,11 +1263,13 @@ private:
                         uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
                         for(uint32_t j = 0; j < texel_count; ++j)
                         {
-                            uint32_t index = j * byte_stride;
-                            for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                                metallicity_map.data[j * image.bytes_per_channel + k] = image.data[index++];
-                            for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                                roughness_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                            uint32_t index = j * byte_stride + image.bytes_per_channel;
+                            if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
+                                for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
+                                    roughness_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                            if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
+                                for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
+                                    metallicity_map.data[j * image.bytes_per_channel + k] = image.data[index++];
                         }
                     }
                     material.roughness_map = roughness_map_ref;

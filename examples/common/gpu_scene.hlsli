@@ -28,6 +28,7 @@ struct Material
 {
     float4 albedo;
     float4 metallicity_roughness;
+    float4 ao_normal_emissivity;
 };
 
 struct Mesh
@@ -58,7 +59,7 @@ StructuredBuffer<Material> g_MaterialBuffer;
 StructuredBuffer<float4x4> g_TransformBuffer;
 StructuredBuffer<float4x4> g_PreviousTransformBuffer;
 
-Texture2D g_Textures[];
+Texture2D g_Textures[] : register(space99); // different space to avoid issues with bindless allocating all available texture registers...
 
 SamplerState g_TextureSampler;
 

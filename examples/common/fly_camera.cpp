@@ -65,20 +65,16 @@ void UpdateFlyCamera(GfxContext gfx, FlyCamera &fly_camera)
     fly_camera.prev_view = fly_camera.view;
     fly_camera.prev_proj = fly_camera.proj;
 
-    // TODO: update camera (gboisse)
-#if 0
+    // TODO: animate camera (gboisse)
+
+    // Update projection aspect ratio
     float const aspect_ratio = gfxGetBackBufferWidth(gfx) / (float)gfxGetBackBufferHeight(gfx);
 
-    glm::vec3 const eye    = glm::dvec3(glm::inverse(glm::dmat4(fly_camera.view)) * glm::dvec4(0.0, 0.0, 0.0, 1.0));
-    glm::vec3 const center = eye - glm::vec3(fly_camera.view[0][2], fly_camera.view[1][2], fly_camera.view[2][2]);
-
-    //glm::mat4 const view            = glm::lookAt(glm::vec3(0.0f, 0.0f, 5.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    //glm::mat4 const projection      = glm::perspective(0.6f, aspect_ratio, 1e-1f, 1e4f);
-    //glm::mat4 const view_projection = projection * view;
-#endif
+    fly_camera.proj = glm::perspective(0.6f, aspect_ratio, 1e-1f, 1e4f);
 
     // Update projection jitter for anti-aliasing
     static uint32_t jitter_index;
+
     jitter_index = (jitter_index + 1) & 15; // 16 samples TAA
 
     float const jitter_x = (2.0f * CalculateHaltonNumber(jitter_index + 1, 2) - 1.0f) / gfxGetBackBufferWidth(gfx);

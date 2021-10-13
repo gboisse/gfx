@@ -52,11 +52,11 @@ glm::dvec3 const up_vectors[] =
 
 } //! Unnamed namespace
 
-IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_buffer)
+IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_map)
 {
     IBL ibl = {};
 
-    if(environment_buffer)
+    if(environment_map)
     {
         uint32_t const cubemap_size    = 512;
         uint32_t const mip_level_count = gfxCalculateMipCount(cubemap_size);
@@ -65,10 +65,12 @@ IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_buffer)
         GfxProgram      ibl_program    = gfxCreateProgram(gfx, "ibl");
         GfxSamplerState linear_sampler = gfxCreateSamplerState(gfx, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
 
-        ibl.irradiance_buffer = gfxCreateTextureCube(gfx, 32, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        ibl.brdf_buffer        = gfxCreateTexture2D(gfx, 512, 512, DXGI_FORMAT_R16G16_FLOAT);
+        ibl.irradiance_buffer  = gfxCreateTextureCube(gfx, 32, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        ibl.environment_buffer = gfxCreateTextureCube(gfx, 128, DXGI_FORMAT_R16G16B16A16_FLOAT, 5);
 
         gfxProgramSetParameter(gfx, ibl_program, "g_Cubemap", cubemap);
-        gfxProgramSetParameter(gfx, ibl_program, "g_EnvironmentBuffer", environment_buffer);
+        gfxProgramSetParameter(gfx, ibl_program, "g_EnvironmentMap", environment_map);
 
         gfxProgramSetParameter(gfx, ibl_program, "g_LinearSampler", linear_sampler);
 
@@ -148,6 +150,57 @@ IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_buffer)
             gfxDestroyKernel(gfx, draw_irradiance_kernel);
         }
 
+        // Convolve the cubemap to pre-filter the environment lighting for reflections
+        GfxKernel draw_environment_kernel = gfxCreateComputeKernel(gfx, ibl_program, "DrawEnvironment");
+        {
+            gfxCommandBindKernel(gfx, draw_environment_kernel);
+
+            uint32_t const *num_threads = gfxKernelGetNumThreads(gfx, draw_environment_kernel);
+            uint32_t mip_level_width    = ibl.environment_buffer.getWidth();
+            uint32_t mip_level_height   = ibl.environment_buffer.getHeight();
+
+            for(uint32_t mip_level = 0; mip_level < ibl.environment_buffer.getMipLevels(); ++mip_level)
+            {
+                uint32_t const num_groups_x = (mip_level_width  + num_threads[0] - 1) / num_threads[0];
+                uint32_t const num_groups_y = (mip_level_height + num_threads[1] - 1) / num_threads[1];
+
+                for(uint32_t face_index = 0; face_index < 6; ++face_index)
+                {
+                    glm::dmat4 const view          = glm::lookAt(glm::dvec3(0.0), forward_vectors[face_index], up_vectors[face_index]);
+                    glm::dmat4 const proj          = glm::perspective(M_PI / 2.0, 1.0, 0.1, 1e4);
+                    glm::mat4  const view_proj_inv = glm::mat4(glm::inverse(proj * view));
+
+                    gfxProgramSetParameter(gfx, ibl_program, "g_MipLevel", mip_level);
+                    gfxProgramSetParameter(gfx, ibl_program, "g_FaceIndex", face_index);
+                    gfxProgramSetParameter(gfx, ibl_program, "g_ViewProjectionInverse", view_proj_inv);
+
+                    gfxProgramSetParameter(gfx, ibl_program, "g_EnvironmentBuffer", ibl.environment_buffer, mip_level);
+
+                    gfxCommandDispatch(gfx, num_groups_x, num_groups_y, 1);
+                }
+
+                mip_level_width  = GFX_MAX(mip_level_width >> 1, 1u);
+                mip_level_height = GFX_MAX(mip_level_height >> 1, 1u);
+            }
+
+            gfxDestroyKernel(gfx, draw_environment_kernel);
+        }
+
+        // Finally, we pre-calculate the BRDF for various roughness and incident directions values
+        GfxKernel draw_brdf_kernel = gfxCreateComputeKernel(gfx, ibl_program, "DrawBRDF");
+        {
+            uint32_t const *num_threads = gfxKernelGetNumThreads(gfx, draw_brdf_kernel);
+            uint32_t const num_groups_x = (ibl.brdf_buffer.getWidth()  + num_threads[0] - 1) / num_threads[0];
+            uint32_t const num_groups_y = (ibl.brdf_buffer.getHeight() + num_threads[1] - 1) / num_threads[1];
+
+            gfxProgramSetParameter(gfx, ibl_program, "g_BrdfBuffer", ibl.brdf_buffer);
+
+            gfxCommandBindKernel(gfx, draw_brdf_kernel);
+            gfxCommandDispatch(gfx, num_groups_x, num_groups_y, 1);
+
+            gfxDestroyKernel(gfx, draw_brdf_kernel);
+        }
+
         gfxDestroyTexture(gfx, cubemap);
         gfxDestroyProgram(gfx, ibl_program);
         gfxDestroySamplerState(gfx, linear_sampler);
@@ -158,5 +211,7 @@ IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_buffer)
 
 void ReleaseIBL(GfxContext gfx, IBL const &ibl)
 {
+    gfxDestroyTexture(gfx, ibl.brdf_buffer);
     gfxDestroyTexture(gfx, ibl.irradiance_buffer);
+    gfxDestroyTexture(gfx, ibl.environment_buffer);
 }

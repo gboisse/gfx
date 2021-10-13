@@ -39,22 +39,22 @@ char const *scene_path           = "data/SciFiHelmet/glTF/SciFiHelmet.gltf";
 
 int main()
 {
-    GfxWindow  window = gfxCreateWindow(1280, 720, "gfx - pbr");
+    GfxWindow  window = gfxCreateWindow(1280, 720, "gfx - PBR");
     GfxContext gfx    = gfxCreateContext(window);
     GfxScene   scene  = gfxCreateScene();
+    gfxImGuiInitialize(gfx);
 
     // Import the scene data
-    gfxImGuiInitialize(gfx);
     gfxSceneImport(scene, scene_path);
     gfxSceneImport(scene, environment_map_path);
     GpuScene gpu_scene = UploadSceneToGpuMemory(gfx, scene);
 
     // Process the environment for image-based lighting (i.e., IBL)
-    GfxConstRef<GfxImage> environment_map = gfxSceneFindObjectByAssetFile<GfxImage>(scene, environment_map_path);
+    GfxConstRef<GfxImage> environment_image = gfxSceneFindObjectByAssetFile<GfxImage>(scene, environment_map_path);
 
-    GfxTexture environment_buffer = (environment_map ? gpu_scene.textures[(uint32_t)environment_map] : GfxTexture());
+    GfxTexture environment_map = (environment_image ? gpu_scene.textures[(uint32_t)environment_image] : GfxTexture());
 
-    IBL const ibl = ConvolveIBL(gfx, environment_buffer);
+    IBL const ibl = ConvolveIBL(gfx, environment_map);
 
     // Create our color (i.e., HDR) and depth buffers
     GfxTexture color_buffer    = gfxCreateTexture2D(gfx, DXGI_FORMAT_R16G16B16A16_FLOAT);
@@ -99,10 +99,11 @@ int main()
     // Bind a bunch of shader parameters
     BindGpuScene(gfx, pbr_program, gpu_scene);
 
-    gfxProgramSetParameter(gfx, pbr_program, "g_ColorBuffer", color_buffer);
+    gfxProgramSetParameter(gfx, pbr_program, "g_BrdfBuffer", ibl.brdf_buffer);
     gfxProgramSetParameter(gfx, pbr_program, "g_IrradianceBuffer", ibl.irradiance_buffer);
+    gfxProgramSetParameter(gfx, pbr_program, "g_EnvironmentBuffer", ibl.environment_buffer);
 
-    gfxProgramSetParameter(gfx, sky_program, "g_IrradianceBuffer", ibl.irradiance_buffer);
+    gfxProgramSetParameter(gfx, sky_program, "g_EnvironmentBuffer", ibl.environment_buffer);
 
     gfxProgramSetParameter(gfx, taa_program, "g_ColorBuffer", color_buffer);
     gfxProgramSetParameter(gfx, taa_program, "g_HistoryBuffer", history_buffer);
@@ -120,6 +121,14 @@ int main()
         // Update our GPU scene and camera
         UpdateGpuScene(gfx, scene, gpu_scene);
         UpdateFlyCamera(gfx, fly_camera);
+
+        glm::vec3 const eye           = glm::vec3(glm::inverse(fly_camera.view) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
+        glm::mat4 const view_proj_inv = glm::inverse(fly_camera.view_proj);
+
+        gfxProgramSetParameter(gfx, pbr_program, "g_Eye", eye);
+        gfxProgramSetParameter(gfx, sky_program, "g_Eye", eye);
+
+        gfxProgramSetParameter(gfx, sky_program, "g_ViewProjectionInverse", view_proj_inv);
 
         // Update texel size (can change if window is resized)
         float const texel_size[] =
@@ -159,9 +168,6 @@ int main()
         }
 
         // Draw our skybox
-        gfxProgramSetParameter(gfx, sky_program, "g_Eye", glm::vec3(glm::inverse(fly_camera.view) *glm::vec4(0.0f, 0.0f, 0.0f, 1.0f)));
-        gfxProgramSetParameter(gfx, sky_program, "g_ViewProjectionInverse", glm::inverse(fly_camera.view_proj));
-
         gfxCommandBindKernel(gfx, sky_kernel);
         gfxCommandDraw(gfx, 3);
 
@@ -169,13 +175,15 @@ int main()
         gfxCommandBindKernel(gfx, reproject_kernel);
         gfxCommandDraw(gfx, 3);
 
-        // Update our temporal history
+        // Update the temporal history with the new anti-aliased frame
         gfxCommandCopyTexture(gfx, history_buffer, resolve_buffer);
 
-        // And resolve into the backbuffer
+        // Resolve into the backbuffer
         gfxCommandBindKernel(gfx, resolve_kernel);
         gfxCommandDraw(gfx, 3);
 
+        // And submit the frame
+        gfxImGuiRender();
         gfxFrame(gfx);
     }
 

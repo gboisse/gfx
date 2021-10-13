@@ -21,29 +21,33 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
+#include "../common/gpu_scene.hlsli"
 
 uint     g_InstanceId;
 float4x4 g_ViewProjection;
-
-#include "../common/gpu_scene.hlsli"
 
 struct Params
 {
     float4 position : SV_Position;
     float3 normal   : NORMAL;
     float2 uv       : TEXCOORD0;
+    float3 current  : POSITION0;
+    float3 previous : POSITION1;
 };
 
 Params main(in Vertex vertex)
 {
-    float4x4 transform = g_TransformBuffer[g_InstanceId];
-    float4   position  = mul(transform, vertex.position);
-    float3   normal    = TransformDirection(transform, vertex.normal.xyz);
+    float4x4 transform          = g_TransformBuffer[g_InstanceId];
+    float4x4 previous_transform = g_PreviousTransformBuffer[g_InstanceId];
+    float4   position           = mul(transform, vertex.position);
+    float3   normal             = TransformDirection(transform, vertex.normal.xyz);
 
     Params params;
     params.position = mul(g_ViewProjection, position);
     params.normal   = normal;
     params.uv       = vertex.uv;
+    params.current  = mul(transform, vertex.position).xyz;
+    params.previous = mul(previous_transform, vertex.position).xyz;
 
     return params;
 }

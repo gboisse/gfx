@@ -26,7 +26,7 @@ float3   g_Eye;
 float2   g_TexelSize;
 float4x4 g_ViewProjectionInverse;
 
-TextureCube g_IrradianceBuffer;
+TextureCube g_EnvironmentBuffer;
 
 SamplerState g_LinearSampler;
 
@@ -38,7 +38,7 @@ float4 main(in float4 pos : SV_Position) : SV_Target
     float4 world = mul(g_ViewProjectionInverse, float4(ndc, 1.0f, 1.0f));
     world /= world.w;   // perspective divide
 
-    float3 color = g_IrradianceBuffer.Sample(g_LinearSampler, world.xyz - g_Eye).xyz;
+    float3 color = g_EnvironmentBuffer.SampleLevel(g_LinearSampler, world.xyz - g_Eye, 1.0f).xyz;
 
     color /= 1.0f + color;
     color  = saturate(color);
