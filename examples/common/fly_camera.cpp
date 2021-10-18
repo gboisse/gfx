@@ -40,7 +40,7 @@ float CalculateHaltonNumber(uint32_t index, uint32_t base)
     return result;
 }
 
-} //! Unnamed namespace
+} //! unnamed namespace
 
 FlyCamera CreateFlyCamera(GfxContext gfx, glm::vec3 const &eye, glm::vec3 const &center)
 {

@@ -259,7 +259,7 @@ template<> inline GfxResult gfxProgramSetParameter<GfxSamplerState>(GfxContext c
 template<> inline GfxResult gfxProgramSetParameter<GfxAccelerationStructure>(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure const &value) { return gfxProgramSetAccelerationStructure(context, program, parameter_name, value); }
 template<typename TYPE> inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, TYPE const &value)
 {
-    static_assert(!std::is_pointer<TYPE>::value, "Program parameters must be passed by reference, not by pointer");
+    static_assert(!std::is_pointer<TYPE>::value, "Program parameters must be passed by value, not by pointer");
     return gfxProgramSetConstants(context, program, parameter_name, &value, sizeof(value));
 }
 
@@ -3704,7 +3704,8 @@ private:
 
     uint64_t getDescriptorHeapId() const
     {
-        return (static_cast<uint64_t>(descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0) << 32);
+        return (static_cast<uint64_t>(descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0) << 32) |
+               (static_cast<uint64_t>(sampler_descriptors_.descriptor_heap_ != nullptr ? sampler_descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0));
     }
 
     template<typename TYPE>

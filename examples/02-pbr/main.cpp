@@ -34,7 +34,7 @@ namespace
 char const *environment_map_path = "data/kiara_1_dawn_4k.hdr";
 char const *scene_path           = "data/SciFiHelmet/glTF/SciFiHelmet.gltf";
 
-} //! Unnamed namespace
+} //! unnamed namespace
 
 int main()
 {

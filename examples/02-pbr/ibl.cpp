@@ -50,7 +50,7 @@ glm::dvec3 const up_vectors[] =
     glm::dvec3( 0.0, -1.0,  0.0)
 };
 
-} //! Unnamed namespace
+} //! unnamed namespace
 
 IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_map)
 {

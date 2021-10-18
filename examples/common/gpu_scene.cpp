@@ -45,7 +45,7 @@ struct Vertex
     glm::vec2 uv;
 };
 
-} //! Unnamed namespace
+} //! unnamed namespace
 
 GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
 {
