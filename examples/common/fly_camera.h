@@ -24,6 +24,7 @@ SOFTWARE.
 #pragma once
 
 #include "gfx_scene.h"
+#include "gfx_window.h"
 
 struct FlyCamera
 {
@@ -36,4 +37,4 @@ struct FlyCamera
 };
 
 FlyCamera CreateFlyCamera(GfxContext gfx, glm::vec3 const &eye, glm::vec3 const &center);
-void UpdateFlyCamera(GfxContext gfx, FlyCamera &fly_camera);
+void UpdateFlyCamera(GfxContext gfx, GfxWindow window, FlyCamera &fly_camera);

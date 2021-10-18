@@ -59,7 +59,7 @@ FlyCamera CreateFlyCamera(GfxContext gfx, glm::vec3 const &eye, glm::vec3 const 
     return fly_camera;
 }
 
-void UpdateFlyCamera(GfxContext gfx, FlyCamera &fly_camera)
+void UpdateFlyCamera(GfxContext gfx, GfxWindow window, FlyCamera &fly_camera)
 {
     // Update camera history
     fly_camera.prev_view = fly_camera.view;

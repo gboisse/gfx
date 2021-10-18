@@ -21,7 +21,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#include "gfx_window.h"
 #include "gfx_imgui.h"
 
 #include "ibl.h"
@@ -120,7 +119,7 @@ int main()
 
         // Update our GPU scene and camera
         UpdateGpuScene(gfx, scene, gpu_scene);
-        UpdateFlyCamera(gfx, fly_camera);
+        UpdateFlyCamera(gfx, window, fly_camera);
 
         glm::vec3 const eye           = glm::vec3(glm::inverse(fly_camera.view) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
         glm::mat4 const view_proj_inv = glm::inverse(fly_camera.view_proj);
@@ -163,6 +162,7 @@ int main()
 
             gfxProgramSetParameter(gfx, pbr_program, "g_InstanceId", instance_id);
             gfxProgramSetParameter(gfx, pbr_program, "g_ViewProjection", fly_camera.view_proj);
+            gfxProgramSetParameter(gfx, pbr_program, "g_PreviousViewProjection", fly_camera.prev_view_proj);
 
             gfxCommandDrawIndexed(gfx, mesh.count, 1, mesh.first_index, mesh.base_vertex);
         }

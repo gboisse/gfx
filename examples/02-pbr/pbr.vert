@@ -25,14 +25,16 @@ SOFTWARE.
 
 uint     g_InstanceId;
 float4x4 g_ViewProjection;
+float4x4 g_PreviousViewProjection;
 
 struct Params
 {
     float4 position : SV_Position;
     float3 normal   : NORMAL;
     float2 uv       : TEXCOORD0;
-    float3 current  : POSITION0;
-    float3 previous : POSITION1;
+    float3 world    : POSITION0;
+    float4 current  : POSITION1;
+    float4 previous : POSITION2;
 };
 
 Params main(in Vertex vertex)
@@ -40,14 +42,16 @@ Params main(in Vertex vertex)
     float4x4 transform          = g_TransformBuffer[g_InstanceId];
     float4x4 previous_transform = g_PreviousTransformBuffer[g_InstanceId];
     float4   position           = mul(transform, vertex.position);
+    float4   previous_position  = mul(previous_transform, vertex.position);
     float3   normal             = TransformDirection(transform, vertex.normal.xyz);
 
     Params params;
     params.position = mul(g_ViewProjection, position);
     params.normal   = normal;
     params.uv       = vertex.uv;
-    params.current  = mul(transform, vertex.position).xyz;
-    params.previous = mul(previous_transform, vertex.position).xyz;
+    params.world    = position.xyz;
+    params.current  = params.position;
+    params.previous = mul(g_PreviousViewProjection, previous_position);
 
     return params;
 }
