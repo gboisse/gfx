@@ -28,9 +28,14 @@ SOFTWARE.
 
 struct FlyCamera
 {
+    glm::vec3 eye;
+    glm::vec3 center;
+    glm::vec3 up;
+
     glm::mat4 view;
     glm::mat4 proj;
     glm::mat4 view_proj;
+
     glm::mat4 prev_view;
     glm::mat4 prev_proj;
     glm::mat4 prev_view_proj;

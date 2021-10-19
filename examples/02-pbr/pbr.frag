@@ -54,6 +54,7 @@ float3 FresnelSchlickRoughness(in float n_dot_v, in float3 F0, in float roughnes
     return F0 + (max(F0, 1.0f - roughness) - F0) * pow(1.0f - n_dot_v, 5.0f);
 }
 
+// Calculates motion vectors in UV-space (i.e., normalized [0, 1] coordinates)
 float2 CalculateVelocity(in Params params)
 {
     float2 ndc_velocity = params.current.xy / params.current.w

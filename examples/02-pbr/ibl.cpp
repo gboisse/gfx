@@ -30,24 +30,24 @@ SOFTWARE.
 namespace
 {
 
-glm::dvec3 const forward_vectors[] =
+glm::vec3 const forward_vectors[] =
 {
-    glm::dvec3(-1.0,  0.0,  0.0),
-    glm::dvec3( 1.0,  0.0,  0.0),
-    glm::dvec3( 0.0,  1.0,  0.0),
-    glm::dvec3( 0.0, -1.0,  0.0),
-    glm::dvec3( 0.0,  0.0, -1.0),
-    glm::dvec3( 0.0,  0.0,  1.0)
+    glm::vec3(-1.0f,  0.0f,  0.0f),
+    glm::vec3( 1.0f,  0.0f,  0.0f),
+    glm::vec3( 0.0f,  1.0f,  0.0f),
+    glm::vec3( 0.0f, -1.0f,  0.0f),
+    glm::vec3( 0.0f,  0.0f, -1.0f),
+    glm::vec3( 0.0f,  0.0f,  1.0f)
 };
 
-glm::dvec3 const up_vectors[] =
+glm::vec3 const up_vectors[] =
 {
-    glm::dvec3( 0.0, -1.0,  0.0),
-    glm::dvec3( 0.0, -1.0,  0.0),
-    glm::dvec3( 0.0,  0.0, -1.0),
-    glm::dvec3( 0.0,  0.0,  1.0),
-    glm::dvec3( 0.0, -1.0,  0.0),
-    glm::dvec3( 0.0, -1.0,  0.0)
+    glm::vec3( 0.0f, -1.0f,  0.0f),
+    glm::vec3( 0.0f, -1.0f,  0.0f),
+    glm::vec3( 0.0f,  0.0f, -1.0f),
+    glm::vec3( 0.0f,  0.0f,  1.0f),
+    glm::vec3( 0.0f, -1.0f,  0.0f),
+    glm::vec3( 0.0f, -1.0f,  0.0f)
 };
 
 } //! unnamed namespace
@@ -85,9 +85,9 @@ IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_map)
 
             for(uint32_t face_index = 0; face_index < 6; ++face_index)
             {
-                glm::dmat4 const view          = glm::lookAt(glm::dvec3(0.0), forward_vectors[face_index], up_vectors[face_index]);
-                glm::dmat4 const proj          = glm::perspective(M_PI / 2.0, 1.0, 0.1, 1e4);
-                glm::mat4  const view_proj_inv = glm::mat4(glm::inverse(proj * view));
+                glm::mat4 const view          = glm::lookAt(glm::vec3(0.0f), forward_vectors[face_index], up_vectors[face_index]);
+                glm::mat4 const proj          = glm::perspective((float)M_PI / 2.0f, 1.0f, 0.1f, 1e4f);
+                glm::mat4 const view_proj_inv = glm::inverse(proj * view);
 
                 gfxProgramSetParameter(gfx, ibl_program, "g_FaceIndex", face_index);
                 gfxProgramSetParameter(gfx, ibl_program, "g_ViewProjectionInverse", view_proj_inv);
@@ -135,9 +135,9 @@ IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_map)
 
             for(uint32_t face_index = 0; face_index < 6; ++face_index)
             {
-                glm::dmat4 const view          = glm::lookAt(glm::dvec3(0.0), forward_vectors[face_index], up_vectors[face_index]);
-                glm::dmat4 const proj          = glm::perspective(M_PI / 2.0, 1.0, 0.1, 1e4);
-                glm::mat4  const view_proj_inv = glm::mat4(glm::inverse(proj * view));
+                glm::mat4 const view          = glm::lookAt(glm::vec3(0.0f), forward_vectors[face_index], up_vectors[face_index]);
+                glm::mat4 const proj          = glm::perspective((float)M_PI / 2.0f, 1.0f, 0.1f, 1e4f);
+                glm::mat4 const view_proj_inv = glm::inverse(proj * view);
 
                 gfxProgramSetParameter(gfx, ibl_program, "g_FaceIndex", face_index);
                 gfxProgramSetParameter(gfx, ibl_program, "g_ViewProjectionInverse", view_proj_inv);
@@ -166,9 +166,9 @@ IBL ConvolveIBL(GfxContext gfx, GfxTexture environment_map)
 
                 for(uint32_t face_index = 0; face_index < 6; ++face_index)
                 {
-                    glm::dmat4 const view          = glm::lookAt(glm::dvec3(0.0), forward_vectors[face_index], up_vectors[face_index]);
-                    glm::dmat4 const proj          = glm::perspective(M_PI / 2.0, 1.0, 0.1, 1e4);
-                    glm::mat4  const view_proj_inv = glm::mat4(glm::inverse(proj * view));
+                    glm::mat4 const view          = glm::lookAt(glm::vec3(0.0f), forward_vectors[face_index], up_vectors[face_index]);
+                    glm::mat4 const proj          = glm::perspective((float)M_PI / 2.0f, 1.0f, 0.1f, 1e4f);
+                    glm::mat4 const view_proj_inv = glm::inverse(proj * view);
 
                     gfxProgramSetParameter(gfx, ibl_program, "g_MipLevel", mip_level);
                     gfxProgramSetParameter(gfx, ibl_program, "g_FaceIndex", face_index);

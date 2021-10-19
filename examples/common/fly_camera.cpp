@@ -48,7 +48,11 @@ FlyCamera CreateFlyCamera(GfxContext gfx, glm::vec3 const &eye, glm::vec3 const 
 
     float const aspect_ratio = gfxGetBackBufferWidth(gfx) / (float)gfxGetBackBufferHeight(gfx);
 
-    fly_camera.view      = glm::lookAt(eye, center, glm::vec3(0.0f, 1.0f, 0.0f));
+    fly_camera.eye    = eye;
+    fly_camera.center = center;
+    fly_camera.up     = glm::vec3(0.0f, 1.0f, 0.0f);
+
+    fly_camera.view      = glm::lookAt(eye, center, fly_camera.up);
     fly_camera.proj      = glm::perspective(0.6f, aspect_ratio, 1e-1f, 1e4f);
     fly_camera.view_proj = fly_camera.proj * fly_camera.view;
 
@@ -65,7 +69,7 @@ void UpdateFlyCamera(GfxContext gfx, GfxWindow window, FlyCamera &fly_camera)
     fly_camera.prev_view = fly_camera.view;
     fly_camera.prev_proj = fly_camera.proj;
 
-    // TODO: animate camera (gboisse)
+    // TODO: animate the camera... (gboisse)
 
     // Update projection aspect ratio
     float const aspect_ratio = gfxGetBackBufferWidth(gfx) / (float)gfxGetBackBufferHeight(gfx);

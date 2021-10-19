@@ -121,13 +121,10 @@ int main()
         UpdateGpuScene(gfx, scene, gpu_scene);
         UpdateFlyCamera(gfx, window, fly_camera);
 
-        glm::vec3 const eye           = glm::vec3(glm::inverse(fly_camera.view) * glm::vec4(0.0f, 0.0f, 0.0f, 1.0f));
-        glm::mat4 const view_proj_inv = glm::inverse(fly_camera.view_proj);
+        gfxProgramSetParameter(gfx, pbr_program, "g_Eye", fly_camera.eye);
+        gfxProgramSetParameter(gfx, sky_program, "g_Eye", fly_camera.eye);
 
-        gfxProgramSetParameter(gfx, pbr_program, "g_Eye", eye);
-        gfxProgramSetParameter(gfx, sky_program, "g_Eye", eye);
-
-        gfxProgramSetParameter(gfx, sky_program, "g_ViewProjectionInverse", view_proj_inv);
+        gfxProgramSetParameter(gfx, sky_program, "g_ViewProjectionInverse", glm::inverse(fly_camera.view_proj));
 
         // Update texel size (can change if window is resized)
         float const texel_size[] =

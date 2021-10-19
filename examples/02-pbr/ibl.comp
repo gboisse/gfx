@@ -38,6 +38,7 @@ RWTexture2DArray<float4> g_EnvironmentBuffer;
 
 SamplerState g_LinearSampler;
 
+// https://en.wikipedia.org/wiki/Equirectangular_projection
 float2 SampleSphericalMap(in float3 rd)
 {
     return float2(atan2(rd.z, rd.x) / (2.0f * PI) + 0.5f, 1.0f - acos(rd.y) / PI);
@@ -96,6 +97,10 @@ void BlurCubemap(in uint3 did : SV_DispatchThreadID)
     g_OutCubemap[did] = result / sample_count;
 }
 
+//!
+//! For more info, see: https://cdn2.unrealengine.com/Resources/files/2013SiggraphPresentationsNotes-26915738.pdf
+//!
+
 [numthreads(8, 8, 1)]
 void DrawIrradiance(in uint2 did : SV_DispatchThreadID)
 {
@@ -136,7 +141,6 @@ void DrawIrradiance(in uint2 did : SV_DispatchThreadID)
     g_IrradianceBuffer[int3(did, g_FaceIndex)] = float4(PI * irradiance / sample_count, 1.0f);
 }
 
-// https://en.wikipedia.org/wiki/Van_der_Corput_sequence
 float VanDerCorput(in uint bits)
 {
     bits = (bits << 16u) | (bits >> 16u);
@@ -147,7 +151,6 @@ float VanDerCorput(in uint bits)
     return float(double(bits) * 2.3283064365386963e-10);    // / 0x100000000
 }
 
-// http://holger.dammertz.org/stuff/notes_HammersleyOnHemisphere.html
 float2 Hammersley(in uint i, in uint N)
 {
     return float2(i / float(N), VanDerCorput(i));
