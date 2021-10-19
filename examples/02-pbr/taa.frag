@@ -38,6 +38,7 @@ float SquareLength(in float2 value)
     return (value.x * value.x + value.y * value.y);
 }
 
+// https://www.gdcvault.com/play/1022970/Temporal-Reprojection-Anti-Aliasing-in
 float2 FindClosestVelocity(in float2 uv, out bool is_sky_pixel)
 {
     float2 velocity;
@@ -87,6 +88,7 @@ float4 Reproject(in float4 pos : SV_Position) : SV_Target
         }
     }
 
+    // https://developer.download.nvidia.com/gameworks/events/GDC2016/msalvi_temporal_supersampling.pdf
     float3 ex  = vsum / wsum;
     float3 ex2 = vsum2 / wsum;
     float3 dev = sqrt(max(ex2 - ex * ex, 0.0f));
@@ -98,6 +100,7 @@ float4 Reproject(in float4 pos : SV_Position) : SV_Target
     nmin = max(ex - dev * box_size, nmin);
     nmax = min(ex + dev * box_size, nmax);
 
+    // http://advances.realtimerendering.com/s2014/#_HIGH-QUALITY_TEMPORAL_SUPERSAMPLING
     float3 history         = g_HistoryBuffer.Sample(g_LinearSampler, uv - velocity).xyz;
     float3 clamped_history = clamp(history, nmin, nmax);
     float3 center          = g_ColorBuffer.Sample(g_NearestSampler, uv).xyz;
@@ -122,6 +125,7 @@ float3 YCoCgToRGB(in float3 yCoCg)
         yCoCg.x - yCoCg.y - yCoCg.z);
 }
 
+// https://en.wikipedia.org/wiki/Unsharp_masking
 float3 ApplySharpening(in float3 center, in float3 top, in float3 left, in float3 right, in float3 bottom)
 {
     float3 result = RGBToYCoCg(center);
