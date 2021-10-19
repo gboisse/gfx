@@ -25,7 +25,7 @@ SOFTWARE.
 
 int main()
 {
-    auto window = gfxCreateWindow(1280, 720, "gfx - hellotriangle");
+    auto window = gfxCreateWindow(1280, 720, "gfx - Hello, triangle!");
     auto gfx = gfxCreateContext(window);
 
     float vertices[] = {  0.5f, -0.5f, 0.0f,

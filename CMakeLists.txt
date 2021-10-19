@@ -5,6 +5,8 @@ add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader-2.0-rc1)
 
 option(GFX_BUILD_EXAMPLES "Build gfx examples" ON)
 
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
 add_library(gfx STATIC gfx.cpp)
 
 target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_imgui.h gfx_scene.h gfx_window.h)
