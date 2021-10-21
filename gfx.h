@@ -900,7 +900,8 @@ class GfxInternal
                 parameter.name_ = parameter_name;
                 return parameter;
             }
-            return (*it).second;
+            GFX_ASSERT(strcmp((*it).second.name_.c_str(), parameter_name) == 0);
+            return (*it).second;    // ^ assert on hashing conflicts
         }
 
         String cs_;

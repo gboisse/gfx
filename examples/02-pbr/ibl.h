@@ -23,7 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 #pragma once
 
-#include "gfx_scene.h"
+#include "gfx.h"
 
 struct IBL
 {
