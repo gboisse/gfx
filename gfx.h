@@ -194,6 +194,8 @@ GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimiti
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
+GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
+GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
@@ -726,12 +728,14 @@ class GfxInternal
     {
         uint32_t index_ = 0;
         float transform_[16] = {};
+        uint32_t instance_id_ = 0;
+        uint8_t instance_mask_ = 0xFFu;
         GfxBuffer bvh_buffer_ = {};
         uint32_t index_stride_ = 0;
         GfxBuffer index_buffer_ = {};
         uint32_t vertex_stride_ = 0;
         GfxBuffer vertex_buffer_ = {};
-        GfxAccelerationStructure acceleration_structure = {};
+        GfxAccelerationStructure acceleration_structure_ = {};
     };
     GfxArray<RaytracingPrimitive> raytracing_primitives_;
     GfxHandles raytracing_primitive_handles_;
@@ -1877,8 +1881,8 @@ public:
                     instance_desc.Transform[row][col] = gfx_raytracing_primitive.transform_[4 * row + col];
             for(uint32_t j = 0; j < 3; ++j)
                 instance_desc.Transform[j][3] = gfx_raytracing_primitive.transform_[4 * j + 3];
-            instance_desc.InstanceID = raytracing_primitive;
-            instance_desc.InstanceMask = 0xFFu;
+            instance_desc.InstanceID = gfx_raytracing_primitive.instance_id_;
+            instance_desc.InstanceMask = gfx_raytracing_primitive.instance_mask_;
             instance_desc.AccelerationStructure = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             instance_descs[instance_desc_count++] = instance_desc;
         }
@@ -1969,7 +1973,8 @@ public:
         for(uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
             gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
         gfx_acceleration_structure.raytracing_primitives_.push_back(raytracing_primitive);
-        gfx_raytracing_primitive.acceleration_structure = acceleration_structure;
+        gfx_raytracing_primitive.acceleration_structure_ = acceleration_structure;
+        gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
         gfx_acceleration_structure.needs_rebuild_ = true;
         return raytracing_primitive;
     }
@@ -1981,8 +1986,8 @@ public:
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid raytracing primitive object");
         RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        if(acceleration_structure_handles_.has_handle(gfx_raytracing_primitive.acceleration_structure.handle))
-            acceleration_structures_[gfx_raytracing_primitive.acceleration_structure].needs_rebuild_ = true;
+        if(acceleration_structure_handles_.has_handle(gfx_raytracing_primitive.acceleration_structure_.handle))
+            acceleration_structures_[gfx_raytracing_primitive.acceleration_structure_].needs_rebuild_ = true;
         collect(gfx_raytracing_primitive);  // release resources
         raytracing_primitives_.erase(raytracing_primitive); // destroy raytracing primitive
         raytracing_primitive_handles_.free_handle(raytracing_primitive.handle);
@@ -2045,6 +2050,32 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
         memcpy(gfx_raytracing_primitive.transform_, row_major_4x4_transform, sizeof(gfx_raytracing_primitive.transform_));
+        return kGfxResult_NoError;
+    }
+
+    GfxResult setRaytracingPrimitiveInstanceID(GfxRaytracingPrimitive const &raytracing_primitive, uint32_t instance_id)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instanceID on an invalid raytracing primitive object");
+        if(instance_id >= (1u << 24))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set an instanceID that is greater than %u", (1u << 24) - 1);
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
+        gfx_raytracing_primitive.instance_id_ = instance_id;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult setRaytracingPrimitiveInstanceMask(GfxRaytracingPrimitive const &raytracing_primitive, uint8_t instance_mask)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instance mask on an invalid raytracing primitive object");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
+        gfx_raytracing_primitive.instance_mask_ = instance_mask;
         return kGfxResult_NoError;
     }
 
@@ -5487,7 +5518,7 @@ private:
 
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive)
     {
-        GfxAccelerationStructure const &acceleration_structure = gfx_raytracing_primitive.acceleration_structure;
+        GfxAccelerationStructure const &acceleration_structure = gfx_raytracing_primitive.acceleration_structure_;
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid acceleration structure object");
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
@@ -6775,6 +6806,20 @@ GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPr
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setRaytracingPrimitiveTransform(raytracing_primitive, row_major_4x4_transform);
+}
+
+GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setRaytracingPrimitiveInstanceID(raytracing_primitive, instance_id);
+}
+
+GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setRaytracingPrimitiveInstanceMask(raytracing_primitive, instance_mask);
 }
 
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
