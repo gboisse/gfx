@@ -534,6 +534,7 @@ public:
             GFX_TRY(importHdr(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||
                 CaseInsensitiveCompare(asset_extension, ".png") ||
+                CaseInsensitiveCompare(asset_extension, ".tga") ||
                 CaseInsensitiveCompare(asset_extension, ".jpg") ||
                 CaseInsensitiveCompare(asset_extension, ".jpeg"))
             GFX_TRY(importImage(scene, asset_file));
