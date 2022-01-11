@@ -1333,7 +1333,7 @@ private:
             std::vector<GfxConstRef<GfxMesh>> &mesh_list = meshes[(int32_t)i];
             for(size_t j = 0; j < gltf_mesh.primitives.size(); ++j)
             {
-                std::map<std::string, int>::const_iterator it;
+                std::map<std::string, int32_t>::const_iterator it;
                 static std::string const position_attribute = "POSITION";
                 static std::string const normal_attribute   = "NORMAL";
                 static std::string const uv_attribute       = "TEXCOORD_0";
