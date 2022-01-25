@@ -383,6 +383,7 @@ class GfxSceneInternal
 
         std::vector<uint64_t> children_;
         std::vector<GfxRef<GfxInstance>> instances_;
+        GfxRef<GfxCamera> camera_;
     };
 
     struct GltfAnimatedNode
@@ -630,6 +631,8 @@ public:
                 for(size_t i = 0; i < node.instances_.size(); ++i)
                     if(node.instances_[i])
                         node.instances_[i]->transform = glm::mat4(transform);
+                if(node.camera_)
+                    transformGltfCamera(*node.camera_, transform);
             };
             for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
                 VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
@@ -655,6 +658,8 @@ public:
                 for(size_t i = 0; i < node.instances_.size(); ++i)
                     if(node.instances_[i])
                         node.instances_[i]->transform = glm::mat4(transform);
+                if(node.camera_)
+                    transformGltfCamera(*node.camera_, transform);
             };
             for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
                 VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
@@ -857,6 +862,22 @@ private:
             else if(str1[i] == '\0')
                 break;
         return true;
+    }
+
+    static inline void transformGltfCamera(GfxCamera& camera, const glm::dmat4& transform)
+    {
+        // Default gltf camera
+        glm::dvec4 eye {0.0, 0.0, 0.0, 1.0};
+        glm::dvec4 center {0.0, 0.0, -1.0, 1.0};
+        glm::dvec4 up {0.0, 1.0, 0.0, 0.0};
+
+        eye = transform * eye;
+        center = transform * center;
+        up = transform * up;
+
+        camera.eye = glm::vec3(eye / eye.w);
+        camera.center = glm::vec3(center / center.w);
+        camera.up = glm::vec3(up);
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1119,6 +1140,25 @@ private:
             GFX_PRINTLN("Parsed gltf file `%s' with warnings:\r\n%s", asset_file, warnings.c_str());
         if(gltf_model.scenes.empty())
             return kGfxResult_NoError;  // nothing needs loading
+        std::map<int32_t, GfxConstRef<GfxCamera>> cameras;
+        for(size_t i = 0; i < gltf_model.cameras.size(); ++i)
+        {
+            tinygltf::Camera const &gltf_camera = gltf_model.cameras[i];
+            if (gltf_camera.type != "perspective") continue;
+            tinygltf::PerspectiveCamera const& gltf_perspective_camera = gltf_camera.perspective;
+            GfxRef<GfxCamera> camera_ref = gfxSceneCreateCamera(scene);
+            GfxCamera &camera = *camera_ref;
+            camera.type = kGfxCameraType_Perspective;
+            transformGltfCamera(camera, glm::dmat4(1.0));
+            camera.aspect = float(gltf_perspective_camera.aspectRatio);
+            camera.fovY = float(gltf_perspective_camera.yfov);
+            camera.nearZ = float(gltf_perspective_camera.znear);
+            camera.farZ = float(gltf_perspective_camera.zfar);
+            cameras[(int32_t)i] = camera_ref;
+            GfxMetadata &camera_metadata = camera_metadata_[camera_ref];
+            camera_metadata.asset_file = asset_file;
+            camera_metadata.object_name = gltf_camera.name;
+        }
         std::map<int32_t, GfxConstRef<GfxImage>> images;
         for(size_t i = 0; i < gltf_model.textures.size(); ++i)
         {
@@ -1519,6 +1559,15 @@ private:
                             instance_metadata.asset_file = asset_file;
                     }
             }
+            GfxRef<GfxCamera> camera;
+            if (gltf_node.camera >= 0)
+            {
+                std::map<int32_t, GfxConstRef<GfxCamera>>::const_iterator const it = cameras.find(gltf_node.camera);
+                if(it != cameras.end())
+                {
+                    camera = (*it).second;
+                }
+            }
             bool is_any_children_animated = false;
             std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(node_index);
             bool is_node_animated = (is_parent_animated || it != animated_nodes.end());
@@ -1563,6 +1612,7 @@ private:
                 node->matrix_ = local_transform;
                 std::swap(node->children_, children);
                 std::swap(node->instances_, instances);
+                node->camera_ = camera;
             }
             return is_node_animated;
         };
