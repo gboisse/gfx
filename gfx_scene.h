@@ -381,9 +381,9 @@ class GfxSceneInternal
         glm::dquat rotate_;
         glm::dvec3 scale_;
 
+        GfxRef<GfxCamera> camera_;
         std::vector<uint64_t> children_;
         std::vector<GfxRef<GfxInstance>> instances_;
-        GfxRef<GfxCamera> camera_;
     };
 
     struct GltfAnimatedNode
@@ -632,7 +632,7 @@ public:
                     if(node.instances_[i])
                         node.instances_[i]->transform = glm::mat4(transform);
                 if(node.camera_)
-                    transformGltfCamera(*node.camera_, transform);
+                    TransformGltfCamera(*node.camera_, transform);
             };
             for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
                 VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
@@ -659,7 +659,7 @@ public:
                     if(node.instances_[i])
                         node.instances_[i]->transform = glm::mat4(transform);
                 if(node.camera_)
-                    transformGltfCamera(*node.camera_, transform);
+                    TransformGltfCamera(*node.camera_, transform);
             };
             for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
                 VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
@@ -864,20 +864,19 @@ private:
         return true;
     }
 
-    static inline void transformGltfCamera(GfxCamera& camera, const glm::dmat4& transform)
+    static inline void TransformGltfCamera(GfxCamera &camera, glm::dmat4 const &transform)
     {
-        // Default gltf camera
-        glm::dvec4 eye {0.0, 0.0, 0.0, 1.0};
-        glm::dvec4 center {0.0, 0.0, -1.0, 1.0};
-        glm::dvec4 up {0.0, 1.0, 0.0, 0.0};
+        glm::dvec4 eye(0.0, 0.0, 0.0, 1.0);
+        glm::dvec4 center(0.0, 0.0, -1.0, 1.0);
+        glm::dvec4 up(0.0, 1.0, 0.0, 0.0);
 
-        eye = transform * eye;
+        eye    = transform * eye;
         center = transform * center;
-        up = transform * up;
+        up     = transform * up;
 
-        camera.eye = glm::vec3(eye / eye.w);
+        camera.eye    = glm::vec3(eye / eye.w);
         camera.center = glm::vec3(center / center.w);
-        camera.up = glm::vec3(up);
+        camera.up     = glm::vec3(glm::normalize(up));
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1144,20 +1143,20 @@ private:
         for(size_t i = 0; i < gltf_model.cameras.size(); ++i)
         {
             tinygltf::Camera const &gltf_camera = gltf_model.cameras[i];
-            if (gltf_camera.type != "perspective") continue;
-            tinygltf::PerspectiveCamera const& gltf_perspective_camera = gltf_camera.perspective;
+            if(gltf_camera.type != "perspective") continue; // unsupported camera type
+            tinygltf::PerspectiveCamera const &gltf_perspective_camera = gltf_camera.perspective;
             GfxRef<GfxCamera> camera_ref = gfxSceneCreateCamera(scene);
             GfxCamera &camera = *camera_ref;
             camera.type = kGfxCameraType_Perspective;
-            transformGltfCamera(camera, glm::dmat4(1.0));
-            camera.aspect = float(gltf_perspective_camera.aspectRatio);
-            camera.fovY = float(gltf_perspective_camera.yfov);
-            camera.nearZ = float(gltf_perspective_camera.znear);
-            camera.farZ = float(gltf_perspective_camera.zfar);
-            cameras[(int32_t)i] = camera_ref;
+            TransformGltfCamera(camera, glm::dmat4(1.0));
+            camera.aspect = (float)gltf_perspective_camera.aspectRatio;
+            camera.fovY   = (float)gltf_perspective_camera.yfov;
+            camera.nearZ  = (float)gltf_perspective_camera.znear;
+            camera.farZ   = (float)gltf_perspective_camera.zfar;
             GfxMetadata &camera_metadata = camera_metadata_[camera_ref];
-            camera_metadata.asset_file = asset_file;
+            camera_metadata.asset_file = asset_file;    // set up metadata
             camera_metadata.object_name = gltf_camera.name;
+            cameras[(int32_t)i] = camera_ref;
         }
         std::map<int32_t, GfxConstRef<GfxImage>> images;
         for(size_t i = 0; i < gltf_model.textures.size(); ++i)
@@ -1560,12 +1559,13 @@ private:
                     }
             }
             GfxRef<GfxCamera> camera;
-            if (gltf_node.camera >= 0)
+            if(gltf_node.camera >= 0)
             {
                 std::map<int32_t, GfxConstRef<GfxCamera>>::const_iterator const it = cameras.find(gltf_node.camera);
                 if(it != cameras.end())
                 {
                     camera = (*it).second;
+                    TransformGltfCamera(*camera, transform);
                 }
             }
             bool is_any_children_animated = false;
