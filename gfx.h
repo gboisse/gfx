@@ -4198,6 +4198,8 @@ private:
                     case Kernel::Parameter::kType_Texture3D:
                     case Kernel::Parameter::kType_RWTexture3D:
                     case Kernel::Parameter::kType_TextureCube:
+                    case Kernel::Parameter::kType_Buffer:
+                    case Kernel::Parameter::kType_RWBuffer:
                         descriptor_range.NumDescriptors = kGfxConstant_NumBindlessSlots;
                         break;
                     default:
@@ -4675,6 +4677,7 @@ private:
                 case Kernel::Parameter::kType_RWBuffer:
                     {
                         D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                         dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
                         parameter.bound_buffers_.resize(parameter.descriptor_count_);
                         for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
