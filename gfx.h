@@ -241,6 +241,7 @@ GfxResult gfxProgramSetBuffer(GfxContext context, GfxProgram program, char const
 GfxResult gfxProgramSetTexture(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture texture, uint32_t mip_level = 0);
 GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count);
 GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count);
+GfxResult gfxProgramSetBuffers(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const *buffers, uint32_t buffer_count);
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state);
 GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size);
@@ -254,6 +255,7 @@ inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, 
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const &texture, uint32_t mip_level) { return gfxProgramSetTexture(context, program, parameter_name, texture, mip_level); }
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count) { return gfxProgramSetTextures(context, program, parameter_name, textures, texture_count); }
 inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count) { return gfxProgramSetTextures(context, program, parameter_name, textures, mip_levels, texture_count); }
+inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const *buffers, uint32_t buffer_count) { return gfxProgramSetBuffers(context, program, parameter_name, buffers, buffer_count); }
 
 template<> inline GfxResult gfxProgramSetParameter<GfxBuffer>(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const &value) { return gfxProgramSetBuffer(context, program, parameter_name, value); }
 template<> inline GfxResult gfxProgramSetParameter<GfxTexture>(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const &value) { return gfxProgramSetTexture(context, program, parameter_name, value); }
@@ -760,7 +762,7 @@ class GfxInternal
             Type type_ = kType_Count;
             union
             {
-                GfxBuffer buffer_;
+                struct { GfxBuffer *buffers_; uint32_t buffer_count; } buffer_;
                 struct { GfxTexture *textures_; uint32_t *mip_levels_; uint32_t texture_count; } image_;
                 GfxSamplerState sampler_state_;
                 struct { GfxAccelerationStructure bvh_; GfxBuffer bvh_buffer_; } acceleration_structure_;
@@ -769,17 +771,28 @@ class GfxInternal
             data_ = {};
             uint32_t data_size_ = 0;
 
-            void set(GfxBuffer const &buffer)
+            void set(GfxBuffer const *buffers, uint32_t buffer_count)
             {
-                if(type_ == kType_Buffer)
-                    id_ += (buffer.handle != data_.buffer_.handle || buffer.stride != data_.buffer_.stride);
+                GFX_ASSERT(buffers != nullptr || buffer_count == 0);
+                if(type_ == kType_Buffer && data_.buffer_.buffer_count == buffer_count)
+                    for(uint32_t i = 0; i < buffer_count; ++i) { if(buffers[i].handle != data_.buffer_.buffers_[i].handle) { ++id_; break; } }
                 else
                 {
                     unset();
                     type_ = kType_Buffer;
-                    data_size_ = sizeof(buffer);
+                    data_.buffer_.buffer_count = buffer_count;
+                    data_size_ = buffer_count * sizeof(GfxBuffer);
+                    data_.buffer_.buffers_ = (GfxBuffer *)(buffer_count > 0 ? malloc(buffer_count * sizeof(GfxBuffer)) : nullptr);
+                    if(buffer_count > 0 && data_.buffer_.buffers_ == nullptr)
+                    {
+                        GFX_ASSERT(0);  // out of memory
+                        unset(); return;
+                    }
                 }
-                data_.buffer_ = buffer;
+                for(uint32_t i = 0; i < buffer_count; ++i)
+                {
+                    data_.buffer_.buffers_[i] = buffers[i];
+                }
             }
 
             void set(GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
@@ -958,6 +971,7 @@ class GfxInternal
             uint32_t descriptor_count_ = 0;
             uint32_t descriptor_slot_ = 0xFFFFFFFFu;
             std::vector<ID3D12Resource *> bound_textures_;
+            std::vector<ID3D12Resource *> bound_buffers_;
             Program::Parameter const *parameter_ = nullptr;
 
             struct Variable
@@ -2145,7 +2159,7 @@ public:
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
         Program &gfx_program = programs_[program];  // get hold of program object
-        gfx_program.insertParameter(parameter_name).set(buffer);
+        gfx_program.insertParameter(parameter_name).set(&buffer, 1);
         return kGfxResult_NoError;
     }
 
@@ -2170,6 +2184,19 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid array of textures");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(textures, mip_levels, texture_count);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult setProgramBuffers(GfxProgram const &program, char const *parameter_name, GfxBuffer const *buffers, uint32_t buffer_count)
+    {
+        if(!program_handles_.has_handle(program.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        if(buffers == nullptr && buffer_count > 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to an invalid array of textures");
+        Program &gfx_program = programs_[program];  // get hold of program object
+        gfx_program.insertParameter(parameter_name).set(buffers, buffer_count);
         return kGfxResult_NoError;
     }
 
@@ -4171,6 +4198,8 @@ private:
                     case Kernel::Parameter::kType_Texture3D:
                     case Kernel::Parameter::kType_RWTexture3D:
                     case Kernel::Parameter::kType_TextureCube:
+                    case Kernel::Parameter::kType_Buffer:
+                    case Kernel::Parameter::kType_RWBuffer:
                         descriptor_range.NumDescriptors = kGfxConstant_NumBindlessSlots;
                         break;
                     default:
@@ -4582,118 +4611,130 @@ private:
                 {
                 case Kernel::Parameter::kType_Buffer:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_;
-                        if(!buffer_handles_.has_handle(buffer.handle))
-                        {
-                            if(buffer.handle != 0)
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid buffer object
-                        }
-                        if(buffer.cpu_access == kGfxCpuAccess_Read)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read CPU access as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid buffer object for shader SRV
-                        }
-                        if(buffer.stride == 0)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid buffer stride
-                        }
-                        if(buffer.size < buffer.stride)
-                        {
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid buffer size
-                        }
-                        Buffer &gfx_buffer = buffers_[buffer];
-                        SetObjectName(gfx_buffer, buffer.name);
-                        if(buffer.cpu_access == kGfxCpuAccess_None)
-                            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                        if(!invalidate_descriptor) break;   // already up to date
-                        if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
-                            GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
-                        srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
-                        srv_desc.Buffer.StructureByteStride = buffer.stride;
-                        device_->CreateShaderResourceView(gfx_buffer.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        parameter.bound_buffers_.resize(parameter.descriptor_count_);
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                            {
+                                if(!invalidate_descriptor) continue;
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                                if(!buffer_handles_.has_handle(buffer.handle))
+                                {
+                                    if(buffer.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_buffers_[j] == nullptr) continue;    // already up to date
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_buffers_[j] = nullptr; // invalidate cached pointer
+                                    continue;  // user set an invalid buffer object
+                                }
+                                if(buffer.cpu_access == kGfxCpuAccess_Read)
+                                {
+                                    if(!invalidate_descriptor) continue;
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read CPU access as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;  // invalid buffer object for shader SRV
+                                }
+                                if(buffer.stride == 0)
+                                {
+                                    if(!invalidate_descriptor) continue;
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;  // invalid buffer stride
+                                }
+                                if(buffer.size < buffer.stride)
+                                {
+                                    if(!invalidate_descriptor) continue;
+                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;  // invalid buffer size
+                                }
+                                Buffer &gfx_buffer = buffers_[buffer];
+                                SetObjectName(gfx_buffer, buffer.name);
+                                if(buffer.cpu_access == kGfxCpuAccess_None)
+                                    transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                if(!invalidate_descriptor && gfx_buffer.resource_ == parameter.bound_buffers_[j])
+                                    continue;   // already up to date
+                                if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
+                                    GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                                srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
+                                srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
+                                srv_desc.Buffer.StructureByteStride = buffer.stride;
+                                device_->CreateShaderResourceView(gfx_buffer.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_RWBuffer:
                     {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_;
-                        if(!buffer_handles_.has_handle(buffer.handle))
-                        {
-                            if(buffer.handle != 0)
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid buffer object
-                        }
-                        if(buffer.cpu_access != kGfxCpuAccess_None)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read/write CPU access as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid buffer object for shader UAV
-                        }
-                        if(buffer.stride == 0)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid buffer stride
-                        }
-                        if(buffer.size < buffer.stride)
-                        {
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // invalid buffer size
-                        }
-                        Buffer &gfx_buffer = buffers_[buffer];
-                        SetObjectName(gfx_buffer, buffer.name);
-                        transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                        if(!invalidate_descriptor) break;   // already up to date
-                        if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
-                            GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-                        uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
-                        uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
-                        uav_desc.Buffer.StructureByteStride = buffer.stride;
-                        device_->CreateUnorderedAccessView(gfx_buffer.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+                        parameter.bound_buffers_.resize(parameter.descriptor_count_);
+                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
+                               parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                            {
+                                if(!invalidate_descriptor) continue;
+                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
+                            else
+                            {
+                                GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                                if(!buffer_handles_.has_handle(buffer.handle))
+                                {
+                                    if(buffer.handle != 0)
+                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    if(!invalidate_descriptor && parameter.bound_buffers_[j] == nullptr) continue;    // already up to date
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    parameter.bound_buffers_[j] = nullptr; // invalidate cached pointer
+                                    continue;  // user set an invalid buffer object
+                                }
+                                if(buffer.cpu_access != kGfxCpuAccess_None)
+                                {
+                                    if(!invalidate_descriptor) continue;
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read/write CPU access as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;  // invalid buffer object for shader UAV
+                                }
+                                if(buffer.stride == 0)
+                                {
+                                    if(!invalidate_descriptor) continue;
+                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;  // invalid buffer stride
+                                }
+                                if(buffer.size < buffer.stride)
+                                {
+                                    if(!invalidate_descriptor) continue;
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;  // invalid buffer size
+                                }
+                                Buffer &gfx_buffer = buffers_[buffer];
+                                SetObjectName(gfx_buffer, buffer.name);
+                                transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                                if(!invalidate_descriptor) break;   // already up to date
+                                if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
+                                    GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+                                uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
+                                uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
+                                uav_desc.Buffer.StructureByteStride = buffer.stride;
+                                device_->CreateUnorderedAccessView(gfx_buffer.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            }
                     }
                     break;
                 case Kernel::Parameter::kType_Texture2D:
@@ -5171,7 +5212,17 @@ private:
                         }
                         else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
                         {
-                            GfxBuffer const &buffer = parameter.parameter_->data_.buffer_;
+                            if (parameter.parameter_->data_.buffer_.buffer_count > 1)
+                            {
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                break;  // user set an invalid buffer object
+                            }
+                            if (parameter.parameter_->data_.buffer_.buffer_count < 1)
+                            {
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                                break;  // user set an invalid buffer object
+                            }
+                            GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
                             if(!buffer_handles_.has_handle(buffer.handle))
                             {
                                 if(buffer.handle != 0)
@@ -6927,6 +6978,13 @@ GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char con
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramTextures(program, parameter_name, textures, mip_levels, texture_count);
+}
+
+GfxResult gfxProgramSetBuffers(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const *buffers, uint32_t buffer_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setProgramBuffers(program, parameter_name, buffers, buffer_count);
 }
 
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state)
