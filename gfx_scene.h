@@ -894,7 +894,9 @@ private:
         auto const LoadImage = [&](std::string const &texname, GfxConstRef<GfxImage> &image)
         {
             if(texname.empty()) return; // no image to be loaded
-            std::string const texture_file = texture_path + texname;
+            std::string texture_file = texture_path + texname;
+            FILE *fd = fopen(texture_file.c_str(), "rb"); if(fd) fclose(fd);
+            if(fd == nullptr) texture_file = texname;   // is this not a relative path?
             if(gfxSceneImport(scene, texture_file.c_str()) != kGfxResult_NoError)
                 return; // unable to load image file
             image = gfxSceneFindObjectByAssetFile<GfxImage>(scene, texture_file.c_str());
