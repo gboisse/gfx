@@ -4717,7 +4717,7 @@ private:
                                 Buffer &gfx_buffer = buffers_[buffer];
                                 SetObjectName(gfx_buffer, buffer.name);
                                 transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                                if(!invalidate_descriptor) break;   // already up to date
+                                if(!invalidate_descriptor) continue;    // already up to date
                                 if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
                                     GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
