@@ -6366,6 +6366,7 @@ private:
         if(debug_shaders_)
         {
             shader_args.push_back(DXC_ARG_DEBUG);
+            shader_args.push_back(DXC_ARG_OPTIMIZATION_LEVEL0);
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
         }
 
