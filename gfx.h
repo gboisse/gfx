@@ -42,7 +42,8 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 enum GfxCreateContextFlag
 {
     kGfxCreateContextFlag_EnableDebugLayer       = 1 << 0,
-    kGfxCreateContextFlag_EnableStablePowerState = 1 << 1
+    kGfxCreateContextFlag_EnableShaderDebugging  = 1 << 1,
+    kGfxCreateContextFlag_EnableStablePowerState = 1 << 2
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -416,6 +417,7 @@ class GfxInternal
     ID3D12Fence *fences_[kGfxConstant_BackBufferCount] = {};
     uint64_t fence_values_[kGfxConstant_BackBufferCount] = {};
 
+    bool debug_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -1134,6 +1136,7 @@ public:
            !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
            !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXC compiler");
+        debug_shaders_ = ((flags & kGfxCreateContextFlag_EnableShaderDebugging) != 0);
         device_->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         SetDebugName(device_, "gfx_Device");
 
@@ -6360,6 +6363,11 @@ private:
         shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+        if(debug_shaders_)
+        {
+            shader_args.push_back(DXC_ARG_DEBUG);
+            shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
+        }
 
         std::vector<std::wstring> user_defines;
         if(!kernel.defines_.empty())
@@ -6396,16 +6404,44 @@ private:
             return;
         }
 
+        IDxcBlob *dxc_pdb = nullptr;
         IDxcBlob *dxc_bytecode = nullptr;
         IDxcBlob *dxc_reflection = nullptr;
+        IDxcBlobUtf16 *dxc_pdb_name = nullptr;
         dxc_result->GetResult(&dxc_bytecode);
+        if(debug_shaders_)
+            dxc_result->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&dxc_pdb), &dxc_pdb_name);
         dxc_result->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(&dxc_reflection), nullptr);
         dxc_result->Release();
         if(!dxc_bytecode || !dxc_reflection)
         {
+            if(dxc_pdb) dxc_pdb->Release();
+            if(dxc_pdb_name) dxc_pdb_name->Release();
             if(dxc_bytecode) dxc_bytecode->Release();
             if(dxc_reflection) dxc_reflection->Release();
             return; // should never happen?
+        }
+        if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
+        {
+            char pdb_name[1024];
+            static bool created_shader_pdb_directory;
+            char const *shader_pdb_directory = "./shader_pdb";
+            std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
+            wcstombs(pdb_name, wpdb_name.c_str(), ARRAYSIZE(pdb_name)); // retrieve PDB file name
+            GFX_SNPRINTF(shader_file, ARRAYSIZE(shader_file), "%s/%s", shader_pdb_directory, pdb_name);
+            if(!created_shader_pdb_directory)
+            {
+                BOOL const result = CreateDirectory(shader_pdb_directory, nullptr);
+                if(!result && GetLastError() != ERROR_ALREADY_EXISTS)
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory);
+                created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
+            }
+            FILE *fd = fopen(shader_file, "wb");
+            if(fd != nullptr)
+            {
+                fwrite(dxc_pdb->GetBufferPointer(), dxc_pdb->GetBufferSize(), 1, fd);
+                fclose(fd); // write out PDB for shader debugging
+            }
         }
 
         DxcBuffer reflection_data = {};
@@ -6414,6 +6450,8 @@ private:
         dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&shader_reflection));
         if(shader_reflection) shader_bytecode = dxc_bytecode;
         if(!shader_reflection) dxc_bytecode->Release();
+        if(dxc_pdb_name) dxc_pdb_name->Release();
+        if(dxc_pdb) dxc_pdb->Release();
         dxc_reflection->Release();
     }
 
