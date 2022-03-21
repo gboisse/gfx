@@ -1274,6 +1274,22 @@ public:
         generate_mips_program_desc.cs =
             "RWTexture2D<float4> InputBuffer;\r\n"
             "RWTexture2D<float4> OutputBuffer;\r\n"
+            "bool isSRGB;\r\n"
+            "\r\n"
+            "float4 convertToSRGB(float4 val)\r\n"
+            "{\r\n"
+            "    if(isSRGB)\r\n"
+            "        return float4(val.xyz < 0.0031308f ? 12.92f * val.xyz : 1.055f * pow(abs(val.xyz), 1.0f / 2.4f) - 0.055f, val.w);\r\n"
+            "    else\r\n"
+            "        return val;\r\n"
+            "}\r\n"
+            "float4 convertToLinear(float4 val)\r\n"
+            "{\r\n"
+            "    if(isSRGB)\r\n"
+            "        return float4(val.xyz < 0.04045f ? val.xyz / 12.92f : pow((val.xyz + 0.055f) / 1.055f, 2.4f), val.w);\r\n"
+            "    else\r\n"
+            "        return val;\r\n"
+            "}\r\n"
             "\r\n"
             "[numthreads(16, 16, 1)]\r\n"
             "void main(in uint2 gidx : SV_DispatchThreadID)\r\n"
@@ -1288,10 +1304,10 @@ public:
             "        {\r\n"
             "            const uint2 pix = (gidx << 1) + uint2(x, y);\r\n"
             "            if(any(pix >= dims)) break; // out of bounds\r\n"
-            "            result += InputBuffer[pix];\r\n"
+            "            result += convertToLinear(InputBuffer[pix]);\r\n"
             "            ++w;\r\n"
             "        }\r\n"
-            "    OutputBuffer[gidx] = result / w;\r\n"
+            "    OutputBuffer[gidx] = convertToSRGB(result / w);\r\n"
             "}\r\n";
         generate_mips_program_ = createProgram(generate_mips_program_desc, "gfx_GenerateMipsProgram", nullptr);
         generate_mips_kernel_ = createComputeKernel(generate_mips_program_, "main", nullptr, 0);
@@ -2639,10 +2655,14 @@ public:
         if(texture.mip_levels <= 1) return kGfxResult_NoError;  // nothing to generate
         GfxKernel const bound_kernel = bound_kernel_;
         GFX_TRY(encodeBindKernel(generate_mips_kernel_));
+        bool isSRGB = false;
+        if(texture.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+            isSRGB = true;
         for(uint32_t mip_level = 1; mip_level < texture.mip_levels; ++mip_level)
         {
             setProgramTexture(generate_mips_program_, "InputBuffer", texture, mip_level - 1);
             setProgramTexture(generate_mips_program_, "OutputBuffer", texture, mip_level);
+            setProgramConstants(generate_mips_program_, "isSRGB", &isSRGB, sizeof(bool));
             uint32_t const *num_threads = getKernelNumThreads(generate_mips_kernel_);
             uint32_t const num_groups_x = (GFX_MAX(texture.width  >> mip_level, 1u) + num_threads[0] - 1) / num_threads[0];
             uint32_t const num_groups_y = (GFX_MAX(texture.height >> mip_level, 1u) + num_threads[1] - 1) / num_threads[1];
@@ -4841,7 +4861,7 @@ private:
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB? DXGI_FORMAT_R8G8B8A8_UNORM : resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
                                 uav_desc.Texture2D.MipSlice = mip_level;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
