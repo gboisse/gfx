@@ -6416,13 +6416,21 @@ private:
 
         HRESULT result_code = E_FAIL;
         dxc_result->GetStatus(&result_code);
+        IDxcBlobEncoding *dxc_error = nullptr;
+        dxc_result->GetErrorBuffer(&dxc_error);
         if(FAILED(result_code))
         {
-            IDxcBlobEncoding *dxc_error = nullptr;
-            dxc_result->GetErrorBuffer(&dxc_error);
-            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file, kernel.entry_point_.c_str(), dxc_error ? ":\r\n" : "", dxc_error ? (char const *)dxc_error->GetBufferPointer() : "");
+            bool const has_errors = (dxc_error != nullptr && dxc_error->GetBufferPointer() != nullptr);
+            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file, kernel.entry_point_.c_str(), has_errors ? ":\r\n" : "", has_errors ? (char const *)dxc_error->GetBufferPointer() : "");
             if(dxc_error) dxc_error->Release(); dxc_result->Release();
-            return;
+            return; // failed to compile
+        }
+        if(dxc_error != nullptr)
+        {
+            bool const has_warnings = (dxc_error->GetBufferPointer() != nullptr);
+            if(has_warnings)
+                GFX_PRINTLN("Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file, kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
+            dxc_error->Release();
         }
 
         IDxcBlob *dxc_pdb = nullptr;
