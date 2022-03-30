@@ -181,6 +181,7 @@ struct GfxImage
     uint32_t height            = 0;
     uint32_t channel_count     = 0;
     uint32_t bytes_per_channel = 0;
+    DXGI_FORMAT format         = DXGI_FORMAT_UNKNOWN;
 
     std::vector<uint8_t> data;
 };
@@ -914,13 +915,21 @@ private:
             material_ref->metallicity = obj_material.metallic;
             material_ref->emissivity = glm::vec3(obj_material.emission[0], obj_material.emission[1], obj_material.emission[2]);
             LoadImage(obj_material.diffuse_texname, material_ref->albedo_map);
-            if(material_ref->albedo_map) material_ref->albedo = glm::vec4(glm::vec3(1.0f), material_ref->albedo.w);
+            if(material_ref->albedo_map)
+            {
+                if(material_ref->albedo_map->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                material_ref->albedo = glm::vec4(glm::vec3(1.0f), material_ref->albedo.w);
+            }
             LoadImage(obj_material.roughness_texname, material_ref->roughness_map);
             if(material_ref->roughness_map) material_ref->roughness = 1.0f;
             LoadImage(obj_material.metallic_texname, material_ref->metallicity_map);
             if(material_ref->metallicity_map) material_ref->metallicity = 1.0f;
             LoadImage(obj_material.emissive_texname, material_ref->emissivity_map);
-            if(material_ref->emissivity_map) material_ref->emissivity = glm::vec3(1.0f);
+            if(material_ref->emissivity_map)
+            {
+                if(material_ref->emissivity_map->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                material_ref->emissivity = glm::vec3(1.0f);
+            }
             materials[i] = material_ref;    // append the new material
         }
         for(size_t i = 0; i < obj_reader.GetShapes().size(); ++i)
@@ -1187,7 +1196,8 @@ private:
                 image_ref->height = gltf_image.height;
                 image_ref->channel_count = gltf_image.component;
                 image_ref->bytes_per_channel = (gltf_image.bits >> 3);
-                image_ref->data.resize(image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel);
+                image_ref->format = gfxImageGetFormat(*image_ref);
+                image_ref->data.resize((size_t)image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel);
                 GfxMetadata &image_metadata = image_metadata_[image_ref];
                 image_metadata.asset_file = image_file; // set up metadata
                 image_metadata.object_name = image_name;
@@ -1259,7 +1269,11 @@ private:
                            else material.emissivity = glm::vec3(0.0f, 0.0f, 0.0f);
             int32_t const albedo_map = GetTextureIndex(gltf_material, "baseColorTexture");
             it = (albedo_map >= 0 ? images.find(albedo_map) : images.end());
-            if(it != images.end()) material.albedo_map = (*it).second;
+            if(it != images.end())
+            {
+                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                material.albedo_map = (*it).second;
+            }
             int32_t const metallicity_roughness_map = GetTextureIndex(gltf_material, "metallicRoughnessTexture");
             it = (metallicity_roughness_map >= 0 ? images.find(metallicity_roughness_map) : images.end());
             if(it != images.end())
@@ -1295,11 +1309,13 @@ private:
                         metallicity_map.height = image.height;
                         metallicity_map.channel_count = 1;
                         metallicity_map.bytes_per_channel = image.bytes_per_channel;
+                        metallicity_map.format = gfxImageGetFormat(metallicity_map);
                         metallicity_map.data.resize(metallicity_map.width * metallicity_map.height * metallicity_map.bytes_per_channel);
                         roughness_map.width = image.width;
                         roughness_map.height = image.height;
                         roughness_map.channel_count = 1;
                         roughness_map.bytes_per_channel = image.bytes_per_channel;
+                        roughness_map.format = gfxImageGetFormat(roughness_map);
                         roughness_map.data.resize(roughness_map.width * roughness_map.height * roughness_map.bytes_per_channel);
                         uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
                         uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
@@ -1322,7 +1338,11 @@ private:
             }
             int32_t const emissivity_map = GetTextureIndex(gltf_material, "emissiveTexture");
             it = (emissivity_map >= 0 ? images.find(emissivity_map) : images.end());
-            if(it != images.end()) material.emissivity_map = (*it).second;
+            if(it != images.end())
+            {
+                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                material.emissivity_map = (*it).second;
+            }
             int32_t const normal_map = GetTextureIndex(gltf_material, "normalTexture");
             it = (normal_map >= 0 ? images.find(normal_map) : images.end());
             if(it != images.end()) material.normal_map = (*it).second;
@@ -1661,6 +1681,7 @@ private:
         image_ref->height = (uint32_t)image_height;
         image_ref->channel_count = resolved_channel_count;
         image_ref->bytes_per_channel = (uint32_t)2;
+        image_ref->format = gfxImageGetFormat(*image_ref);
         uint16_t *data = (uint16_t *)image_ref->data.data();
         for(int32_t y = 0; y < image_height; ++y)
             for(int32_t x = 0; x < image_width; ++x)
@@ -1696,6 +1717,7 @@ private:
         image_ref->height = (uint32_t)image_height;
         image_ref->channel_count = resolved_channel_count;
         image_ref->bytes_per_channel = (uint32_t)1;
+        image_ref->format = gfxImageGetFormat(*image_ref);
         for(int32_t y = 0; y < image_height; ++y)
             for(int32_t x = 0; x < image_width; ++x)
                 for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
