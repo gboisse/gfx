@@ -110,7 +110,7 @@ Result main(in Params params)
 
         float    invmax  = rsqrt(max(dot(tangent, tangent), dot(bitangent, bitangent)));
         float3x3 tbn     = transpose(float3x3(tangent * invmax, bitangent * invmax, normal));
-        float3   disturb = 2.0f * g_Textures[normal_map].Sample(g_TextureSampler, params.uv) - 1.0f;
+        float3   disturb = 2.0f * g_Textures[normal_map].Sample(g_TextureSampler, params.uv).xyz - 1.0f;
 
         params.normal = mul(tbn, disturb);
     }
