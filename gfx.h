@@ -2655,14 +2655,12 @@ public:
         if(texture.mip_levels <= 1) return kGfxResult_NoError;  // nothing to generate
         GfxKernel const bound_kernel = bound_kernel_;
         GFX_TRY(encodeBindKernel(generate_mips_kernel_));
-        bool isSRGB = false;
-        if(texture.format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
-            isSRGB = true;
+        bool const isSRGB = IsSRGBFormat(texture.format);
         for(uint32_t mip_level = 1; mip_level < texture.mip_levels; ++mip_level)
         {
             setProgramTexture(generate_mips_program_, "InputBuffer", texture, mip_level - 1);
             setProgramTexture(generate_mips_program_, "OutputBuffer", texture, mip_level);
-            setProgramConstants(generate_mips_program_, "isSRGB", &isSRGB, sizeof(bool));
+            setProgramConstants(generate_mips_program_, "isSRGB", &isSRGB, sizeof(isSRGB));
             uint32_t const *num_threads = getKernelNumThreads(generate_mips_kernel_);
             uint32_t const num_groups_x = (GFX_MAX(texture.width  >> mip_level, 1u) + num_threads[0] - 1) / num_threads[0];
             uint32_t const num_groups_y = (GFX_MAX(texture.height >> mip_level, 1u) + num_threads[1] - 1) / num_threads[1];
@@ -3735,6 +3733,24 @@ private:
         return 0;
     }
 
+    static inline bool IsSRGBFormat(DXGI_FORMAT format)
+    {
+        switch(format)
+        {
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            return true;
+        default:
+            break;
+        }
+        return false;
+    }
+
     static inline bool IsDepthStencilFormat(DXGI_FORMAT format)
     {
         switch(format)
@@ -3761,6 +3777,22 @@ private:
             break;
         }
         return false;
+    }
+
+    static inline DXGI_FORMAT GetUAVFormat(DXGI_FORMAT format)
+    {
+        switch(format)
+        {
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+            return DXGI_FORMAT_R8G8B8A8_UNORM;
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+            return DXGI_FORMAT_B8G8R8A8_UNORM;
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+            return DXGI_FORMAT_B8G8R8X8_UNORM;
+        default:
+            break;
+        }
+        return GetCBVSRVUAVFormat(format);
     }
 
     static inline DXGI_FORMAT GetCBVSRVUAVFormat(DXGI_FORMAT format)
@@ -4861,7 +4893,7 @@ private:
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB? DXGI_FORMAT_R8G8B8A8_UNORM : resource_desc.Format);
+                                uav_desc.Format = GetUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
                                 uav_desc.Texture2D.MipSlice = mip_level;
                                 device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
@@ -4979,7 +5011,7 @@ private:
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                uav_desc.Format = GetUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
                                 uav_desc.Texture2DArray.MipSlice = mip_level;
                                 uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
@@ -5097,7 +5129,7 @@ private:
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
                                 D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                                uav_desc.Format = GetUAVFormat(resource_desc.Format);
                                 uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
                                 uav_desc.Texture3D.MipSlice = mip_level;
                                 uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;

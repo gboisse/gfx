@@ -177,11 +177,11 @@ GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_han
 
 struct GfxImage
 {
-    uint32_t width             = 0;
-    uint32_t height            = 0;
-    uint32_t channel_count     = 0;
-    uint32_t bytes_per_channel = 0;
-    DXGI_FORMAT format         = DXGI_FORMAT_UNKNOWN;
+    uint32_t    width             = 0;
+    uint32_t    height            = 0;
+    uint32_t    channel_count     = 0;
+    uint32_t    bytes_per_channel = 0;
+    DXGI_FORMAT format            = DXGI_FORMAT_UNKNOWN;
 
     std::vector<uint8_t> data;
 };
@@ -917,7 +917,8 @@ private:
             LoadImage(obj_material.diffuse_texname, material_ref->albedo_map);
             if(material_ref->albedo_map)
             {
-                if(material_ref->albedo_map->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->albedo_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
                 material_ref->albedo = glm::vec4(glm::vec3(1.0f), material_ref->albedo.w);
             }
             LoadImage(obj_material.roughness_texname, material_ref->roughness_map);
@@ -927,7 +928,8 @@ private:
             LoadImage(obj_material.emissive_texname, material_ref->emissivity_map);
             if(material_ref->emissivity_map)
             {
-                if(material_ref->emissivity_map->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->emissivity_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
                 material_ref->emissivity = glm::vec3(1.0f);
             }
             materials[i] = material_ref;    // append the new material
@@ -1271,7 +1273,8 @@ private:
             it = (albedo_map >= 0 ? images.find(albedo_map) : images.end());
             if(it != images.end())
             {
-                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM)
+                    gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
                 material.albedo_map = (*it).second;
             }
             int32_t const metallicity_roughness_map = GetTextureIndex(gltf_material, "metallicRoughnessTexture");
@@ -1340,7 +1343,8 @@ private:
             it = (emissivity_map >= 0 ? images.find(emissivity_map) : images.end());
             if(it != images.end())
             {
-                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM) gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM)
+                    gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
                 material.emissivity_map = (*it).second;
             }
             int32_t const normal_map = GetTextureIndex(gltf_material, "normalTexture");
