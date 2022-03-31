@@ -388,7 +388,7 @@ GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *comma
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
 GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource);
+GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource);  // resource must be in D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE state
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer);
 ID3D12Resource *gfxTextureGetResource(GfxContext context, GfxTexture texture);
@@ -729,6 +729,7 @@ class GfxInternal
         uint32_t *reference_count_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
         D3D12_RESOURCE_STATES *resource_state_ = nullptr;
+        D3D12_RESOURCE_STATES initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
     };
     GfxArray<Buffer> buffers_;
     GfxHandles buffer_handles_;
@@ -748,6 +749,7 @@ class GfxInternal
         std::vector<uint32_t> dsv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         std::vector<uint32_t> rtv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         D3D12_RESOURCE_STATES resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+        D3D12_RESOURCE_STATES initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
     };
     GfxArray<Texture> textures_;
     GfxHandles texture_handles_;
@@ -1663,7 +1665,7 @@ public:
         buffer_range.handle = buffer_handles_.allocate_handle();
         Buffer &gfx_buffer_range = buffers_.insert(buffer_range, gfx_buffer);
         if(gfx_buffer_range.data_ != nullptr) gfx_buffer_range.data_ = (char *)gfx_buffer_range.data_ + byte_offset;
-        GFX_ASSERT(gfx_buffer_range.resource_ != nullptr && gfx_buffer_range.allocation_ != nullptr && gfx_buffer_range.reference_count_ != nullptr);
+        GFX_ASSERT(gfx_buffer_range.resource_ != nullptr && gfx_buffer_range.reference_count_ != nullptr);
         gfx_buffer_range.data_offset_ += byte_offset;
         ++*gfx_buffer_range.reference_count_;   // retain
         buffer_range.cpu_access = buffer.cpu_access;
@@ -1994,6 +1996,8 @@ public:
         void *data = nullptr;
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(isInterop(acceleration_structure))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update an interop acceleration structure object");
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid acceleration structure object");
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
@@ -2102,6 +2106,11 @@ public:
         GfxRaytracingPrimitive raytracing_primitive = {};
         if(dxr_device_ == nullptr)
             return raytracing_primitive;    // avoid spamming console output
+        if(isInterop(acceleration_structure))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a raytracing primitive using an interop acceleration structure object");
+            return raytracing_primitive;
+        }
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
@@ -3668,7 +3677,7 @@ public:
         GfxBuffer buffer = {};
         if(resource == nullptr)
             return buffer;  // invalid parameter
-        D3D12_RESOURCE_DESC const &resource_desc = resource->GetDesc();
+        D3D12_RESOURCE_DESC const resource_desc = resource->GetDesc();
         if(resource_desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER)
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a buffer object from a non-buffer resource");
@@ -3689,11 +3698,81 @@ public:
         GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
         *gfx_buffer.reference_count_ = 1;   // retain
         gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
+        gfx_buffer.initial_resource_state_ = resource_state;
         GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
         *gfx_buffer.resource_state_ = resource_state;
         gfx_buffer.resource_ = resource;
         resource->AddRef(); // retain
         return buffer;
+    }
+
+    GfxTexture createTexture(ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
+    {
+        GfxTexture texture = {};
+        if(resource == nullptr)
+            return texture; // invalid parameter
+        D3D12_RESOURCE_DESC const resource_desc = resource->GetDesc();
+        switch(resource_desc.Dimension)
+        {
+        case D3D12_RESOURCE_DIMENSION_TEXTURE2D:
+            texture.type = (resource_desc.DepthOrArraySize > 1 ? GfxTexture::kType_2DArray : GfxTexture::kType_2D);
+            break;
+        case D3D12_RESOURCE_DIMENSION_TEXTURE3D:
+            texture.type = GfxTexture::kType_3D;
+            break;
+        default:
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a texture object from a non-texture resource");
+            return texture; // invalid operation
+        }
+        if(resource_desc.SampleDesc.Count > 1)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Multisample textures are not supported");
+            return texture; // invalid operation
+        }
+        texture.handle = texture_handles_.allocate_handle();
+        Texture &gfx_texture = textures_.insert(texture);
+        texture.width = (uint32_t)resource_desc.Width;
+        texture.height = (uint32_t)resource_desc.Height;
+        texture.depth = (uint32_t)resource_desc.DepthOrArraySize;
+        texture.format = resource_desc.Format;
+        texture.mip_levels = (uint32_t)resource_desc.MipLevels;
+        gfx_texture.Object::flags_ = Object::kFlag_Named;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.resource_state_ = resource_state;
+        gfx_texture.resource_ = resource;
+        resource->AddRef(); // retain
+        return texture;
+    }
+
+    GfxAccelerationStructure createAccelerationStructure(ID3D12Resource *resource)
+    {
+        GfxAccelerationStructure acceleration_structure = {};
+        if(resource == nullptr)
+            return acceleration_structure;  // invalid parameter
+        D3D12_RESOURCE_DESC const resource_desc = resource->GetDesc();
+        if(resource_desc.Dimension != D3D12_RESOURCE_DIMENSION_BUFFER)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create an acceleration structure object from a non-buffer resource");
+            return acceleration_structure;  // invalid operation
+        }
+        acceleration_structure.handle = acceleration_structure_handles_.allocate_handle();
+        AccelerationStructure &gfx_acceleration_structure = acceleration_structures_.insert(acceleration_structure);
+        gfx_acceleration_structure.bvh_buffer_.handle = buffer_handles_.allocate_handle();
+        Buffer &gfx_buffer = buffers_.insert(gfx_acceleration_structure.bvh_buffer_);
+        gfx_acceleration_structure.bvh_buffer_.size = (uint32_t)resource_desc.Width;
+        gfx_acceleration_structure.bvh_buffer_.cpu_access = kGfxCpuAccess_None;
+        gfx_acceleration_structure.bvh_buffer_.stride = sizeof(uint32_t);
+        gfx_buffer.flags_ = Object::kFlag_Named;
+        gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
+        GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
+        *gfx_buffer.reference_count_ = 1;   // retain
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);  // out of memory
+        gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        gfx_buffer.resource_ = resource;
+        resource->AddRef(); // retain
+        return acceleration_structure;
     }
 
     ID3D12Resource *getBufferResource(GfxBuffer const &buffer)
@@ -3751,6 +3830,16 @@ public:
     }
 
     inline bool isInterop() const { return (swap_chain_ != nullptr ? false : true); }
+
+    inline bool isInterop(GfxAccelerationStructure const &acceleration_structure) const
+    {
+        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+            return false;   // not a valid acceleration structure object
+        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+        if(!buffer_handles_.has_handle(gfx_acceleration_structure.bvh_buffer_.handle))
+            return false;   // not an interop acceleration structure object
+        return buffers_[gfx_acceleration_structure.bvh_buffer_].isInterop();
+    }
 
     static inline GfxInternal *GetGfx(GfxContext &context) { return reinterpret_cast<GfxInternal *>(context.handle); }
 
@@ -4096,6 +4185,16 @@ private:
             if(--*buffer.reference_count_ > 0)
                 return; // still in use
         }
+        if(buffer.isInterop() && command_list_ != nullptr && *buffer.resource_state_ != buffer.initial_resource_state_)
+        {
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource = buffer.resource_;
+            resource_barrier.Transition.StateBefore = *buffer.resource_state_;
+            resource_barrier.Transition.StateAfter = buffer.initial_resource_state_;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
+        }
         collect(buffer.resource_);
         collect(buffer.allocation_);
         free(buffer.resource_state_);
@@ -4104,6 +4203,16 @@ private:
 
     void collect(Texture const &texture)
     {
+        if(texture.isInterop() && command_list_ != nullptr && texture.resource_state_ != texture.initial_resource_state_)
+        {
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource = texture.resource_;
+            resource_barrier.Transition.StateBefore = texture.resource_state_;
+            resource_barrier.Transition.StateAfter = texture.initial_resource_state_;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
+        }
         collect(texture.resource_);
         collect(texture.allocation_);
         for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
@@ -5078,7 +5187,7 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
@@ -5137,13 +5246,19 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
                                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // out of bounds mip level
+                                }
+                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                                {
+                                    if(!invalidate_descriptor) continue;    // invalid resource use
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid operation
                                 }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
@@ -5195,7 +5310,7 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
@@ -5255,13 +5370,19 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
                                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // out of bounds mip level
+                                }
+                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                                {
+                                    if(!invalidate_descriptor) continue;    // invalid resource use
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid operation
                                 }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
@@ -5314,7 +5435,7 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
@@ -5373,13 +5494,19 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
                                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // out of bounds mip level
+                                }
+                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                                {
+                                    if(!invalidate_descriptor) continue;    // invalid resource use
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid operation
                                 }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
@@ -5422,7 +5549,7 @@ private:
                                     parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
                                     continue;   // user set an invalid texture object
                                 }
-                                if(!texture.isCube())
+                                if(!texture.isCube() && (!texture.is2DArray() || texture.getWidth() != texture.getHeight() || texture.getDepth() != 6))
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
                                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-cube texture object as a cubemap sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
@@ -5432,7 +5559,7 @@ private:
                                 Texture &gfx_texture = textures_[texture];
                                 SetObjectName(gfx_texture, texture.name);
                                 uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const &resource_desc = gfx_texture.resource_->GetDesc();
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
                                 if(mip_level >= (uint32_t)resource_desc.MipLevels)
                                 {
                                     if(!invalidate_descriptor) continue;    // already up to date
@@ -5647,6 +5774,8 @@ private:
         D3D12_RESOURCE_DESC resource_desc = texture.resource_->GetDesc();
         if(!((resource_desc.Flags & usage_flag) != 0))
         {
+            if(texture.isInterop())
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot re-create interop texture objects with different usage flag(s)");
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -7751,6 +7880,22 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return buffer; // invalid context
     return gfx->createBuffer(resource, resource_state);
+}
+
+GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
+{
+    GfxTexture const texture = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return texture;    // invalid context
+    return gfx->createTexture(resource, resource_state);
+}
+
+GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource)
+{
+    GfxAccelerationStructure const acceleration_structure = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return acceleration_structure; // invalid context
+    return gfx->createAccelerationStructure(resource);
 }
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer)
