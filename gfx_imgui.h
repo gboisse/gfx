@@ -58,8 +58,8 @@ class GfxImGuiInternal
     GfxContext gfx_ = {};
     GfxTexture font_buffer_ = {};
     GfxSamplerState font_sampler_ = {};
-    GfxBuffer index_buffers_[kGfxConstant_BackBufferCount] = {};
-    GfxBuffer vertex_buffers_[kGfxConstant_BackBufferCount] = {};
+    GfxBuffer *index_buffers_ = nullptr;
+    GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernel_ = {};
 
@@ -176,6 +176,13 @@ public:
         io.KeyMap[ImGuiKey_Y]          = 0x59;
         io.KeyMap[ImGuiKey_Z]          = 0x5A;
 
+        index_buffers_ = (GfxBuffer *)malloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
+        vertex_buffers_ = (GfxBuffer *)malloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
+        for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
+        {
+            new(&index_buffers_[i]) GfxBuffer();
+            new(&vertex_buffers_[i]) GfxBuffer();
+        }
         GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
         ImGui::NewFrame();  // can now start submitting ImGui commands
 
@@ -190,12 +197,22 @@ public:
         {
             GFX_TRY(gfxDestroyTexture(gfx_, font_buffer_));
             GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_));
-            for(uint32_t i = 0; i < ARRAYSIZE(index_buffers_); ++i)
-                GFX_TRY(gfxDestroyBuffer(gfx_, index_buffers_[i]));
-            for(uint32_t i = 0; i < ARRAYSIZE(vertex_buffers_); ++i)
-                GFX_TRY(gfxDestroyBuffer(gfx_, vertex_buffers_[i]));
+            if(index_buffers_ != nullptr)
+                for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
+                {
+                    GFX_TRY(gfxDestroyBuffer(gfx_, index_buffers_[i]));
+                    index_buffers_[i].~GfxBuffer();
+                }
+            if(vertex_buffers_ != nullptr)
+                for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
+                {
+                    GFX_TRY(gfxDestroyBuffer(gfx_, vertex_buffers_[i]));
+                    vertex_buffers_[i].~GfxBuffer();
+                }
             GFX_TRY(gfxDestroyProgram(gfx_, imgui_program_));
             GFX_TRY(gfxDestroyKernel(gfx_, imgui_kernel_));
+            free(vertex_buffers_);
+            free(index_buffers_);
         }
         return kGfxResult_NoError;
     }
