@@ -385,6 +385,7 @@ GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight 
 ID3D12Device *gfxGetDevice(GfxContext context);
 ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context);
 GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *command_list);
+GfxResult gfxResetCommandListState(GfxContext context);
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
 GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
@@ -3687,6 +3688,13 @@ public:
             }
             resetState();
         }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult resetCommandListState()
+    {
+        resetState();
+
         return kGfxResult_NoError;
     }
 
@@ -7924,6 +7932,13 @@ GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *comma
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setCommandList(command_list);
+}
+
+GfxResult gfxResetCommandListState(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->resetCommandListState();
 }
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
