@@ -385,7 +385,7 @@ GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight 
 ID3D12Device *gfxGetDevice(GfxContext context);
 ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context);
 GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *command_list);
-GfxResult gfxResetCommandListState(GfxContext context);
+GfxResult gfxResetCommandListState(GfxContext context); // call this function before returning to gfx after externally modifying the state on the command list
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
 GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
