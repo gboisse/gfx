@@ -387,8 +387,8 @@ ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context);
 GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *command_list);
 GfxResult gfxResetCommandListState(GfxContext context); // call this function before returning to gfx after externally modifying the state on the command list
 
-GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
-GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state);
+GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource);  // resource must be in D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE state
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer);
