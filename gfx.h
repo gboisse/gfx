@@ -4213,6 +4213,7 @@ private:
             return DXGI_FORMAT_R16_UNORM;
         case DXGI_FORMAT_D24_UNORM_S8_UINT:
             return DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+        case DXGI_FORMAT_R32G8X24_TYPELESS: // fall through
         case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
             return DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS;
         default:
