@@ -389,7 +389,7 @@ GfxResult gfxResetCommandListState(GfxContext context); // call this function be
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource);  // resource must be in D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE state
+GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource, uint64_t byte_offset = 0);    // resource must be in D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE state
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer);
 ID3D12Resource *gfxTextureGetResource(GfxContext context, GfxTexture texture);
@@ -3770,7 +3770,7 @@ public:
         return texture;
     }
 
-    GfxAccelerationStructure createAccelerationStructure(ID3D12Resource *resource)
+    GfxAccelerationStructure createAccelerationStructure(ID3D12Resource *resource, uint64_t byte_offset)
     {
         GfxAccelerationStructure acceleration_structure = {};
         if(resource == nullptr)
@@ -3781,6 +3781,11 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create an acceleration structure object from a non-buffer resource");
             return acceleration_structure;  // invalid operation
         }
+        if(byte_offset >= (uint64_t)resource_desc.Width)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot have a byte offset that is larger than the size of the buffer resource");
+            return acceleration_structure;  // invalid operation
+        }
         acceleration_structure.handle = acceleration_structure_handles_.allocate_handle();
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_.insert(acceleration_structure);
         gfx_acceleration_structure.bvh_buffer_.handle = buffer_handles_.allocate_handle();
@@ -3789,6 +3794,7 @@ public:
         gfx_acceleration_structure.bvh_buffer_.cpu_access = kGfxCpuAccess_None;
         gfx_acceleration_structure.bvh_buffer_.stride = sizeof(uint32_t);
         gfx_buffer.flags_ = Object::kFlag_Named;
+        gfx_buffer.data_offset_ = byte_offset;
         gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
         GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
         *gfx_buffer.reference_count_ = 1;   // retain
@@ -7958,12 +7964,12 @@ GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_
     return gfx->createTexture(resource, resource_state);
 }
 
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource)
+GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource, uint64_t byte_offset)
 {
     GfxAccelerationStructure const acceleration_structure = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return acceleration_structure; // invalid context
-    return gfx->createAccelerationStructure(resource);
+    return gfx->createAccelerationStructure(resource, byte_offset);
 }
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer)
