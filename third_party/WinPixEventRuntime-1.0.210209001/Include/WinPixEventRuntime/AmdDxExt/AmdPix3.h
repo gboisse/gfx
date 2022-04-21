@@ -57,7 +57,7 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
 
     if (tls_checkAmdDriver)
     {
-        loaded = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, L"amdxc64.dll", &hpAmdD3dDl2);
+        loaded = GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, L"amdxc64.dll", &hpAmdD3dDl2);
     }
 
     if (FALSE != loaded && nullptr != hpAmdD3dDl2)
@@ -94,6 +94,24 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
     }
 }
 
+inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatStringInChar, ...)
+{
+    InitializeAmdExtDeviceObject(pCommandList);
+
+    if (nullptr != tls_pAmdExtDeviceObject)
+    {
+        // create a new marker string that includes all the variadic args
+        char    markerString[MAX_MARKER_STRING_LENGTH];
+        va_list args;
+        va_start(args, formatStringInChar);
+        vsprintf_s(markerString, formatStringInChar, args);
+        va_end(args);
+
+        // set the rgp marker
+        tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerString);
+    }
+}
+
 inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCWSTR formatString, ...)
 {
     InitializeAmdExtDeviceObject(pCommandList);
@@ -114,6 +132,24 @@ inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCWSTR formatS
 
         // set the rgp marker
         tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerString);
+    }
+}
+
+inline void RgpPushMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatStringInChar, ...)
+{
+    InitializeAmdExtDeviceObject(pCommandList);
+
+    if (nullptr != tls_pAmdExtDeviceObject)
+    {
+        // create a new marker string that includes all the variadic args
+        char    markerString[MAX_MARKER_STRING_LENGTH];
+        va_list args;
+        va_start(args, formatStringInChar);
+        vsprintf_s(markerString, formatStringInChar, args);
+        va_end(args);
+
+        // push the rgp marker
+        tls_pAmdExtDeviceObject->PushMarker(pCommandList, markerString);
     }
 }
 
@@ -150,7 +186,17 @@ inline void RgpPopMarker(ID3D12GraphicsCommandList* pCommandList)
     }
 }
 
+inline void RgpSetMarker(ID3D12CommandQueue*, PCSTR, ...)
+{
+    // there is no queue-based marker yet
+}
+
 inline void RgpSetMarker(ID3D12CommandQueue*, PCWSTR, ...)
+{
+    // there is no queue-based marker yet
+}
+
+inline void RgpPushMarker(ID3D12CommandQueue*, PCSTR, ...)
 {
     // there is no queue-based marker yet
 }
