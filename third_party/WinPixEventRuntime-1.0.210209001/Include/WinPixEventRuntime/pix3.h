@@ -91,6 +91,10 @@ typedef PIXCaptureParameters* PPIXCaptureParameters;
 #define PIX_EVENTS_ARE_TURNED_ON
 
 #include "PIXEventsCommon.h"
+#if defined(USE_PIX) || !defined(PIX_XBOX)
+#define PIX_CONTEXT_EMIT_CPU_EVENTS
+#include "AmdDxExt\AmdPix3.h"
+#endif
 #include "PIXEvents.h"
 
 #ifdef USE_PIX

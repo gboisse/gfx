@@ -261,7 +261,8 @@ namespace PIXEventsDetail
     void PIXBeginEvent(CONTEXT* context, UINT64 color, STR formatString, ARGS... args)
     {
 #ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
-        PIXBeginEventOnContextCpu(context, color, formatString, args...);
+        //PIXBeginEventOnContextCpu(context, color, formatString, args...);
+        RgpPIXBeginEventOnContextCpu(context, color, formatString, args...);
 #endif
 
         // TODO: we've already encoded this once for the CPU event - figure out way to avoid doing it again
@@ -345,7 +346,8 @@ namespace PIXEventsDetail
     void PIXSetMarker(CONTEXT* context, UINT64 color, STR formatString, ARGS... args)
     {
 #ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
-        PIXSetMarkerOnContextCpu(context, color, formatString, args...);
+        //PIXSetMarkerOnContextCpu(context, color, formatString, args...);
+        RgpPIXSetMarkerOnContextCpu(context, color, formatString, args...);
 #endif
 
         UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
@@ -461,7 +463,8 @@ namespace PIXEventsDetail
     void PIXEndEvent(CONTEXT* context)
     {
 #ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
-        PIXEndEventOnContextCpu(context);
+        //PIXEndEventOnContextCpu(context);
+        RgpPIXEndEventOnContextCpu(context);
 #endif
         PIXEndGPUEventOnContext(context);
     }
