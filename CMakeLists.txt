@@ -16,11 +16,11 @@ target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/im
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc_2021_07_01)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinygltf-2.5.0)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator-1.0.0/src)
-target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.200127001/include)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.210209001/include)
 
 target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc_2021_07_01/lib/x64/dxcompiler.lib
-    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.200127001/bin/x64/WinPixEventRuntime.lib)
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.210209001/bin/x64/WinPixEventRuntime.lib)
 
 if(GFX_BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/examples)

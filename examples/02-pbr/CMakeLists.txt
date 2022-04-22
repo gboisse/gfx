@@ -59,14 +59,14 @@ add_custom_command(
     TARGET 02-pbr
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.200127001/bin/x64/WinPixEventRuntime.dll
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.210209001/bin/x64/WinPixEventRuntime.dll
             ${CMAKE_CURRENT_BINARY_DIR}/Debug/WinPixEventRuntime.dll
     COMMAND ${CMAKE_COMMAND} -E copy
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.200127001/bin/x64/WinPixEventRuntime.dll
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.210209001/bin/x64/WinPixEventRuntime.dll
             ${CMAKE_CURRENT_BINARY_DIR}/MinSizeRel/WinPixEventRuntime.dll
     COMMAND ${CMAKE_COMMAND} -E copy
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.200127001/bin/x64/WinPixEventRuntime.dll
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.210209001/bin/x64/WinPixEventRuntime.dll
             ${CMAKE_CURRENT_BINARY_DIR}/Release/WinPixEventRuntime.dll
     COMMAND ${CMAKE_COMMAND} -E copy
-            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.200127001/bin/x64/WinPixEventRuntime.dll
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/WinPixEventRuntime-1.0.210209001/bin/x64/WinPixEventRuntime.dll
             ${CMAKE_CURRENT_BINARY_DIR}/RelWithDebInfo/WinPixEventRuntime.dll)
