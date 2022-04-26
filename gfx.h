@@ -3975,18 +3975,27 @@ public:
     }
 
 private:
-    // http://www.cse.yorku.ca/~oz/hash.html
-    static uint64_t Hash(char const *value)
-    {
-        uint64_t hash = 0;
-        GFX_ASSERT(value != nullptr);
-        if(value == nullptr) return hash;
-        while(*value)
-        {
-            hash = static_cast<uint64_t>(*value) + (hash << 6) + (hash << 16) - hash;
-            ++value;
+    // FNV-1a
+    static uint64_t Hash(uint64_t hash, const unsigned char* const value, const size_t count)
+    { 
+        for (size_t i = 0; i < count; ++i) {
+            hash ^= static_cast<uint64_t>(value[i]);
+            hash *= 1099511628211ULL;
         }
+
         return hash;
+    }
+
+    static uint64_t Hash(const unsigned char* const value, const size_t count)
+    {
+        return Hash(14695981039346656037ULL, value, count);
+    }
+
+    static uint64_t Hash(const char* const value)
+    {
+        GFX_ASSERT(value != nullptr);
+        if(value == nullptr) return 0ULL;
+        return Hash(reinterpret_cast<const unsigned char* const>(value), strlen(value));
     }
 
     template<typename TYPE>
@@ -4504,7 +4513,7 @@ private:
         collect(sampler_slot, freelist_sampler_descriptors_);
     }
 
-    GfxResult createRootSignature(Kernel &kernel)
+    GfxResult createRootSignature(Program const &program, Kernel &kernel)
     {
         ID3DBlob *result = nullptr, *error = nullptr;
         std::vector<Kernel::Parameter> kernel_parameters;
@@ -4737,6 +4746,32 @@ private:
             GFX_PRINTLN("Error: Failed to serialize root signature%s%s", error ? ":\r\n" : "", error ? (char const *)error->GetBufferPointer() : "");
             if(error) error->Release();
             return GFX_SET_ERROR(kGfxResult_InternalError, "Failed to serizalize root signature");
+        }
+        if (debug_shaders_)
+        {   
+            uint64_t root_signature_hash = Hash((unsigned char*)result->GetBufferPointer(), result->GetBufferSize());
+            char root_signature_file[1024];
+            static bool created_shader_blobs_directory;
+            char const *shader_blobs_directory = "./shader_blobs";
+            GFX_SNPRINTF(root_signature_file, ARRAYSIZE(root_signature_file),
+                         "%s/%s_%s_%llx.rsbin",
+                         shader_blobs_directory,
+                         program.file_name_.c_str(),
+                         kernel.entry_point_.c_str(),
+                         root_signature_hash);
+            if(!created_shader_blobs_directory)
+            {
+                int32_t const result = _mkdir(shader_blobs_directory);
+                if(result < 0 && errno != EEXIST)
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader root signatures", shader_blobs_directory);
+                created_shader_blobs_directory = true;    // do not attempt creating the shader PDB directory again
+            }
+            FILE *fd = fopen(root_signature_file, "wb");
+            if(fd != nullptr)
+            {
+                fwrite(result->GetBufferPointer(), result->GetBufferSize(), 1, fd);
+                fclose(fd); // write out root signature for shader debugging
+            }
         }
 
         device_->CreateRootSignature(0, result->GetBufferPointer(), result->GetBufferSize(), IID_PPV_ARGS(&kernel.root_signature_));
@@ -6757,7 +6792,7 @@ private:
         {
             kernel_type = "Compute";
             compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
-            createRootSignature(kernel);
+            createRootSignature(program, kernel);
             createComputePipelineState(kernel);
             if(kernel.cs_reflection_ == nullptr)
                 for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
@@ -6770,7 +6805,7 @@ private:
             compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_);
             compileShader(program, kernel, kShaderType_GS, kernel.gs_bytecode_, kernel.gs_reflection_);
             compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
-            createRootSignature(kernel);
+            createRootSignature(program, kernel);
             result = createGraphicsPipelineState(kernel, kernel.draw_state_);
         }
         if(kernel.root_signature_ != nullptr)
@@ -6929,12 +6964,16 @@ private:
         }
 
         IDxcBlob *dxc_pdb = nullptr;
+        IDxcBlob *dxc_hash = nullptr;
         IDxcBlob *dxc_bytecode = nullptr;
         IDxcBlob *dxc_reflection = nullptr;
         IDxcBlobUtf16 *dxc_pdb_name = nullptr;
         dxc_result->GetResult(&dxc_bytecode);
         if(debug_shaders_)
+        {
             dxc_result->GetOutput(DXC_OUT_PDB, IID_PPV_ARGS(&dxc_pdb), &dxc_pdb_name);
+            dxc_result->GetOutput(DXC_OUT_SHADER_HASH, IID_PPV_ARGS(&dxc_hash), nullptr);
+        }
         dxc_result->GetOutput(DXC_OUT_REFLECTION, IID_PPV_ARGS(&dxc_reflection), nullptr);
         dxc_result->Release();
         if(!dxc_bytecode || !dxc_reflection)
@@ -6967,6 +7006,43 @@ private:
                 fclose(fd); // write out PDB for shader debugging
             }
         }
+        if (dxc_hash != nullptr)
+        {
+            char* const blob_extension[] =
+            {
+                "csblob",
+                "vsblob",
+                "gsblob",
+                "psblob"
+            };
+            static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
+            static_assert(sizeof(DxcShaderHash::HashDigest) == 2 * sizeof(uint64_t));
+            uint64_t* const dxc_shader_hash = (uint64_t*)(((DxcShaderHash* const)dxc_hash->GetBufferPointer())->HashDigest);
+            char shader_bytecode_file[1024];
+            static bool created_shader_blobs_directory;
+            char const *shader_blobs_directory = "./shader_blobs";
+            GFX_SNPRINTF(shader_bytecode_file, ARRAYSIZE(shader_bytecode_file),
+                         "%s/%s_%s_%llx%llx.%s",
+                         shader_blobs_directory,
+                         program.file_name_.c_str(),
+                         kernel.entry_point_.c_str(),
+                         dxc_shader_hash[0],
+                         dxc_shader_hash[1],
+                         blob_extension[shader_type]);
+            if(!created_shader_blobs_directory)
+            {
+                int32_t const result = _mkdir(shader_blobs_directory);
+                if(result < 0 && errno != EEXIST)
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader bytecodes", shader_blobs_directory);
+                created_shader_blobs_directory = true;    // do not attempt creating the shader PDB directory again
+            }
+            FILE *fd = fopen(shader_bytecode_file, "wb");
+            if(fd != nullptr)
+            {
+                fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
+                fclose(fd); // write out root signature for shader debugging
+            }
+        }
 
         DxcBuffer reflection_data = {};
         reflection_data.Size = dxc_reflection->GetBufferSize();
@@ -6976,6 +7052,7 @@ private:
         if(!shader_reflection) dxc_bytecode->Release();
         if(dxc_pdb_name) dxc_pdb_name->Release();
         if(dxc_pdb) dxc_pdb->Release();
+        if(dxc_hash) dxc_hash->Release();
         dxc_reflection->Release();
     }
 
