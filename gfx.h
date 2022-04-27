@@ -191,15 +191,23 @@ GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(Gf
 
 class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
 
+enum GfxRaytracingPrimitiveFlags
+{
+    GfxRaytracingPrimitiveFlags_None = 0,
+    GfxRaytracingPrimitiveFlags_NonOpaque = 1,
+
+    GfxRaytracingPrimitiveFlags_Count
+};
+
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride, bool non_opaque);
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, bool non_opaque);
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxRaytracingPrimitiveFlags flags = GfxRaytracingPrimitiveFlags_NonOpaque);
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxRaytracingPrimitiveFlags flags = GfxRaytracingPrimitiveFlags_NonOpaque);
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, bool non_opaque);
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxRaytracingPrimitiveFlags flags = GfxRaytracingPrimitiveFlags_NonOpaque);
 
 //!
 //! Draw state manipulation.
@@ -2161,7 +2169,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, bool non_opaque)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxRaytracingPrimitiveFlags flags)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -2177,10 +2185,10 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false, non_opaque);
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false, flags);
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, bool non_opaque)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxRaytracingPrimitiveFlags flags)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -2203,7 +2211,7 @@ public:
         gfx_raytracing_primitive.index_stride_ = index_stride;
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false, non_opaque);
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false, flags);
     }
 
     GfxResult setRaytracingPrimitiveTransform(GfxRaytracingPrimitive const &raytracing_primitive, float const *row_major_4x4_transform)
@@ -2246,14 +2254,14 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, bool non_opaque)
+    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxRaytracingPrimitiveFlags flags)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid raytracing primitive object");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true, non_opaque);
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true, flags);
     }
 
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model)
@@ -5992,7 +6000,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update, bool non_opaque)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update, GfxRaytracingPrimitiveFlags flags)
     {
         if(gfx_raytracing_primitive.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.index_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid index buffer object");
@@ -6014,7 +6022,7 @@ private:
         }
         D3D12_RAYTRACING_GEOMETRY_DESC geometry_desc = {};
         geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-        geometry_desc.Flags = !non_opaque ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
+        geometry_desc.Flags = (flags & GfxRaytracingPrimitiveFlags_NonOpaque) == 0 ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
         if(gfx_raytracing_primitive.index_stride_ != 0)
         {
             GFX_ASSERT(gfx_index_buffer != nullptr);    // should never happen
@@ -7407,18 +7415,18 @@ GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimiti
     return gfx->destroyRaytracingPrimitive(raytracing_primitive);
 }
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride, bool non_opaque)
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxRaytracingPrimitiveFlags flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->buildRaytracingPrimitive(raytracing_primitive, vertex_buffer, vertex_stride, non_opaque);
+    return gfx->buildRaytracingPrimitive(raytracing_primitive, vertex_buffer, vertex_stride, flags);
 }
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, bool non_opaque)
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxRaytracingPrimitiveFlags flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->buildRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, non_opaque);
+    return gfx->buildRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, flags);
 }
 
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform)
@@ -7442,11 +7450,11 @@ GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracin
     return gfx->setRaytracingPrimitiveInstanceMask(raytracing_primitive, instance_mask);
 }
 
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, bool non_opaque)
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxRaytracingPrimitiveFlags flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->updateRaytracingPrimitive(raytracing_primitive, non_opaque);
+    return gfx->updateRaytracingPrimitive(raytracing_primitive, flags);
 }
 
 GfxDrawState::GfxDrawState()
