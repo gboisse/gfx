@@ -5202,6 +5202,7 @@ private:
                                 if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
                                 {
                                     if(!invalidate_descriptor) continue;    // invalid resource use
+                                    GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot re-create interop buffer objects with different usage flag(s)");
                                     device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                                     continue;   // invalid operation
                                 }
