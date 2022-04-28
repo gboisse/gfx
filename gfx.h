@@ -3709,11 +3709,6 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a buffer object from a non-buffer resource");
             return buffer;  // invalid operation
         }
-        if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a buffer object from a non-UAV resource");
-            return buffer;  // invalid operation
-        }
         buffer.handle = buffer_handles_.allocate_handle();
         Buffer &gfx_buffer = buffers_.insert(buffer);
         buffer.size = (uint64_t)resource_desc.Width;
@@ -5203,6 +5198,13 @@ private:
                                 }
                                 Buffer &gfx_buffer = buffers_[buffer];
                                 SetObjectName(gfx_buffer, buffer.name);
+                                D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
+                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                                {
+                                    if(!invalidate_descriptor) continue;    // invalid resource use
+                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                                    continue;   // invalid operation
+                                }
                                 transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                                 if(!invalidate_descriptor) continue;    // already up to date
                                 if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
