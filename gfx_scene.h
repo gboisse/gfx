@@ -193,6 +193,11 @@ struct GfxLight
     float range = FLT_MAX;
     float inner_cone_angle = 0.0f;
     float outer_cone_angle = 3.1415926535897932384626433832795f / 4.0f;
+    glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f); //only valid for point+spot lights
+    glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f); //only valid for directional+spot lights
+    float range = FLT_MAX; //only valid for point+spot lights
+    float inner_cone_angle = 0.0f; //only valid for spot lights
+    float outer_cone_angle = 3.1415926535897932384626433832795f / 4.0f; //only valid for spot lights
 };
 
 GfxRef<GfxLight> gfxSceneCreateLight(GfxScene scene);
