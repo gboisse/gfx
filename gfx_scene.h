@@ -177,10 +177,7 @@ GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_han
 
 enum GfxImageFlags
 {
-    kGfxImageFlags_None = 0,
-    kGfxImageFlags_AlphaChannel = 1,
-
-    kGfxImageFlags_Count
+    kGfxImageFlags_AlphaChannel = 1 << 0
 };
 
 struct GfxImage
@@ -190,7 +187,7 @@ struct GfxImage
     uint32_t      channel_count     = 0;
     uint32_t      bytes_per_channel = 0;
     DXGI_FORMAT   format            = DXGI_FORMAT_UNKNOWN;
-    GfxImageFlags flags             = kGfxImageFlags_None;
+    uint32_t      flags             = 0;
 
     std::vector<uint8_t> data;
 };
@@ -1225,7 +1222,7 @@ private:
                             image_ref->data[dst_index] = source;
                             ++dst_index;
                         }
-                image_ref->flags = alpha_check == 255 ? kGfxImageFlags_None : kGfxImageFlags_AlphaChannel;
+                image_ref->flags = alpha_check == 255 ? 0 : kGfxImageFlags_AlphaChannel;
                 GfxMetadata &image_metadata = image_metadata_[image_ref];
                 image_metadata.asset_file = image_file; // set up metadata
                 image_metadata.object_name = image_name;
@@ -1339,14 +1336,14 @@ private:
                         metallicity_map.channel_count = 1;
                         metallicity_map.bytes_per_channel = image.bytes_per_channel;
                         metallicity_map.format = gfxImageGetFormat(metallicity_map);
-                        metallicity_map.flags = kGfxImageFlags_None;
+                        metallicity_map.flags = 0;
                         metallicity_map.data.resize(metallicity_map.width * metallicity_map.height * metallicity_map.bytes_per_channel);
                         roughness_map.width = image.width;
                         roughness_map.height = image.height;
                         roughness_map.channel_count = 1;
                         roughness_map.bytes_per_channel = image.bytes_per_channel;
                         roughness_map.format = gfxImageGetFormat(roughness_map);
-                        roughness_map.flags = kGfxImageFlags_None;
+                        roughness_map.flags = 0;
                         roughness_map.data.resize(roughness_map.width * roughness_map.height * roughness_map.bytes_per_channel);
                         uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
                         uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
@@ -1731,7 +1728,7 @@ private:
                     data[dst_index] = source;
                     ++dst_index;
                 }
-        image_ref->flags = alpha_check == 65535 ? kGfxImageFlags_None : kGfxImageFlags_AlphaChannel;;
+        image_ref->flags = alpha_check == 65535 ? 0 : kGfxImageFlags_AlphaChannel;
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
@@ -1775,7 +1772,7 @@ private:
                     image_ref->data[dst_index] = source;
                     ++dst_index;
                 }
-        image_ref->flags = alpha_check == 255 ? kGfxImageFlags_None : kGfxImageFlags_AlphaChannel;;
+        image_ref->flags = alpha_check == 255 ? 0 : kGfxImageFlags_AlphaChannel;
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
