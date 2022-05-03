@@ -790,6 +790,7 @@ class GfxInternal
         uint32_t vertex_stride_ = 0;
         GfxBuffer vertex_buffer_ = {};
         GfxAccelerationStructure acceleration_structure_ = {};
+        uint32_t flags = 0;
     };
     GfxArray<RaytracingPrimitive> raytracing_primitives_;
     GfxHandles raytracing_primitive_handles_;
@@ -2182,7 +2183,8 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false, flags);
+        gfx_raytracing_primitive.flags = flags;
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
     GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, uint32_t flags)
@@ -2208,7 +2210,8 @@ public:
         gfx_raytracing_primitive.index_stride_ = index_stride;
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false, flags);
+        gfx_raytracing_primitive.flags = flags;
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
     GfxResult setRaytracingPrimitiveTransform(GfxRaytracingPrimitive const &raytracing_primitive, float const *row_major_4x4_transform)
@@ -2258,7 +2261,7 @@ public:
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid raytracing primitive object");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true, 0);
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model)
@@ -5997,7 +6000,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update, uint32_t flags)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
         if(gfx_raytracing_primitive.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.index_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid index buffer object");
@@ -6019,7 +6022,7 @@ private:
         }
         D3D12_RAYTRACING_GEOMETRY_DESC geometry_desc = {};
         geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-        geometry_desc.Flags = (flags & kGfxRaytracingPrimitiveFlags_Opaque) != 0 ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
+        geometry_desc.Flags = (gfx_raytracing_primitive.flags & kGfxRaytracingPrimitiveFlags_Opaque) != 0 ? D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE : D3D12_RAYTRACING_GEOMETRY_FLAG_NONE;
         if(gfx_raytracing_primitive.index_stride_ != 0)
         {
             GFX_ASSERT(gfx_index_buffer != nullptr);    // should never happen
