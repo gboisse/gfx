@@ -204,7 +204,7 @@ GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t flags = 0);
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
 //! Draw state manipulation.
@@ -2251,14 +2251,14 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, uint32_t flags)
+    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid raytracing primitive object");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true, flags);
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true, 0);
     }
 
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model)
@@ -7447,11 +7447,11 @@ GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracin
     return gfx->setRaytracingPrimitiveInstanceMask(raytracing_primitive, instance_mask);
 }
 
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t flags)
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->updateRaytracingPrimitive(raytracing_primitive, flags);
+    return gfx->updateRaytracingPrimitive(raytracing_primitive);
 }
 
 GfxDrawState::GfxDrawState()
