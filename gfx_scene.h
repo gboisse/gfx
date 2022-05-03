@@ -1212,6 +1212,7 @@ private:
                 {
                 case 8:
                     {
+                        uint8_t const *image_data = gltf_image.image.data();
                         uint8_t *data = image_ref->data.data();
                         uint8_t alpha_check = 255;  // check alpha
                         for(int32_t y = 0; y < gltf_image.height; ++y)
@@ -1220,7 +1221,7 @@ private:
                                 {
                                     int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * gltf_image.width) + k;
                                     int32_t const src_index = gltf_image.component * (x + y * gltf_image.width) + k;
-                                    uint8_t const source = (k < gltf_image.component ? gltf_image.image[src_index] : (uint8_t)255);
+                                    uint8_t const source = (k < gltf_image.component ? image_data[src_index] : (uint8_t)255);
                                     if(k == 3) alpha_check &= source;
                                     data[dst_index] = source;
                                 }
