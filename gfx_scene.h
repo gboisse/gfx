@@ -175,19 +175,19 @@ GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_han
 //! Image object.
 //!
 
-enum GfxImageFlags
+enum GfxImageFlag
 {
-    kGfxImageFlags_AlphaChannel = 1 << 0
+    kGfxImageFlag_AlphaChannel = 1 << 0
 };
 
 struct GfxImage
 {
-    uint32_t      width             = 0;
-    uint32_t      height            = 0;
-    uint32_t      channel_count     = 0;
-    uint32_t      bytes_per_channel = 0;
-    DXGI_FORMAT   format            = DXGI_FORMAT_UNKNOWN;
-    uint32_t      flags             = 0;
+    uint32_t    width             = 0;
+    uint32_t    height            = 0;
+    uint32_t    channel_count     = 0;
+    uint32_t    bytes_per_channel = 0;
+    DXGI_FORMAT format            = DXGI_FORMAT_UNKNOWN;
+    uint32_t    flags             = 0;
 
     std::vector<uint8_t> data;
 };
@@ -1202,27 +1202,29 @@ private:
                 image_ref = gfxSceneCreateImage(scene);
                 image_ref->width = gltf_image.width;
                 image_ref->height = gltf_image.height;
-                image_ref->channel_count = gltf_image.component == 3 ? 4 : gltf_image.component;
+                image_ref->channel_count = (gltf_image.component == 3 ? 4 : gltf_image.component);
                 image_ref->bytes_per_channel = (gltf_image.bits >> 3);
                 image_ref->format = gfxImageGetFormat(*image_ref);
                 image_ref->data.resize((size_t)image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel);
                 uint32_t dst_index = 0;
                 uint32_t src_index = 0;
                 uint8_t alpha_check = 255;
-                for (uint32_t y = 0; y < image_ref->height; ++y)
-                    for (uint32_t x = 0; x < image_ref->width; ++x)
-                        for (uint32_t k = 0; k < image_ref->channel_count; ++k) {
+                for(uint32_t y = 0; y < image_ref->height; ++y)
+                    for(uint32_t x = 0; x < image_ref->width; ++x)
+                        for(uint32_t k = 0; k < image_ref->channel_count; ++k)
+                        {
                             uint8_t source = 255;
-                            if (k < (uint32_t)gltf_image.component) {
+                            if(k < (uint32_t)gltf_image.component)
+                            {
                                 source = gltf_image.image[src_index];
                                 ++src_index;
-                                if (k == 3)
+                                if(k == 3)
                                     alpha_check &= source;
                             }
                             image_ref->data[dst_index] = source;
                             ++dst_index;
                         }
-                image_ref->flags = alpha_check == 255 ? 0 : kGfxImageFlags_AlphaChannel;
+                image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_AlphaChannel);
                 GfxMetadata &image_metadata = image_metadata_[image_ref];
                 image_metadata.asset_file = image_file; // set up metadata
                 image_metadata.object_name = image_name;
@@ -1712,23 +1714,18 @@ private:
         image_ref->bytes_per_channel = (uint32_t)2;
         image_ref->format = gfxImageGetFormat(*image_ref);
         uint16_t *data = (uint16_t *)image_ref->data.data();
-        uint32_t dst_index = 0;
-        uint32_t src_index = 0;
-        uint16_t alpha_check = 65535;
-        for (uint32_t y = 0; y < image_ref->height; ++y)
-            for (uint32_t x = 0; x < image_ref->width; ++x)
-                for (uint32_t k = 0; k < image_ref->channel_count; ++k) {
-                    uint16_t source = 65535;
-                    if (k < (uint32_t)channel_count) {
-                        source = image_data[src_index];
-                        ++src_index;
-                        if (k == 3)
-                            alpha_check &= source;
-                    }
+        uint16_t alpha_check = 65535;   // check alpha
+        for(int32_t y = 0; y < image_height; ++y)
+            for(int32_t x = 0; x < image_width; ++x)
+                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
+                {
+                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + (image_height - y - 1) * image_width) + k;
+                    int32_t const src_index = channel_count * (x + y * image_width) + k;
+                    uint16_t const source = (k < channel_count ? image_data[src_index] : (uint16_t)65535);
+                    if(k == 3) alpha_check &= source;
                     data[dst_index] = source;
-                    ++dst_index;
                 }
-        image_ref->flags = alpha_check == 65535 ? 0 : kGfxImageFlags_AlphaChannel;
+        image_ref->flags = (alpha_check == 65535 ? 0 : kGfxImageFlag_AlphaChannel);
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
@@ -1756,23 +1753,19 @@ private:
         image_ref->channel_count = resolved_channel_count;
         image_ref->bytes_per_channel = (uint32_t)1;
         image_ref->format = gfxImageGetFormat(*image_ref);
-        uint32_t dst_index = 0;
-        uint32_t src_index = 0;
-        uint8_t alpha_check = 255;
-        for (uint32_t y = 0; y < image_ref->height; ++y)
-            for (uint32_t x = 0; x < image_ref->width; ++x)
-                for (uint32_t k = 0; k < image_ref->channel_count; ++k) {
-                    uint8_t source = 255;
-                    if (k < (uint32_t)channel_count) {
-                        source = image_data[src_index];
-                        ++src_index;
-                        if (k == 3)
-                            alpha_check &= source;
-                    }
-                    image_ref->data[dst_index] = source;
-                    ++dst_index;
+        uint8_t *data = image_ref->data.data();
+        uint8_t alpha_check = 255;  // check alpha
+        for(int32_t y = 0; y < image_height; ++y)
+            for(int32_t x = 0; x < image_width; ++x)
+                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
+                {
+                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + (image_height - y - 1) * image_width) + k;
+                    int32_t const src_index = channel_count * (x + y * image_width) + k;
+                    uint8_t const source = (k < channel_count ? image_data[src_index] : (uint8_t)255);
+                    if(k == 3) alpha_check &= source;
+                    data[dst_index] = source;
                 }
-        image_ref->flags = alpha_check == 255 ? 0 : kGfxImageFlags_AlphaChannel;
+        image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_AlphaChannel);
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
