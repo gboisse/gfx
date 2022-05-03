@@ -172,6 +172,42 @@ GfxRef<GfxCamera> gfxSceneGetCameraHandle(GfxScene scene, uint32_t camera_index)
 GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_handle);
 
 //!
+//! Light object.
+//!
+
+enum GfxLightType
+{
+    kGfxLightType_Point = 0,
+    kGfxLightType_Spot = 1,
+    kGfxLightType_Directional = 2,
+
+    kGfxLightType_Count
+};
+
+struct GfxLight
+{
+    GfxLightType type = kGfxLightType_Point;
+
+    glm::vec3 color = glm::vec3(1.0f, 1.0f, 1.0f);
+    float intensity = 1.0f;
+    glm::vec3 position = glm::vec3(0.0f, 0.0f, 0.0f); //only valid for point+spot lights
+    glm::vec3 direction = glm::vec3(0.0f, 0.0f, -1.0f); //only valid for directional+spot lights
+    float range = FLT_MAX; //only valid for point+spot lights
+    float inner_cone_angle = 0.0f; //only valid for spot lights
+    float outer_cone_angle = 3.1415926535897932384626433832795f / 4.0f; //only valid for spot lights
+};
+
+GfxRef<GfxLight> gfxSceneCreateLight(GfxScene scene);
+GfxResult gfxSceneDestroyLight(GfxScene scene, uint64_t light_handle);
+GfxResult gfxSceneDestroyAllLights(GfxScene scene);
+
+uint32_t gfxSceneGetLightCount(GfxScene scene);
+GfxLight const* gfxSceneGetLights(GfxScene scene);
+GfxLight* gfxSceneGetLight(GfxScene scene, uint64_t light_handle);
+GfxRef<GfxLight> gfxSceneGetLightHandle(GfxScene scene, uint32_t light_index);
+GfxMetadata const& gfxSceneGetLightMetadata(GfxScene scene, uint64_t light_handle);
+
+//!
 //! Image object.
 //!
 
@@ -331,6 +367,12 @@ template<> inline GfxCamera *gfxSceneGetObject<GfxCamera>(GfxScene scene, uint64
 template<> inline GfxRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene scene, uint32_t object_index) { return gfxSceneGetCameraHandle(scene, object_index); }
 template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
 
+template<> inline uint32_t gfxSceneGetObjectCount<GfxLight>(GfxScene scene) { return gfxSceneGetLightCount(scene); }
+template<> inline GfxLight const* gfxSceneGetObjects<GfxLight>(GfxScene scene) { return gfxSceneGetLights(scene); }
+template<> inline GfxLight* gfxSceneGetObject<GfxLight>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetLight(scene, object_handle); }
+template<> inline GfxRef<GfxLight> gfxSceneGetObjectHandle<GfxLight>(GfxScene scene, uint32_t object_index) { return gfxSceneGetLightHandle(scene, object_index); }
+template<> inline GfxMetadata const& gfxSceneGetObjectMetadata<GfxLight>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetLightMetadata(scene, object_handle); }
+
 template<> inline uint32_t gfxSceneGetObjectCount<GfxImage>(GfxScene scene) { return gfxSceneGetImageCount(scene); }
 template<> inline GfxImage const *gfxSceneGetObjects<GfxImage>(GfxScene scene) { return gfxSceneGetImages(scene); }
 template<> inline GfxImage *gfxSceneGetObject<GfxImage>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetImage(scene, object_handle); }
@@ -389,6 +431,7 @@ class GfxSceneInternal
         glm::dvec3 scale_;
 
         GfxRef<GfxCamera> camera_;
+        GfxRef<GfxLight> light_;
         std::vector<uint64_t> children_;
         std::vector<GfxRef<GfxInstance>> instances_;
     };
@@ -449,6 +492,11 @@ class GfxSceneInternal
     GfxConstRef<GfxCamera> active_camera_;
     GfxHandles camera_handles_;
 
+    GfxArray<GfxLight> lights_;
+    GfxArray<uint64_t> light_refs_;
+    GfxArray<GfxMetadata> light_metadata_;
+    GfxHandles light_handles_;
+
     GfxArray<GfxImage> images_;
     GfxArray<uint64_t> image_refs_;
     GfxArray<GfxMetadata> image_metadata_;
@@ -486,6 +534,11 @@ class GfxSceneInternal
     template<> inline GfxArray<uint64_t> &object_refs_<GfxCamera>() { return camera_refs_; }
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxCamera>() { return camera_metadata_; }
     template<> inline GfxHandles &object_handles_<GfxCamera>() { return camera_handles_; }
+
+    template<> inline GfxArray<GfxLight>& objects_<GfxLight>() { return lights_; }
+    template<> inline GfxArray<uint64_t>& object_refs_<GfxLight>() { return light_refs_; }
+    template<> inline GfxArray<GfxMetadata>& object_metadata_<GfxLight>() { return light_metadata_; }
+    template<> inline GfxHandles& object_handles_<GfxLight>() { return light_handles_; }
 
     template<> inline GfxArray<GfxImage> &objects_<GfxImage>() { return images_; }
     template<> inline GfxArray<uint64_t> &object_refs_<GfxImage>() { return image_refs_; }
@@ -640,6 +693,8 @@ public:
                         node.instances_[i]->transform = glm::mat4(transform);
                 if(node.camera_)
                     TransformGltfCamera(*node.camera_, transform);
+                if (node.light_)
+                    TransformGltfLight(*node.light_, transform);
             };
             for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
                 VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
@@ -667,6 +722,8 @@ public:
                         node.instances_[i]->transform = glm::mat4(transform);
                 if(node.camera_)
                     TransformGltfCamera(*node.camera_, transform);
+                if (node.light_)
+                    TransformGltfLight(*node.light_, transform);
             };
             for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
                 VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
@@ -884,6 +941,18 @@ private:
         camera.eye    = glm::vec3(eye / eye.w);
         camera.center = glm::vec3(center / center.w);
         camera.up     = glm::vec3(glm::normalize(up));
+    }
+
+    static inline void TransformGltfLight(GfxLight& light, glm::dmat4 const& transform)
+    {
+        glm::dvec4 position(0.0, 0.0, 0.0, 1.0);
+        glm::dvec4 direction(0.0, 0.0, -1.0, 1.0);
+
+        position = transform * position;
+        direction = transform * direction;
+                
+        light.position = glm::vec3(position / position.w);
+        light.direction = glm::vec3(direction / direction.w);
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1177,6 +1246,25 @@ private:
             camera_metadata.asset_file = asset_file;    // set up metadata
             camera_metadata.object_name = gltf_camera.name;
             cameras[(int32_t)i] = camera_ref;
+        }
+        std::map<int32_t, GfxConstRef<GfxLight>> lights;
+        for (size_t i = 0; i < gltf_model.lights.size(); ++i) {
+            tinygltf::Light const& gltf_light = gltf_model.lights[i];
+            GfxRef<GfxLight> light_ref = gfxSceneCreateLight(scene);
+            GfxLight& light = *light_ref;
+            light.color = glm::vec3((float)gltf_light.color[0], (float)gltf_light.color[1], (float)gltf_light.color[2]);
+            light.intensity = (float)gltf_light.intensity;
+            light.range = (float)gltf_light.range;
+            light.type = gltf_light.type == "point" ? kGfxLightType_Point : (gltf_light.type == "spot" ? kGfxLightType_Spot : kGfxLightType_Directional);
+            if (light.type == kGfxLightType_Spot) {
+                light.inner_cone_angle = (float)gltf_light.spot.innerConeAngle;
+                light.outer_cone_angle = (float)gltf_light.spot.outerConeAngle;
+            }
+            TransformGltfLight(light, glm::dmat4(1.0));
+            GfxMetadata& light_metadata = light_metadata_[light_ref];
+            light_metadata.asset_file = asset_file;    // set up metadata
+            light_metadata.object_name = gltf_light.name;
+            lights[(int32_t)i] = light_ref;
         }
         std::map<int32_t, GfxConstRef<GfxImage>> images;
         for(size_t i = 0; i < gltf_model.textures.size(); ++i)
@@ -1646,6 +1734,15 @@ private:
                     TransformGltfCamera(*camera, transform);
                 }
             }
+            GfxRef<GfxLight> light;
+            if (gltf_node.extensions.find("KHR_lights_punctual") != gltf_node.extensions.end()) {
+                auto t = gltf_node.extensions.find("KHR_lights_punctual");
+                std::map<int32_t, GfxConstRef<GfxLight>>::const_iterator const it = lights.find((uint32_t)t->second.Get("light").GetNumberAsInt());
+                if (it != lights.end()) {
+                    light = (*it).second;
+                    TransformGltfLight(*light, transform);
+                }
+            }
             bool is_any_children_animated = false;
             std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(node_index);
             bool is_node_animated = (is_parent_animated || it != animated_nodes.end());
@@ -2012,6 +2109,65 @@ GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_han
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return metadata; // invalid parameter
     return gfx_scene->getObjectMetadata<GfxCamera>(camera_handle);
+}
+
+GfxRef<GfxLight> gfxSceneCreateLight(GfxScene scene)
+{
+    GfxRef<GfxLight> const light_ref = {};
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return light_ref;   // invalid parameter
+    return gfx_scene->createObject<GfxLight>(scene);
+}
+
+GfxResult gfxSceneDestroyLight(GfxScene scene, uint64_t light_handle)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->destroyObject<GfxLight>(light_handle);
+}
+
+GfxResult gfxSceneDestroyAllLights(GfxScene scene)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxLight>();
+}
+
+uint32_t gfxSceneGetLightCount(GfxScene scene)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return 0;    // invalid parameter
+    return gfx_scene->getObjectCount<GfxLight>();
+}
+
+GfxLight const* gfxSceneGetLights(GfxScene scene)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObjects<GfxLight>();
+}
+
+GfxLight* gfxSceneGetLight(GfxScene scene, uint64_t light_handle)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObject<GfxLight>(light_handle);
+}
+
+GfxRef<GfxLight> gfxSceneGetLightHandle(GfxScene scene, uint32_t light_index)
+{
+    GfxRef<GfxLight> const light_ref = {};
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return light_ref;   // invalid parameter
+    return gfx_scene->getObjectHandle<GfxLight>(scene, light_index);
+}
+
+GfxMetadata const& gfxSceneGetLightMetadata(GfxScene scene, uint64_t light_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxLight>(light_handle);
 }
 
 GfxRef<GfxImage> gfxSceneCreateImage(GfxScene scene)
