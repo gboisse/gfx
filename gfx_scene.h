@@ -397,11 +397,11 @@ template<> inline GfxInstance *gfxSceneGetObject<GfxInstance>(GfxScene scene, ui
 template<> inline GfxRef<GfxInstance> gfxSceneGetObjectHandle<GfxInstance>(GfxScene scene, uint32_t object_index) { return gfxSceneGetInstanceHandle(scene, object_index); }
 template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstanceMetadata(scene, object_handle); }
 
-template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene scene) { static_assert("Cannot get object count for unsupported object type"); }
-template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene scene) { static_assert("Cannot get object list for unsupported object type"); }
-template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get scene object for unsupported object type"); }
-template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert("Cannot get object handle for unsupported object type"); }
-template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert("Cannot get object metadata for unsupported object type"); }
+template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene scene) { static_assert(false, "Cannot get object count for unsupported object type"); }
+template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene scene) { static_assert(false, "Cannot get object list for unsupported object type"); }
+template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_handle) { static_assert(false, "Cannot get scene object for unsupported object type"); }
+template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert(false, "Cannot get object handle for unsupported object type"); }
+template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert(false, "Cannot get object metadata for unsupported object type"); }
 
 //!
 //! Implementation details.
