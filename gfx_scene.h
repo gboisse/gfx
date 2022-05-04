@@ -608,6 +608,7 @@ public:
     {
         clearObjects<GfxAnimation>();
         clearObjects<GfxCamera>();
+        clearObjects<GfxLight>();
         clearObjects<GfxImage>();
         clearObjects<GfxMaterial>();
         clearObjects<GfxMesh>();
