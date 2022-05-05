@@ -1809,7 +1809,7 @@ private:
             for(size_t j = 0; j < gltf_scene.nodes.size(); ++j)
             {
                 std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it2 = animated_nodes.find(gltf_scene.nodes[j]);
-                GFX_ASSERT((*it2).second.first < gltf_model.animations.size());
+                GFX_ASSERT(it2 == animated_nodes.end() || (*it2).second.first < gltf_model.animations.size());
                 if(it2 != animated_nodes.end() && (*it2).second.first == i)
                     animation_object.nodes_.push_back((*it2).second.second);
             }
