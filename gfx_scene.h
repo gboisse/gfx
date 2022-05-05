@@ -1602,7 +1602,7 @@ private:
             }
         }
         std::set<uint64_t> unparented_nodes;
-        std::map<int32_t, std::pair<size_t, uint64_t>> animated_nodes;
+        std::map<int32_t, uint64_t> animated_nodes;
         std::map<size_t, GfxConstRef<GfxAnimation>> animations;
         for(size_t i = 0; i < gltf_model.animations.size(); ++i)
         {
@@ -1629,13 +1629,13 @@ private:
                 GltfBuffer const input_buffer  = GetBuffer(gltf_animation_sampler.input);
                 GltfBuffer const output_buffer = GetBuffer(gltf_animation_sampler.output);
                 if(!input_buffer.count_ || !output_buffer.count_ || input_buffer.count_ != output_buffer.count_) continue;
-                std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it = animated_nodes.find(gltf_animation_channel.target_node);
+                std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(gltf_animation_channel.target_node);
                 if(it != animated_nodes.end())
-                    animated_node_handle = (*it).second.second;
+                    animated_node_handle = (*it).second;
                 else
                 {
                     animated_node_handle = gltf_node_handles_.allocate_handle();
-                    animated_nodes[gltf_animation_channel.target_node] = {i, animated_node_handle};
+                    animated_nodes[gltf_animation_channel.target_node] = animated_node_handle;
                     gltf_nodes_.insert(GetObjectIndex(animated_node_handle)) = {};  // flag animated node
                     gltf_animated_nodes_.insert(GetObjectIndex(animated_node_handle)) = {};
                     unparented_nodes.insert(animated_node_handle);
@@ -1745,7 +1745,7 @@ private:
                 }
             }
             bool is_any_children_animated = false;
-            std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it = animated_nodes.find(node_index);
+            std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(node_index);
             bool is_node_animated = (is_parent_animated || it != animated_nodes.end());
             for(size_t i = 0; i < gltf_node.children.size(); ++i)
                 is_any_children_animated = (VisitNode(gltf_node.children[i], transform, is_node_animated) || is_any_children_animated);
@@ -1757,22 +1757,22 @@ private:
                 GltfAnimatedNode *animated_node = nullptr;
                 for(size_t i = 0; i < gltf_node.children.size(); ++i)
                 {
-                    std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it2 = animated_nodes.find(gltf_node.children[i]);
-                    if(it2 != animated_nodes.end()) children.push_back((*it2).second.second);
+                    std::map<int32_t, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node.children[i]);
+                    if(it2 != animated_nodes.end()) children.push_back((*it2).second);
                 }
                 if(it != animated_nodes.end())
                 {
-                    unparented_nodes.erase((*it).second.second);
-                    node = &gltf_nodes_[GetObjectIndex((*it).second.second)];
-                    animated_node = gltf_animated_nodes_.at(GetObjectIndex((*it).second.second));
-                    gltf_node_refs_.insert(GetObjectIndex((*it).second.second), (uint32_t)animations.size());
+                    unparented_nodes.erase((*it).second);
+                    node = &gltf_nodes_[GetObjectIndex((*it).second)];
+                    animated_node = gltf_animated_nodes_.at(GetObjectIndex((*it).second));
+                    gltf_node_refs_.insert(GetObjectIndex((*it).second), (uint32_t)animations.size());
                 }
                 else
                 {
                     uint64_t const animated_node_handle = gltf_node_handles_.allocate_handle();
                     gltf_node_refs_.insert(GetObjectIndex(animated_node_handle), (uint32_t)animations.size());
                     node = &gltf_nodes_.insert(GetObjectIndex(animated_node_handle));
-                    animated_nodes[node_index] = {(*it).second.first, animated_node_handle};
+                    animated_nodes[node_index] = animated_node_handle;
                     *node = {};
                 }
                 if(animated_node != nullptr)
@@ -1808,10 +1808,9 @@ private:
             GltfAnimation &animation_object = gltf_animations_[GetObjectIndex((*it).second)];
             for(size_t j = 0; j < gltf_scene.nodes.size(); ++j)
             {
-                std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it2 = animated_nodes.find(gltf_scene.nodes[j]);
-                GFX_ASSERT((*it2).second.first < gltf_model.animations.size());
-                if(it2 != animated_nodes.end() && (*it2).second.first == i)
-                    animation_object.nodes_.push_back((*it2).second.second);
+                std::map<int32_t, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_scene.nodes[j]);
+                if(it2 != animated_nodes.end())
+                    animation_object.nodes_.push_back((*it2).second);
             }
         }
         return kGfxResult_NoError;
