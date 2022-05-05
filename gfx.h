@@ -79,7 +79,7 @@ class GfxBuffer { GFX_INTERNAL_NAMED_HANDLE(GfxBuffer); uint64_t size; uint32_t 
                   inline uint64_t getSize() const { return size; } };
 
 GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data = nullptr, GfxCpuAccess cpu_access = kGfxCpuAccess_None);
-GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t byte_offset, uint64_t size);  // fast path for (sub-)allocating during a frame
+GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t byte_offset, uint64_t size = 0);  // fast path for (sub-)allocating during a frame
 GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer);
 
 void *gfxBufferGetData(GfxContext context, GfxBuffer buffer);
@@ -1685,6 +1685,7 @@ public:
             return buffer_range;
         }
         Buffer const gfx_buffer = buffers_[buffer];
+        if(size == 0) size = (buffer.size - byte_offset);
         buffer_range.handle = buffer_handles_.allocate_handle();
         Buffer &gfx_buffer_range = buffers_.insert(buffer_range, gfx_buffer);
         if(gfx_buffer_range.data_ != nullptr) gfx_buffer_range.data_ = (char *)gfx_buffer_range.data_ + byte_offset;
