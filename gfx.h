@@ -4217,6 +4217,8 @@ private:
     {
         switch(format)
         {
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+            return DXGI_FORMAT_B8G8R8A8_UNORM;
         case DXGI_FORMAT_D32_FLOAT:
             return DXGI_FORMAT_R32_FLOAT;
         case DXGI_FORMAT_D16_UNORM:
