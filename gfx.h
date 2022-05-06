@@ -97,7 +97,7 @@ GfxBuffer gfxCreateBuffer(GfxContext context, uint32_t element_count, void const
 }
 
 template<typename TYPE>
-GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t element_offset, uint32_t element_count)
+GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t element_offset, uint32_t element_count = 0)
 {
     GfxBuffer buffer_range = gfxCreateBufferRange(context, buffer, element_offset * sizeof(TYPE), element_count * sizeof(TYPE));
     if(buffer_range) buffer_range.setStride((uint32_t)sizeof(TYPE));
