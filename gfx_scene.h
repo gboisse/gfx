@@ -1663,14 +1663,14 @@ private:
                 animation_channel.type_ = type;
             }
         }
-        std::function<bool(int32_t, glm::dmat4 const &, bool)> VisitNode;
-        VisitNode = [&](int32_t node_index, glm::dmat4 const &parent_transform, bool is_parent_animated)
+        std::function<std::pair<bool, size_t>(int32_t, glm::dmat4 const &, bool, size_t)> VisitNode;
+        VisitNode = [&](int32_t node_index, glm::dmat4 const &parent_transform, bool is_parent_animated, size_t parent_animation) -> std::pair<bool, size_t>
         {
             glm::dvec3 T(0.0), S(1.0);
             glm::dquat R(1.0, 0.0, 0.0, 0.0);
             glm::dmat4 local_transform(1.0);    // default to identity
             if(node_index < 0 || node_index >= (int32_t)gltf_model.nodes.size())
-                return false;   // out of bounds
+                return {false, std::numeric_limits<size_t>::max()};   // out of bounds
             tinygltf::Node const &gltf_node = gltf_model.nodes[node_index];
             if(!gltf_node.matrix.empty())
             {
@@ -1744,12 +1744,23 @@ private:
                     TransformGltfLight(*light, transform);
                 }
             }
-            bool is_any_children_animated = false;
             std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it = animated_nodes.find(node_index);
             bool is_node_animated = (is_parent_animated || it != animated_nodes.end());
+            size_t node_animation = (is_parent_animated ? parent_animation : (it != animated_nodes.end() ? (*it).second.first : std::numeric_limits<size_t>::max()));
+            bool is_any_children_animated = false;
+            size_t children_animation = std::numeric_limits<size_t>::max();
             for(size_t i = 0; i < gltf_node.children.size(); ++i)
-                is_any_children_animated = (VisitNode(gltf_node.children[i], transform, is_node_animated) || is_any_children_animated);
-            is_node_animated = (is_node_animated || is_any_children_animated);
+            {
+                auto const [is_child_animated, child_animation] = VisitNode(gltf_node.children[i], transform, is_node_animated, node_animation);
+                GFX_ASSERT(!is_any_children_animated || !is_child_animated || children_animation == child_animation); // we assume non overlapping animations
+                is_any_children_animated = is_any_children_animated || is_child_animated;
+                children_animation = is_child_animated ? child_animation : children_animation;
+            }
+            if (!is_node_animated && is_any_children_animated)
+            {
+                is_node_animated = true;
+                node_animation = children_animation;
+            }
             if(is_node_animated)
             {
                 GltfNode *node = nullptr;
@@ -1769,10 +1780,11 @@ private:
                 }
                 else
                 {
+                    GFX_ASSERT(node_animation < animations.size());
                     uint64_t const animated_node_handle = gltf_node_handles_.allocate_handle();
                     gltf_node_refs_.insert(GetObjectIndex(animated_node_handle), (uint32_t)animations.size());
                     node = &gltf_nodes_.insert(GetObjectIndex(animated_node_handle));
-                    animated_nodes[node_index] = {(*it).second.first, animated_node_handle};
+                    animated_nodes[node_index] = {node_animation, animated_node_handle};
                     *node = {};
                 }
                 if(animated_node != nullptr)
@@ -1790,11 +1802,11 @@ private:
                 std::swap(node->instances_, instances);
                 node->camera_ = camera;
             }
-            return is_node_animated;
+            return {is_node_animated, node_animation};
         };
         tinygltf::Scene const &gltf_scene = gltf_model.scenes[glm::clamp(gltf_model.defaultScene, 0, (int32_t)gltf_model.scenes.size() - 1)];
         for(size_t i = 0; i < gltf_scene.nodes.size(); ++i)
-            VisitNode(gltf_scene.nodes[i], glm::dmat4(1.0), false);
+            VisitNode(gltf_scene.nodes[i], glm::dmat4(1.0), false, std::numeric_limits<size_t>::max());
         for(std::set<uint64_t>::const_iterator it = unparented_nodes.begin(); it != unparented_nodes.end(); ++it)
         {
             gltf_node_handles_.free_handle(*it);
@@ -1809,7 +1821,7 @@ private:
             for(size_t j = 0; j < gltf_scene.nodes.size(); ++j)
             {
                 std::map<int32_t, std::pair<size_t, uint64_t>>::const_iterator const it2 = animated_nodes.find(gltf_scene.nodes[j]);
-                GFX_ASSERT((*it2).second.first < gltf_model.animations.size());
+                GFX_ASSERT(it2 == animated_nodes.end() || (*it2).second.first < gltf_model.animations.size());
                 if(it2 != animated_nodes.end() && (*it2).second.first == i)
                     animation_object.nodes_.push_back((*it2).second.second);
             }
