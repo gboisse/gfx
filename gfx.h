@@ -408,7 +408,7 @@ D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture 
 //!
 
 template<typename TYPE>
-GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
+GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
 {
     GfxBuffer buffer = gfxCreateBuffer(context, resource, resource_state);
     if(buffer) buffer.setStride((uint32_t)sizeof(TYPE));
