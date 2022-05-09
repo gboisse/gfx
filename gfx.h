@@ -97,7 +97,7 @@ GfxBuffer gfxCreateBuffer(GfxContext context, uint32_t element_count, void const
 }
 
 template<typename TYPE>
-GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t element_offset, uint32_t element_count)
+GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint32_t element_offset, uint32_t element_count = 0)
 {
     GfxBuffer buffer_range = gfxCreateBufferRange(context, buffer, element_offset * sizeof(TYPE), element_count * sizeof(TYPE));
     if(buffer_range) buffer_range.setStride((uint32_t)sizeof(TYPE));
@@ -408,7 +408,7 @@ D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture 
 //!
 
 template<typename TYPE>
-GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
+GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE)
 {
     GfxBuffer buffer = gfxCreateBuffer(context, resource, resource_state);
     if(buffer) buffer.setStride((uint32_t)sizeof(TYPE));
@@ -4217,6 +4217,8 @@ private:
     {
         switch(format)
         {
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+            return DXGI_FORMAT_B8G8R8A8_UNORM;
         case DXGI_FORMAT_D32_FLOAT:
             return DXGI_FORMAT_R32_FLOAT;
         case DXGI_FORMAT_D16_UNORM:
