@@ -21,7 +21,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#pragma once
+#ifndef GFX_INCLUDE_GFX_CORE_H
+#define GFX_INCLUDE_GFX_CORE_H
 
 #include <cstdio>       // vprintf, etc.
 #include <cstdarg>      // va_list, etc.
@@ -845,3 +846,5 @@ void GfxHandles::grow(uint32_t handle_count)
     handles_ = handles;
     capacity_ = capacity;
 }
+
+#endif //! GFX_INCLUDE_GFX_CORE_H

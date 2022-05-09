@@ -21,7 +21,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#pragma once
+#ifndef GFX_INCLUDE_GFX_WINDOW_H
+#define GFX_INCLUDE_GFX_WINDOW_H
 
 #include "gfx.h"
 
@@ -55,11 +56,15 @@ bool gfxWindowIsCloseRequested(GfxWindow window);
 bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
 
+#endif //! GFX_INCLUDE_GFX_WINDOW_H
+
 //!
 //! Implementation details.
 //!
 
 #ifdef GFX_IMPLEMENTATION_DEFINE
+
+#pragma once
 
 #include "gfx_imgui.h"  // for (optional) ImGui integration
 #include "examples/imgui_impl_win32.h"

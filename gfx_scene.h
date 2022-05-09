@@ -21,7 +21,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#pragma once
+#ifndef GFX_INCLUDE_GFX_SCENE_H
+#define GFX_INCLUDE_GFX_SCENE_H
 
 #include "gfx.h"
 #include "glm/glm.hpp"
@@ -403,11 +404,15 @@ template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_
 template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert(false, "Cannot get object handle for unsupported object type"); }
 template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert(false, "Cannot get object metadata for unsupported object type"); }
 
+#endif //! GFX_INCLUDE_GFX_SCENE_H
+
 //!
 //! Implementation details.
 //!
 
 #ifdef GFX_IMPLEMENTATION_DEFINE
+
+#pragma once
 
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION

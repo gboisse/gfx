@@ -21,7 +21,8 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#pragma once
+#ifndef GFX_INCLUDE_GFX_H
+#define GFX_INCLUDE_GFX_H
 
 #include "d3d12.h"
 #include "dxgi1_4.h"
@@ -415,11 +416,15 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
     return buffer;
 }
 
+#endif //! GFX_INCLUDE_GFX_H
+
 //!
 //! Implementation details.
 //!
 
 #ifdef GFX_IMPLEMENTATION_DEFINE
+
+#pragma once
 
 #include <map>                  // std::map
 #include <deque>                // std::deque
