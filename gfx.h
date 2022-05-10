@@ -3922,6 +3922,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set color target on an invalid draw state object");
         if(target_index >= kGfxConstant_MaxRenderTarget)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot have more than %u render targets in draw state object", (uint32_t)kGfxConstant_MaxRenderTarget);
+        if(!texture)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
         if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
@@ -3938,6 +3940,8 @@ public:
         DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth/stencil target on an invalid draw state object");
+        if(!texture)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
         if(mip_level >= texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
         if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
