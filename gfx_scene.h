@@ -1255,7 +1255,7 @@ private:
             GfxLight& light = *light_ref;
             light.color = glm::vec3((float)gltf_light.color[0], (float)gltf_light.color[1], (float)gltf_light.color[2]);
             light.intensity = (float)gltf_light.intensity;
-            light.range = (float)gltf_light.range;
+            light.range = gltf_light.range > 0.0 ? (float)gltf_light.range : FLT_MAX;
             light.type = gltf_light.type == "point" ? kGfxLightType_Point : (gltf_light.type == "spot" ? kGfxLightType_Spot : kGfxLightType_Directional);
             if (light.type == kGfxLightType_Spot) {
                 light.inner_cone_angle = (float)gltf_light.spot.innerConeAngle;
