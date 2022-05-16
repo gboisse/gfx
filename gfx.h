@@ -3771,6 +3771,20 @@ public:
         texture.depth = (uint32_t)resource_desc.DepthOrArraySize;
         texture.format = resource_desc.Format;
         texture.mip_levels = (uint32_t)resource_desc.MipLevels;
+        if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
         gfx_texture.Object::flags_ = Object::kFlag_Named;
         gfx_texture.initial_resource_state_ = resource_state;
         gfx_texture.resource_state_ = resource_state;
