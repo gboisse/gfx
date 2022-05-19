@@ -952,13 +952,13 @@ private:
     static inline void TransformGltfLight(GfxLight& light, glm::dmat4 const& transform)
     {
         glm::dvec4 position(0.0, 0.0, 0.0, 1.0);
-        glm::dvec4 direction(0.0, 0.0, -1.0, 1.0);
+        glm::dvec4 direction(0.0, 0.0, 1.0, 0.0);//Direction oriented toward the light
 
         position = transform * position;
         direction = transform * direction;
                 
         light.position = glm::vec3(position / position.w);
-        light.direction = glm::vec3(direction / direction.w);
+        light.direction = glm::vec3(direction);
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1803,6 +1803,7 @@ private:
                 std::swap(node->children_, children);
                 std::swap(node->instances_, instances);
                 node->camera_ = camera;
+                node->light_ = light;
             }
             return children_animations;
         };
