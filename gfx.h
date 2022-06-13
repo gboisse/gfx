@@ -2986,8 +2986,10 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
+            submitPipelineBarriers();
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        }
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(multi_draw_signature_, args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -3015,8 +3017,10 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel, true));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
+            submitPipelineBarriers();
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        }
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(multi_draw_indexed_signature_, args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -3060,8 +3064,10 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
+            submitPipelineBarriers();
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        }
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -3088,8 +3094,10 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
+            submitPipelineBarriers();
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        }
         submitPipelineBarriers();   // transition our resources if needed
         uint32_t root_parameter_index = 0xFFFFFFFFu, destination_offset = 0;
         static uint64_t const dispatch_id_parameter = Hash("gfx_DispatchID");
@@ -5300,6 +5308,7 @@ private:
                                     continue;   // out of bounds mip level
                                 }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                                submitPipelineBarriers();
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
