@@ -2984,11 +2984,10 @@ public:
         GFX_TRY(populateDrawIdBuffer(args_count));
         Buffer &gfx_buffer = buffers_[args_buffer];
         SetObjectName(gfx_buffer, args_buffer.name);
-        // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
         {
-            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
+            submitPipelineBarriers();   // break barrier batches to avoid debug layer warnings
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3016,11 +3015,10 @@ public:
         GFX_TRY(populateDrawIdBuffer(args_count));
         Buffer &gfx_buffer = buffers_[args_buffer];
         SetObjectName(gfx_buffer, args_buffer.name);
-        // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel, true));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
         {
-            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
+            submitPipelineBarriers();   // break barrier batches to avoid debug layer warnings
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3064,11 +3062,10 @@ public:
             return kGfxResult_NoError;  // skip dispatch call
         Buffer &gfx_buffer = buffers_[args_buffer];
         SetObjectName(gfx_buffer, args_buffer.name);
-        // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
         {
-            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
+            submitPipelineBarriers();   // break barrier batches to avoid debug layer warnings
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3095,11 +3092,10 @@ public:
             return kGfxResult_NoError;  // skip multi-dispatch call
         Buffer &gfx_buffer = buffers_[args_buffer];
         SetObjectName(gfx_buffer, args_buffer.name);
-        // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
         {
-            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
+            submitPipelineBarriers();   // break barrier batches to avoid debug layer warnings
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3280,7 +3276,7 @@ public:
         uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 1 billion keys"); // TODO: implement 3-level scan? (gboisse)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 1 billion keys");
         uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
         if(texture_upload_buffer_.size < scratch_buffer_size)
         {
@@ -3411,7 +3407,7 @@ public:
         uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");   // TODO: implement 3-level reduction? (gboisse)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");
         uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
         if(texture_upload_buffer_.size < scratch_buffer_size)
         {
@@ -5849,7 +5845,6 @@ private:
                     ibv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
                     ibv_desc.SizeInBytes = (uint32_t)bound_index_buffer_.size;
                     ibv_desc.Format = (bound_index_buffer_.stride == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT);
-                    // TODO: might need multiple resource state flags... (gboisse)
                     if(bound_index_buffer_.cpu_access == kGfxCpuAccess_None)
                         transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDEX_BUFFER);
                 }
@@ -5873,7 +5868,6 @@ private:
                     vbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
                     vbv_desc.SizeInBytes = (uint32_t)bound_vertex_buffer_.size;
                     vbv_desc.StrideInBytes = GFX_MAX(bound_vertex_buffer_.stride, kernel.vertex_stride_);
-                    // TODO: might need multiple resource state flags... (gboisse)
                     if(bound_vertex_buffer_.cpu_access == kGfxCpuAccess_None)
                         transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
                 }
@@ -7085,6 +7079,13 @@ private:
             }
             return; // no need to transition
         }
+        for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
+            if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == buffer.resource_) ||
+               ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == buffer.resource_))
+            {
+                submitPipelineBarriers();
+                break;  // break barrier batches to avoid debug layer warnings
+            }
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         resource_barrier.Transition.pResource = buffer.resource_;
@@ -7119,6 +7120,13 @@ private:
             }
             return; // no need to transition
         }
+        for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
+            if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == texture.resource_) ||
+               ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == texture.resource_))
+            {
+                submitPipelineBarriers();
+                break;  // break barrier batches to avoid debug layer warnings
+            }
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         resource_barrier.Transition.pResource = texture.resource_;
