@@ -1670,8 +1670,8 @@ private:
                 animation_channel.type_ = type;
             }
         }
-        for(auto const& [_, animations] : node_animations)
-            if(animations.size() > 1)
+        for(std::map<int32_t, std::set<GfxConstRef<GfxAnimation>>>::const_iterator it = node_animations.begin(); it != node_animations.end(); ++it)
+            if((*it).second.size() > 1)
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Some nodes are targeted by several animations...");
         std::map<int32_t, std::set<GfxConstRef<GfxAnimation>>> propagated_node_animations;
         std::function<std::set<GfxConstRef<GfxAnimation>> (int32_t node_index, glm::dmat4 const &parent_transform, std::set<GfxConstRef<GfxAnimation>> const& parent_animations)> VisitNode;

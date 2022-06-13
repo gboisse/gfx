@@ -3276,7 +3276,7 @@ public:
         uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 1 billion keys");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 1 billion keys"); // TODO: implement 3-level scan? (gboisse)
         uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
         if(texture_upload_buffer_.size < scratch_buffer_size)
         {
@@ -3407,7 +3407,7 @@ public:
         uint32_t const num_groups_level_1 = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");   // TODO: implement 3-level reduction? (gboisse)
         uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
         if(texture_upload_buffer_.size < scratch_buffer_size)
         {
