@@ -1551,8 +1551,10 @@ public:
             dxc_compiler_->Release();
         if(dxc_include_handler_ != nullptr)
             dxc_include_handler_->Release();
+#ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
         if(tls_pAmdExtDeviceObject != nullptr)
             tls_pAmdExtDeviceObject->Release();
+#endif //! PIX_CONTEXT_EMIT_CPU_EVENTS
 
         if(swap_chain_ != nullptr)
             swap_chain_->Release();
