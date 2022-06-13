@@ -2986,8 +2986,9 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
-            submitPipelineBarriers();
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        {
+            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3017,8 +3018,9 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel, true));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
-            submitPipelineBarriers();
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        {
+            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3064,8 +3066,9 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
-            submitPipelineBarriers();
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        {
+            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -3094,8 +3097,9 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         // TODO: might need multiple resource state flags... (gboisse)
         GFX_TRY(installShaderState(kernel));
-        if(args_buffer.cpu_access == kGfxCpuAccess_None) {
-            submitPipelineBarriers();
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+        {
+            submitPipelineBarriers();   // debug layer warnings fix: https://github.com/gboisse/gfx/pull/33
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         }
         submitPipelineBarriers();   // transition our resources if needed
@@ -5308,7 +5312,6 @@ private:
                                     continue;   // out of bounds mip level
                                 }
                                 transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                submitPipelineBarriers();
                                 if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                                     continue;    // already up to date
                                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
