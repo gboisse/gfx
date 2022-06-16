@@ -1860,8 +1860,18 @@ private:
                 {
                     int32_t const dst_index = (int32_t)resolved_channel_count * (x + (image_height - y - 1) * image_width) + k;
                     int32_t const src_index = channel_count * (x + y * image_width) + k;
-                    float const source = (k < channel_count ? image_data[src_index] : 1.0f);
-                    if(k == 3) alpha_check |= source < 1.0f;
+                    float source = (k < channel_count ? image_data[src_index] : 1.0f);
+                    if(k == 3)
+                    {
+                        source = glm::clamp(source, 0.0f, 1.0f);
+                        alpha_check |= source < 1.0f;
+                    }
+                    else
+                    {
+                        source /= (1.0f + source);  // fix NaNs
+                        source  = glm::clamp(source, 0.0f, 1.0f);
+                        source /= GFX_MAX(1.0f - source, 1e-3f);
+                    }
                     data[dst_index] = source;
                 }
         image_ref->flags = (!alpha_check ? 0 : kGfxImageFlag_AlphaChannel);
