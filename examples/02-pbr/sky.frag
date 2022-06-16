@@ -35,11 +35,14 @@ float4 main(in float4 pos : SV_Position) : SV_Target
     float2 uv  = pos.xy * g_TexelSize;
     float2 ndc = 2.0f * float2(uv.x, 1.0f - uv.y) - 1.0f;
 
+    // Retrieve the ray direction and sample the environment
     float4 world = mul(g_ViewProjectionInverse, float4(ndc, 1.0f, 1.0f));
     world /= world.w;   // perspective divide
 
     float3 color = g_EnvironmentBuffer.SampleLevel(g_LinearSampler, world.xyz - g_Eye, 1.0f).xyz;
 
+    // Tonemap the color output
+    color *= 0.75f;
     color /= 1.0f + color;
     color  = saturate(color);
     color  = pow(color, 1.0f / 2.2f);

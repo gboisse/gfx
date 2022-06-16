@@ -156,6 +156,7 @@ Result main(in Params params)
     float3 color = diffuse + specular;
 
     // Tonemap the color output
+    color *= 0.75f;
     color /= 1.0f + color;
     color  = saturate(color);
     color  = pow(color, 1.0f / 2.2f);

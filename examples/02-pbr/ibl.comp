@@ -60,7 +60,7 @@ void DrawCubemap(in uint2 did : SV_DispatchThreadID)
 
     float3 color = g_EnvironmentMap.SampleLevel(g_LinearSampler, uv, 0.0f).xyz;
 
-    g_OutCubemap[int3(did, g_FaceIndex)] = float4(pow(color, 2.2f), 1.0f);
+    g_OutCubemap[int3(did, g_FaceIndex)] = float4(color, 1.0f);
 }
 
 [numthreads(8, 8, 1)]
