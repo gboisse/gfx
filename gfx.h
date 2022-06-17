@@ -1633,6 +1633,7 @@ public:
         if(createResource(allocation_desc, resource_desc, resource_state, &gfx_buffer.allocation_, IID_PPV_ARGS(&gfx_buffer.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create buffer object of size %u MiB", (uint32_t)((size + 1024 * 1024 - 1) / (1024 * 1024)));
+            gfx_buffer.resource_ = nullptr; gfx_buffer.allocation_ = nullptr;
             destroyBuffer(buffer); buffer = {};
             return buffer;
         }
@@ -4277,7 +4278,7 @@ private:
             if(--*buffer.reference_count_ > 0)
                 return; // still in use
         }
-        if(buffer.isInterop() && command_list_ != nullptr && *buffer.resource_state_ != buffer.initial_resource_state_)
+        if(buffer.isInterop() && command_list_ != nullptr && buffer.resource_ != nullptr && buffer.resource_state_ != nullptr && *buffer.resource_state_ != buffer.initial_resource_state_)
         {
             D3D12_RESOURCE_BARRIER resource_barrier = {};
             resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
@@ -4295,7 +4296,7 @@ private:
 
     void collect(Texture const &texture)
     {
-        if(texture.isInterop() && command_list_ != nullptr && texture.resource_state_ != texture.initial_resource_state_)
+        if(texture.isInterop() && command_list_ != nullptr && texture.resource_ != nullptr && texture.resource_state_ != texture.initial_resource_state_)
         {
             D3D12_RESOURCE_BARRIER resource_barrier = {};
             resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
