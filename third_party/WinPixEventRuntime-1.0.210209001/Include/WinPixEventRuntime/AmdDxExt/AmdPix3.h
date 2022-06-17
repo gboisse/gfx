@@ -83,10 +83,7 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
                 {
                     // use the extension factory object to create a device extension object that contains the marker API
                     pAmdExtObject->CreateInterface(pDevice, __uuidof(IAmdExtD3DDevice1), reinterpret_cast<void**>(&tls_pAmdExtDeviceObject));
-                    pAmdExtObject->Release();
                 }
-
-                pDevice->Release();
             }
         }
     }
