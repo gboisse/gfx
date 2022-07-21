@@ -12,6 +12,9 @@ add_library(gfx STATIC gfx.cpp)
 set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc_2022_07_18)
 set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.210209001)
 
+set(GFX_DXC_PATH ${GFX_DXC_PATH} PARENT_SCOPE)
+set(GFX_PIX_PATH ${GFX_PIX_PATH} PARENT_SCOPE)
+
 target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_imgui.h gfx_scene.h gfx_window.h)
 
 target_include_directories(gfx PUBLIC ${GFX_DXC_PATH})
