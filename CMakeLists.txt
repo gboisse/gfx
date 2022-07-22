@@ -17,6 +17,8 @@ set(GFX_PIX_PATH ${GFX_PIX_PATH} PARENT_SCOPE)
 
 target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_imgui.h gfx_scene.h gfx_window.h)
 
+target_compile_options(gfx PRIVATE /bigobj)
+
 target_include_directories(gfx PUBLIC ${GFX_DXC_PATH})
 target_include_directories(gfx PUBLIC ${GFX_PIX_PATH}/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
