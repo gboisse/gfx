@@ -115,7 +115,7 @@ TYPE *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
 //! Texture resources.
 //!
 
-class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum TextureType { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; public:
+class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; public:
                    inline bool is2DArray() const { return type == kType_2DArray; }
                    inline bool isCube() const { return type == kType_Cube; }
                    inline bool is3D() const { return type == kType_3D; }
@@ -1429,7 +1429,8 @@ public:
         free(constant_buffer_pool_);
         free(constant_buffer_pool_cursors_);
 
-        for (std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it) {
+        for(std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it)
+        {
             destroyProgram((*it).second.mip_program_);
             destroyKernel((*it).second.mip_kernel_);
         }
@@ -2791,16 +2792,16 @@ public:
         if(!texture_handles_.has_handle(texture.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot generate mips of an invalid texture object");
         if(!texture.is2D() && !texture.is2DArray() && !texture.isCube())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot generate mips of a non-2D texture object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot generate mips of a 3D texture object");
         if(texture.mip_levels <= 1) return kGfxResult_NoError;  // nothing to generate
         GfxKernel const bound_kernel = bound_kernel_;
-        MipKernels const& mip_kernels = getMipKernels(texture.type, GetChannelCount(texture.format));
+        MipKernels const &mip_kernels = getMipKernels(texture);
         GFX_TRY(encodeBindKernel(mip_kernels.mip_kernel_));
         bool const isSRGB = IsSRGBFormat(texture.format);
         uint32_t elements = (texture.is2D()) ? 1 : texture.getDepth();
         uint32_t const* num_threads = getKernelNumThreads(mip_kernels.mip_kernel_);
         uint32_t const num_groups_z = (elements + num_threads[2] - 1) / num_threads[2];
-        for (uint32_t mip_level = 1; mip_level < texture.mip_levels; ++mip_level)
+        for(uint32_t mip_level = 1; mip_level < texture.mip_levels; ++mip_level)
         {
             setProgramTexture(mip_kernels.mip_program_, "InputBuffer", texture, mip_level - 1);
             setProgramTexture(mip_kernels.mip_program_, "OutputBuffer", texture, mip_level);
@@ -2808,7 +2809,7 @@ public:
             uint32_t const num_groups_x = (GFX_MAX(texture.width >> mip_level, 1u) + num_threads[0] - 1) / num_threads[0];
             uint32_t const num_groups_y = (GFX_MAX(texture.height >> mip_level, 1u) + num_threads[1] - 1) / num_threads[1];
             result = encodeDispatch(num_groups_x, num_groups_y, num_groups_z);
-            if (result != kGfxResult_NoError) break;
+            if(result != kGfxResult_NoError) break;
         }
         if(kernel_handles_.has_handle(bound_kernel.handle))
             encodeBindKernel(bound_kernel);
@@ -4139,7 +4140,8 @@ private:
 
     static inline uint32_t GetChannelCount(DXGI_FORMAT format)
     {
-        switch (format) {
+        switch(format)
+        {
         case DXGI_FORMAT_R8_TYPELESS:
         case DXGI_FORMAT_R8_UNORM:
         case DXGI_FORMAT_R8_UINT:
@@ -6174,13 +6176,16 @@ private:
         return kGfxResult_NoError;
     }
 
-    MipKernels const& getMipKernels(typename GfxTexture::TextureType texture_type, uint32_t channels)
+    MipKernels const &getMipKernels(GfxTexture const &texture)
     {
-        uint32_t const key = (texture_type << 2) | channels;
+        auto const texture_type = texture.type;
+        uint32_t const channels = GetChannelCount(texture.format);
+        uint32_t const key = ((texture_type << 2) | channels);  // lookup key
         std::map<uint32_t, MipKernels>::const_iterator const it = mip_kernels_.find(key);
-        if (it != mip_kernels_.end()) return (*it).second;  // already compiled
-        char const* texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr;
-        switch (texture_type) {
+        if(it != mip_kernels_.end()) return (*it).second;   // already compiled
+        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr;
+        switch(texture_type)
+        {
         case GfxTexture::kType_2D:
             texture_type_str = "RWTexture2D";
             did_type_str = "uint2";
@@ -6195,9 +6200,11 @@ private:
             did_type_str = "uint3";
             break;
         default:
-            GFX_ASSERT(false); //should never get here
+            GFX_ASSERT(0);
+            break;  // should never get here
         }
-        switch (channels) {
+        switch(channels)
+        {
         case 1:
             channel_type_str = "float";
             break;
@@ -6211,7 +6218,8 @@ private:
             channel_type_str = "float4";
             break;
         default:
-            GFX_ASSERT(false); //should never get here
+            GFX_ASSERT(0);
+            break;  // should never get here
         }
         std::string texture_type_combined = texture_type_str;
         texture_type_combined += '<';
@@ -6233,7 +6241,7 @@ private:
             "        return ";
         mip_program_source += channel_type_str;
         std::string val_string = "val";
-        if (channels == 4)
+        if(channels == 4)
             val_string += ".xyz";
         mip_program_source += '(';
         mip_program_source += val_string;
@@ -6242,7 +6250,7 @@ private:
         mip_program_source += " : 1.055f * pow(abs(";
         mip_program_source += val_string;
         mip_program_source += "), 1.0f / 2.4f) - 0.055f";
-        if (channels == 4)
+        if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
             "    else\r\n"
@@ -6263,7 +6271,7 @@ private:
         mip_program_source += " / 12.92f : pow((";
         mip_program_source += val_string;
         mip_program_source += " + 0.055f) / 1.055f, 2.4f)";
-        if (channels == 4)
+        if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
             "    else\r\n"
@@ -6280,7 +6288,7 @@ private:
         mip_program_source += " dims;\r\n"
             "    float w = 0.0f;\r\n"
             "    InputBuffer.GetDimensions(dims.x, dims.y";
-        if (texture_type != GfxTexture::kType_2D)
+        if(texture_type != GfxTexture::kType_2D)
             mip_program_source += ", dims.z";
         mip_program_source += ");\r\n"
             "    if(any(did.xy >= max(dims.xy >> 1, 1))) return;\r\n"
@@ -6288,11 +6296,11 @@ private:
         mip_program_source += channel_type_str;
         mip_program_source += " result = ";
         mip_program_source += "0.0f";
-        if (channels == 2)
+        if(channels == 2)
             mip_program_source += ".xx";
-        if (channels == 3)
+        if(channels == 3)
             mip_program_source += ".xxx";
-        if (channels == 4)
+        if(channels == 4)
             mip_program_source += ".xxxx";
         mip_program_source += "; \r\n"
             "    for(uint y = 0; y < 2; ++y)\r\n"
@@ -6301,7 +6309,7 @@ private:
             "            const uint2 pix = (did.xy << 1) + uint2(x, y);\r\n"
             "            if(any(pix >= dims.xy)) break; // out of bounds\r\n"
             "            result += convertToLinear(InputBuffer[";
-        if (texture_type != GfxTexture::kType_2D)
+        if(texture_type != GfxTexture::kType_2D)
             mip_program_source += "uint3(pix, did.z)";
         else
             mip_program_source += "pix";
