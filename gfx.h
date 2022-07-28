@@ -301,7 +301,7 @@ GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src)
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_offset, GfxBuffer src, uint64_t src_offset, uint64_t size);
 GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value = 0);
 
-GfxResult gfxCommandClearBackBuffer(GfxContext context);
+GfxResult gfxCommandClearBackBuffer(GfxContext context);    // clears to (0.0, 0.0, 0.0, 1.0)
 GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
@@ -1221,7 +1221,7 @@ public:
             for(; i < ARRAYSIZE(adapters); ++i)
                 if(!adapters[i]) break; else
                 if(SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
-                    break;
+                    break;  // we've got a valid device :)
             if(device_ == nullptr)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
