@@ -48,7 +48,7 @@ enum GfxCreateContextFlag
 };
 typedef uint32_t GfxCreateContextFlags;
 
-GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags = 0);
+GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags = 0, IDXGIAdapter *adapter = nullptr);
 GfxResult gfxDestroyContext(GfxContext context);
 
 uint32_t gfxGetBackBufferWidth(GfxContext context);
@@ -1108,7 +1108,7 @@ public:
                                  { gfx.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxInternal() { terminate(); }
 
-    GfxResult initialize(HWND window, GfxCreateContextFlags flags, GfxContext &context)
+    GfxResult initialize(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
         if(!window)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid window handle was supplied");
@@ -1129,73 +1129,104 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
-        IDXGIAdapter1 *adapters[8] = {};
         DXGI_ADAPTER_DESC1 adapter_desc = {};
-        uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
-        DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
-        for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+        if(adapter != nullptr)
         {
-            IDXGIAdapter1 *adapter = nullptr;
-            if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter)))
-                break;
-            uint32_t j, adapter_score;
-            adapter->GetDesc1(&adapter_desc);
-            if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
-                adapter_score = 0;
-            else
-                switch(adapter_desc.VendorId)
-                {
-                case 0x1002u:   // AMD
-                    adapter_score = 3;
-                    break;
-                case 0x10DEu:   // NVIDIA
-                    adapter_score = 2;
-                    break;
-                default:
-                    adapter_score = 1;
-                    break;
-                }
-            for(j = 0; j < i; ++j)
-                if(adapter_score > adapter_scores[j] ||
-                  (adapter_score == adapter_scores[j] && adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory))
-                    break;
-            for(uint32_t k = i; k > j; --k)
+            IDXGIAdapter1 *adapter1 = nullptr;
+
+            struct DXGIRelease
             {
-                adapters[k] = adapters[k - 1];
-                adapter_descs[k] = adapter_descs[k - 1];
-                adapter_scores[k] = adapter_scores[k - 1];
-            }
-            adapters[j] = adapter;
-            adapter_descs[j] = adapter_desc;
-            adapter_scores[j] = adapter_score;
-        }
+                GFX_NON_COPYABLE(DXGIRelease);
+                IDXGIFactory4 *factory; IDXGIAdapter1 *adapter;
+                DXGIRelease(IDXGIFactory4 *factory, IDXGIAdapter1 *adapter) : factory(factory), adapter(adapter) {}
+                ~DXGIRelease() { factory->Release(); if(adapter) adapter->Release(); }
+            };
+            DXGIRelease const scope(factory, adapter1);
 
-        struct DXGIRelease
-        {
-            GFX_NON_COPYABLE(DXGIRelease);
-            IDXGIFactory4 *factory; IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)];
-            DXGIRelease(IDXGIFactory4 *factory, IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)]) : factory(factory), adapters(adapters) {}
-            ~DXGIRelease() { factory->Release(); for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i) if(adapters[i]) adapters[i]->Release(); }
-        };
-        DXGIRelease const scope(factory, adapters);
-
-        uint32_t i = 0;
-        for(; i < ARRAYSIZE(adapters); ++i)
-            if(!adapters[i]) break; else
-            if(SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
-                break;
-        if(device_ == nullptr)
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
-        if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
-            device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
-            if(!SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+            adapter->QueryInterface(IID_PPV_ARGS(&adapter1));
+            if(adapter1 == nullptr)
+                return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
+            if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
+            if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
+            {
+                GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
+                device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
+                if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+                    return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
+            }
+            adapter1->GetDesc1(&adapter_desc);
         }
+        else
+        {
+            IDXGIAdapter1 *adapters[8] = {};
+            uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
+            DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
+            for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+            {
+                IDXGIAdapter1 *adapter1 = nullptr;
+                if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
+                    break;
+                uint32_t j, adapter_score;
+                adapter1->GetDesc1(&adapter_desc);
+                if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+                    adapter_score = 0;
+                else
+                    switch(adapter_desc.VendorId)
+                    {
+                    case 0x1002u:   // AMD
+                        adapter_score = 3;
+                        break;
+                    case 0x10DEu:   // NVIDIA
+                        adapter_score = 2;
+                        break;
+                    default:
+                        adapter_score = 1;
+                        break;
+                    }
+                for(j = 0; j < i; ++j)
+                    if(adapter_score > adapter_scores[j] ||
+                      (adapter_score == adapter_scores[j] && adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory))
+                        break;
+                for(uint32_t k = i; k > j; --k)
+                {
+                    adapters[k] = adapters[k - 1];
+                    adapter_descs[k] = adapter_descs[k - 1];
+                    adapter_scores[k] = adapter_scores[k - 1];
+                }
+                adapters[j] = adapter1;
+                adapter_descs[j] = adapter_desc;
+                adapter_scores[j] = adapter_score;
+            }
+
+            struct DXGIRelease
+            {
+                GFX_NON_COPYABLE(DXGIRelease);
+                IDXGIFactory4 *factory; IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)];
+                DXGIRelease(IDXGIFactory4 *factory, IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)]) : factory(factory), adapters(adapters) {}
+                ~DXGIRelease() { factory->Release(); for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i) if(adapters[i]) adapters[i]->Release(); }
+            };
+            DXGIRelease const scope(factory, adapters);
+
+            uint32_t i = 0;
+            for(; i < ARRAYSIZE(adapters); ++i)
+                if(!adapters[i]) break; else
+                if(SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+                    break;
+            if(device_ == nullptr)
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
+            if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
+            {
+                GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
+                device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
+                if(!SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+                    return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
+            }
+            adapters[i]->GetDesc1(&adapter_desc);
+        }
+
         debug_shaders_ = ((flags & kGfxCreateContextFlag_EnableShaderDebugging) != 0);
         device_->QueryInterface(IID_PPV_ARGS(&dxr_device_));
-        adapters[i]->GetDesc1(&adapter_desc);
         SetDebugName(device_, "gfx_Device");
 
         D3D12_COMMAND_QUEUE_DESC
@@ -7443,14 +7474,14 @@ char const *GfxInternal::shader_extensions_[] =
 GfxArray<GfxInternal::DrawState> GfxInternal::draw_states_;
 GfxHandles                       GfxInternal::draw_state_handles_("draw state");
 
-GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags)
+GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter)
 {
     GfxResult result;
     GfxContext context = {};
     if(!window) return context; // invalid param
     GfxInternal *gfx = new GfxInternal(context);
     if(!gfx) return context;    // out of memory
-    result = gfx->initialize(window, flags, context);
+    result = gfx->initialize(window, flags, adapter, context);
     if(result != kGfxResult_NoError)
     {
         delete gfx;

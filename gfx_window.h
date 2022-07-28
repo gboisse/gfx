@@ -40,7 +40,8 @@ class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; pu
 
 enum GfxCreateWindowFlag
 {
-    kGfxCreateWindowFlag_MaximizeWindow = 1 << 0
+    kGfxCreateWindowFlag_MaximizeWindow = 1 << 0,
+    kGfxCreateWindowFlag_HideWindow     = 1 << 1
 };
 typedef uint32_t GfxCreateWindowFlags;
 
@@ -121,7 +122,9 @@ public:
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
 
-        ShowWindow(window_, (flags & kGfxCreateWindowFlag_MaximizeWindow) != 0 ? SW_SHOWMAXIMIZED : SW_SHOWDEFAULT);
+        ShowWindow(window_, (flags & kGfxCreateWindowFlag_MaximizeWindow) != 0 ? SW_SHOWMAXIMIZED :
+                            (flags & kGfxCreateWindowFlag_HideWindow    ) != 0 ? SW_HIDE          :
+                                                                                 SW_SHOWDEFAULT);
 
         window.hwnd = window_;
 
