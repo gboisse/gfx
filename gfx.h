@@ -1129,19 +1129,28 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
+        struct DXGIFactoryReleaser
+        {
+            IDXGIFactory4 *factory;
+            GFX_NON_COPYABLE(DXGIFactoryReleaser);
+            DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
+            ~DXGIFactoryReleaser() { factory->Release(); }
+        };
+        DXGIFactoryReleaser const factory_releaser(factory);
+
         DXGI_ADAPTER_DESC1 adapter_desc = {};
         if(adapter != nullptr)
         {
             IDXGIAdapter1 *adapter1 = nullptr;
 
-            struct DXGIRelease
+            struct DXGIAdapterReleaser
             {
-                GFX_NON_COPYABLE(DXGIRelease);
-                IDXGIFactory4 *factory; IDXGIAdapter1 *adapter;
-                DXGIRelease(IDXGIFactory4 *factory, IDXGIAdapter1 *adapter) : factory(factory), adapter(adapter) {}
-                ~DXGIRelease() { factory->Release(); if(adapter) adapter->Release(); }
+                IDXGIAdapter1 *adapter;
+                GFX_NON_COPYABLE(DXGIAdapterReleaser);
+                DXGIAdapterReleaser(IDXGIAdapter1 *adapter) : adapter(adapter) {}
+                ~DXGIAdapterReleaser() { if(adapter) adapter->Release(); }
             };
-            DXGIRelease const scope(factory, adapter1);
+            DXGIAdapterReleaser const adapter_releaser(adapter1);
 
             adapter->QueryInterface(IID_PPV_ARGS(&adapter1));
             if(adapter1 == nullptr)
@@ -1199,14 +1208,14 @@ public:
                 adapter_scores[j] = adapter_score;
             }
 
-            struct DXGIRelease
+            struct DXGIAdapterReleaser
             {
-                GFX_NON_COPYABLE(DXGIRelease);
-                IDXGIFactory4 *factory; IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)];
-                DXGIRelease(IDXGIFactory4 *factory, IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)]) : factory(factory), adapters(adapters) {}
-                ~DXGIRelease() { factory->Release(); for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i) if(adapters[i]) adapters[i]->Release(); }
+                GFX_NON_COPYABLE(DXGIAdapterReleaser);
+                IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)];
+                DXGIAdapterReleaser(IDXGIAdapter1 *(&adapters)[ARRAYSIZE(adapters)]) : adapters(adapters) {}
+                ~DXGIAdapterReleaser() { for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i) if(adapters[i]) adapters[i]->Release(); }
             };
-            DXGIRelease const scope(factory, adapters);
+            DXGIAdapterReleaser const adapter_releaser(adapters);
 
             uint32_t i = 0;
             for(; i < ARRAYSIZE(adapters); ++i)
@@ -1224,7 +1233,6 @@ public:
             }
             adapters[i]->GetDesc1(&adapter_desc);
         }
-
         debug_shaders_ = ((flags & kGfxCreateContextFlag_EnableShaderDebugging) != 0);
         device_->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         SetDebugName(device_, "gfx_Device");
