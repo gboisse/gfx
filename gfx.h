@@ -1152,8 +1152,8 @@ public:
             };
             DXGIAdapterReleaser const adapter_releaser(adapter1);
 
-            adapter->QueryInterface(IID_PPV_ARGS(&adapter1));
-            if(adapter1 == nullptr)
+            DXGI_ADAPTER_DESC desc = {}; adapter->GetDesc(&desc);
+            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter1))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
             if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
