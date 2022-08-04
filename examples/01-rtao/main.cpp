@@ -174,9 +174,18 @@ int32_t main()
         gfxWindowPumpEvents(window);
 
         // Show the GUI options
-        if(ImGui::Begin("gfx - rtao"))
+        if(ImGui::Begin("gfx - rtao", nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings))
         {
-            ImGui::DragFloat("AO radius", &ao_radius, 1e-2f, 0.0f, 10.0f, "%.2f");
+            if(gfxIsRaytracingSupported(gfx))
+            {
+                ImGui::DragFloat("AO radius", &ao_radius, 1e-2f, 0.0f, 10.0f, "%.2f");
+            }
+            else
+            {
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.2f, 0.0f, 1.0f));
+                ImGui::Text("Raytracing isn't supported on device `%s'", gfx.getName());
+                ImGui::PopStyleColor();
+            }
         }
         ImGui::End();
 
