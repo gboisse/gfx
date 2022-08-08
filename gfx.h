@@ -6282,13 +6282,13 @@ private:
         std::string val_string = "val";
         if(channels == 4)
             val_string += ".xyz";
-        mip_program_source += '(';
+        mip_program_source += "(select(";
         mip_program_source += val_string;
-        mip_program_source += " < 0.0031308f ? 12.92f * ";
+        mip_program_source += " < 0.0031308f, 12.92f * ";
         mip_program_source += val_string;
-        mip_program_source += " : 1.055f * pow(abs(";
+        mip_program_source += ", 1.055f * pow(abs(";
         mip_program_source += val_string;
-        mip_program_source += "), 1.0f / 2.4f) - 0.055f";
+        mip_program_source += "), 1.0f / 2.4f) - 0.055f)";
         if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
@@ -6303,13 +6303,13 @@ private:
             "    if(isSRGB)\r\n"
             "        return ";
         mip_program_source += channel_type_str;
-        mip_program_source += '(';
+        mip_program_source += "(select(";
         mip_program_source += val_string;
-        mip_program_source += " < 0.04045f ? ";
+        mip_program_source += " < 0.04045f, ";
         mip_program_source += val_string;
-        mip_program_source += " / 12.92f : pow((";
+        mip_program_source += " / 12.92f, pow((";
         mip_program_source += val_string;
-        mip_program_source += " + 0.055f) / 1.055f, 2.4f)";
+        mip_program_source += " + 0.055f) / 1.055f, 2.4f))";
         if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
@@ -7158,6 +7158,7 @@ private:
         shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+        shader_args.push_back(L"-HV 2021");
         if(debug_shaders_)
         {
             shader_args.push_back(DXC_ARG_DEBUG);
