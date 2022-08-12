@@ -225,6 +225,7 @@ struct GfxImage
     uint32_t    channel_count     = 0;
     uint32_t    bytes_per_channel = 0;
     DXGI_FORMAT format            = DXGI_FORMAT_UNKNOWN;
+    bool        mips              = false;
     uint32_t    flags             = 0;
 
     std::vector<uint8_t> data;
@@ -244,22 +245,22 @@ GfxMetadata const &gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handl
 //! Image helpers.
 //!
 
-inline DXGI_FORMAT gfxImageGetFormat(GfxImage const &image)
+inline bool gfxImageIsFormatCompressed(GfxImage const& image)
 {
-    if(image.bytes_per_channel != 1 && image.bytes_per_channel != 2 && image.bytes_per_channel != 4) return DXGI_FORMAT_UNKNOWN;
-    uint32_t const bits = (image.bytes_per_channel << 3);
-    switch(image.channel_count)
-    {
-    case 1:
-        return (bits == 8 ? DXGI_FORMAT_R8_UNORM       : bits == 16 ? DXGI_FORMAT_R16_UNORM          : DXGI_FORMAT_R32_FLOAT         );
-    case 2:
-        return (bits == 8 ? DXGI_FORMAT_R8G8_UNORM     : bits == 16 ? DXGI_FORMAT_R16G16_UNORM       : DXGI_FORMAT_R32G32_FLOAT      );
-    case 4:
-        return (bits == 8 ? DXGI_FORMAT_R8G8B8A8_UNORM : bits == 16 ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R32G32B32A32_FLOAT);
-    default:
-        break;
+    if (image.format == DXGI_FORMAT_BC1_TYPELESS || image.format == DXGI_FORMAT_BC1_UNORM ||
+        image.format == DXGI_FORMAT_BC1_UNORM_SRGB || image.format == DXGI_FORMAT_BC2_TYPELESS ||
+        image.format == DXGI_FORMAT_BC2_UNORM || image.format == DXGI_FORMAT_BC2_UNORM_SRGB ||
+        image.format == DXGI_FORMAT_BC3_TYPELESS || image.format == DXGI_FORMAT_BC3_UNORM ||
+        image.format == DXGI_FORMAT_BC3_UNORM_SRGB || image.format == DXGI_FORMAT_BC4_TYPELESS ||
+        image.format == DXGI_FORMAT_BC4_UNORM || image.format == DXGI_FORMAT_BC4_SNORM ||
+        image.format == DXGI_FORMAT_BC5_TYPELESS || image.format == DXGI_FORMAT_BC5_UNORM ||
+        image.format == DXGI_FORMAT_BC5_SNORM || image.format == DXGI_FORMAT_BC6H_TYPELESS ||
+        image.format == DXGI_FORMAT_BC6H_UF16 || image.format == DXGI_FORMAT_BC6H_SF16 ||
+        image.format == DXGI_FORMAT_BC7_TYPELESS || image.format == DXGI_FORMAT_BC7_UNORM ||
+        image.format == DXGI_FORMAT_BC7_UNORM_SRGB)             {
+        return true;
     }
-    return DXGI_FORMAT_UNKNOWN;
+    return false;
 }
 
 //!
@@ -415,13 +416,16 @@ template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene sc
 
 #pragma once
 
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define TINYGLTF_NO_STB_IMAGE_WRITE
-#include <map>                  // std::map
-#include <set>                  // std::set
-#include "tiny_gltf.h"          // glTF loader
+#include <map>
+#include <set>
+#include <functional>
+#define CGLTF_IMPLEMENTATION
+#include "cgltf.h"              // glTF loader
 #include "tiny_obj_loader.cc"   // obj loader
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+#include "ktx.h"
+#include "vulkan/vulkan.h"
 #include "glm/gtx/quaternion.hpp"
 
 class GfxSceneInternal
@@ -598,6 +602,9 @@ public:
             GFX_TRY(importGltf(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".hdr"))
             GFX_TRY(importHdr(scene, asset_file));
+        else if(CaseInsensitiveCompare(asset_extension, ".ktx2") ||
+            CaseInsensitiveCompare(asset_extension, ".ktx"))
+            GFX_TRY(importKtx(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||
                 CaseInsensitiveCompare(asset_extension, ".png") ||
                 CaseInsensitiveCompare(asset_extension, ".tga") ||
@@ -956,9 +963,58 @@ private:
 
         position = transform * position;
         direction = transform * direction;
-                
+
         light.position = glm::vec3(position / position.w);
         light.direction = glm::vec3(direction);
+    }
+
+    static inline DXGI_FORMAT GetImageFormat(GfxImage const& image)
+    {
+        if(image.format != DXGI_FORMAT_UNKNOWN) return image.format;
+        if(image.bytes_per_channel != 1 && image.bytes_per_channel != 2 && image.bytes_per_channel != 4) return DXGI_FORMAT_UNKNOWN;
+        uint32_t const bits = (image.bytes_per_channel << 3);
+        switch(image.channel_count) {
+        case 1:
+            return (bits == 8 ? DXGI_FORMAT_R8_UNORM : bits == 16 ? DXGI_FORMAT_R16_UNORM : DXGI_FORMAT_R32_FLOAT);
+        case 2:
+            return (bits == 8 ? DXGI_FORMAT_R8G8_UNORM : bits == 16 ? DXGI_FORMAT_R16G16_UNORM : DXGI_FORMAT_R32G32_FLOAT);
+        case 4:
+            return (bits == 8 ? DXGI_FORMAT_R8G8B8A8_UNORM : bits == 16 ? DXGI_FORMAT_R16G16B16A16_UNORM : DXGI_FORMAT_R32G32B32A32_FLOAT);
+        default:
+            break;
+        }
+        return DXGI_FORMAT_UNKNOWN;
+    }
+
+    static inline DXGI_FORMAT ConvertImageFormatSRGB(const DXGI_FORMAT format)
+    {
+        switch(format)
+        {
+        case DXGI_FORMAT_R8G8B8A8_UNORM: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        case DXGI_FORMAT_BC1_UNORM: return DXGI_FORMAT_BC1_UNORM_SRGB;
+        case DXGI_FORMAT_BC2_UNORM: return DXGI_FORMAT_BC2_UNORM_SRGB;
+        case DXGI_FORMAT_BC3_UNORM: return DXGI_FORMAT_BC3_UNORM_SRGB;
+        case DXGI_FORMAT_BC7_UNORM: return DXGI_FORMAT_BC7_UNORM_SRGB;
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS: return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS: return DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
+        default:
+            return format;
+        }
+    }
+
+    static inline DXGI_FORMAT ConvertImageFormatLinear(const DXGI_FORMAT format)
+    {
+        switch (format) {
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM;
+        case DXGI_FORMAT_BC1_UNORM_SRGB: return DXGI_FORMAT_BC1_UNORM;
+        case DXGI_FORMAT_BC2_UNORM_SRGB: return DXGI_FORMAT_BC2_UNORM;
+        case DXGI_FORMAT_BC3_UNORM_SRGB: return DXGI_FORMAT_BC3_UNORM;
+        case DXGI_FORMAT_BC7_UNORM_SRGB: return DXGI_FORMAT_BC7_UNORM;
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8A8_TYPELESS;
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8X8_TYPELESS;
+        default:
+            return format;
+        }
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1110,324 +1166,124 @@ private:
         return kGfxResult_NoError;
     }
 
-    struct GltfBuffer
-    {
-        uint32_t type_;
-        uint32_t count_;
-        uint32_t stride_;
-        uint32_t normalize_;
-        uint8_t const *data_;
-        uint32_t component_type_;
-    };
-
-    template<typename TYPE>
-    struct GltfComponent {};
-
-    template<> struct GltfComponent<float>    { typedef float    Type; };
-    template<> struct GltfComponent<int32_t>  { typedef int32_t  Type; };
-    template<> struct GltfComponent<uint32_t> { typedef uint32_t Type; };
-
-    template<> struct GltfComponent<glm::vec2> { typedef float Type; };
-    template<> struct GltfComponent<glm::vec3> { typedef float Type; };
-    template<> struct GltfComponent<glm::vec4> { typedef float Type; };
-
-    template<> struct GltfComponent<glm::mat2> { typedef float Type; };
-    template<> struct GltfComponent<glm::mat3> { typedef float Type; };
-    template<> struct GltfComponent<glm::mat4> { typedef float Type; };
-
-    template<typename TYPE>
-    TYPE ReadAs(GltfBuffer const &buffer, uint32_t index)
-    {
-        TYPE value = {};
-        if(index >= buffer.count_) return value;
-        using ComponentType = GltfComponent<TYPE>::Type;
-        uint8_t const *data = (buffer.data_ + index * buffer.stride_);
-        uint32_t const num_components = tinygltf::GetNumComponentsInType(buffer.type_);
-        uint32_t const component_size = tinygltf::GetComponentSizeInBytes(buffer.component_type_);
-        GFX_ASSERT((buffer.type_ != TINYGLTF_TYPE_MAT2 || component_size != 1) &&
-                   (buffer.type_ != TINYGLTF_TYPE_MAT3 || component_size != 1) &&
-                   (buffer.type_ != TINYGLTF_TYPE_MAT3 || component_size != 2));    // unsupported alignment
-        for(uint32_t i = 0; i < num_components; ++i)
-        {
-            if((i + 1) * component_size > buffer.stride_) break;
-            if((i + 1) * sizeof(ComponentType) > sizeof(TYPE)) break;
-            ComponentType &output = ((ComponentType *)((void *)&value))[i];
-            switch(buffer.component_type_)
-            {
-            case TINYGLTF_COMPONENT_TYPE_BYTE:
-                {
-                    int8_t const t = ((int8_t *)data)[i];
-                    if(buffer.normalize_) output = (ComponentType)GFX_MAX(t / 127.0, -1.0);
-                                     else output = (ComponentType)(t);
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE:
-                {
-                    uint8_t const t = ((uint8_t *)data)[i];
-                    if(buffer.normalize_) output = (ComponentType)(t / 255.0);
-                                     else output = (ComponentType)(t);
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_SHORT:
-                {
-                    int16_t const t = ((int16_t *)data)[i];
-                    if(buffer.normalize_) output = (ComponentType)GFX_MAX(t / 32727.0, -1.0);
-                                     else output = (ComponentType)(t);
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-                {
-                    uint16_t const t = ((uint16_t *)data)[i];
-                    if(buffer.normalize_) output = (ComponentType)(t / 65535.0);
-                                     else output = (ComponentType)(t);
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_INT:
-                {
-                    GFX_ASSERT(!buffer.normalize_);
-                    output = (ComponentType)((int32_t *)data)[i];
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-                {
-                    GFX_ASSERT(!buffer.normalize_);
-                    output = (ComponentType)((uint32_t *)data)[i];
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_FLOAT:
-                {
-                    GFX_ASSERT(!buffer.normalize_);
-                    output = (ComponentType)((float *)data)[i];
-                }
-                break;
-            case TINYGLTF_COMPONENT_TYPE_DOUBLE:
-                {
-                    GFX_ASSERT(!buffer.normalize_);
-                    output = (ComponentType)((double *)data)[i];
-                }
-                break;
-            default:
-                GFX_ASSERT(0);
-                break;  // unsupported component type
-            }
-        }
-        return value;
-    }
-
     GfxResult importGltf(GfxScene const &scene, char const *asset_file)
     {
-        bool result;
-        tinygltf::Model gltf_model;
-        std::string errors, warnings;
-        tinygltf::TinyGLTF gltf_reader;
-        gltf_reader.SetPreserveImageChannels(true);
         GFX_ASSERT(asset_file != nullptr);
-        char const *asset_extension = strrchr(asset_file, '.');
-        GFX_ASSERT(asset_extension != nullptr);
-        if(CaseInsensitiveCompare(asset_extension, ".glb"))
-            result = gltf_reader.LoadBinaryFromFile(&gltf_model, &errors, &warnings, asset_file);
-        else
-            result = gltf_reader.LoadASCIIFromFile(&gltf_model, &errors, &warnings, asset_file);
-        if(!result)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to load gltf file `%s'", errors.c_str());
-        if(!warnings.empty())
-            GFX_PRINTLN("Parsed gltf file `%s' with warnings:\r\n%s", asset_file, warnings.c_str());
-        if(gltf_model.scenes.empty())
+        cgltf_options options;
+        memset(&options, 0, sizeof(cgltf_options));
+        cgltf_data *gltf_model = nullptr;
+        cgltf_result result = cgltf_parse_file(&options, asset_file, &gltf_model);
+        if(result != cgltf_result_success) {
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to parse gltf file `%s'", asset_file);
+        }
+        result = cgltf_load_buffers(&options, gltf_model, asset_file);
+        if (result != cgltf_result_success) {
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to load gltf file `%s'", asset_file);
+        }
+#ifndef NDEBUG
+        if (cgltf_validate(gltf_model) != cgltf_result_success) {
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Invalid gltf file `%s'", asset_file);
+        }
+#endif
+        if(gltf_model->scenes_count == 0)
             return kGfxResult_NoError;  // nothing needs loading
-        std::map<int32_t, GfxConstRef<GfxCamera>> cameras;
-        for(size_t i = 0; i < gltf_model.cameras.size(); ++i)
+        std::map<cgltf_camera const*, GfxConstRef<GfxCamera>> cameras;
+        for(size_t i = 0; i < gltf_model->cameras_count; ++i)
         {
-            tinygltf::Camera const &gltf_camera = gltf_model.cameras[i];
-            if(gltf_camera.type != "perspective") continue; // unsupported camera type
-            tinygltf::PerspectiveCamera const &gltf_perspective_camera = gltf_camera.perspective;
+            cgltf_camera const &gltf_camera = gltf_model->cameras[i];
+            if(gltf_camera.type != cgltf_camera_type_perspective) continue; // unsupported camera type
+            cgltf_camera_perspective const &gltf_perspective_camera = gltf_camera.data.perspective;
             GfxRef<GfxCamera> camera_ref = gfxSceneCreateCamera(scene);
             GfxCamera &camera = *camera_ref;
             camera.type = kGfxCameraType_Perspective;
             TransformGltfCamera(camera, glm::dmat4(1.0));
-            camera.aspect = (float)gltf_perspective_camera.aspectRatio;
-            camera.fovY   = (float)gltf_perspective_camera.yfov;
-            camera.nearZ  = (float)gltf_perspective_camera.znear;
-            camera.farZ   = (float)gltf_perspective_camera.zfar;
+            camera.aspect = gltf_perspective_camera.has_aspect_ratio ? gltf_perspective_camera.aspect_ratio : 1.0f;
+            camera.fovY   = gltf_perspective_camera.yfov;
+            camera.nearZ  = gltf_perspective_camera.znear;
+            camera.farZ   = gltf_perspective_camera.zfar;
             GfxMetadata &camera_metadata = camera_metadata_[camera_ref];
             camera_metadata.asset_file = asset_file;    // set up metadata
-            camera_metadata.object_name = gltf_camera.name;
-            cameras[(int32_t)i] = camera_ref;
+            camera_metadata.object_name = (gltf_camera.name != nullptr) ? gltf_camera.name : "Camera" + std::to_string(i);
+            cameras[&gltf_camera] = camera_ref;
         }
-        std::map<int32_t, GfxConstRef<GfxLight>> lights;
-        for(size_t i = 0; i < gltf_model.lights.size(); ++i)
+        std::map<cgltf_light const*, GfxConstRef<GfxLight>> lights;
+        for(size_t i = 0; i < gltf_model->lights_count; ++i)
         {
-            tinygltf::Light const& gltf_light = gltf_model.lights[i];
+            cgltf_light const &gltf_light = gltf_model->lights[i];
             GfxRef<GfxLight> light_ref = gfxSceneCreateLight(scene);
-            GfxLight& light = *light_ref;
-            light.color = glm::vec3((float)gltf_light.color[0], (float)gltf_light.color[1], (float)gltf_light.color[2]);
-            light.intensity = (float)gltf_light.intensity;
-            light.range = gltf_light.range > 0.0 ? (float)gltf_light.range : FLT_MAX;
-            light.type = gltf_light.type == "point" ? kGfxLightType_Point : (gltf_light.type == "spot" ? kGfxLightType_Spot : kGfxLightType_Directional);
+            GfxLight &light = *light_ref;
+            light.color = glm::vec3(gltf_light.color[0], gltf_light.color[1], gltf_light.color[2]);
+            light.intensity = gltf_light.intensity;
+            light.range = gltf_light.range > 0.0 ? gltf_light.range : FLT_MAX;
+            light.type = gltf_light.type == cgltf_light_type_point ? kGfxLightType_Point :
+                (gltf_light.type == cgltf_light_type_spot ? kGfxLightType_Spot : kGfxLightType_Directional);
             if(light.type == kGfxLightType_Spot)
             {
-                light.inner_cone_angle = (float)gltf_light.spot.innerConeAngle;
-                light.outer_cone_angle = (float)gltf_light.spot.outerConeAngle;
+                light.inner_cone_angle = gltf_light.spot_inner_cone_angle;
+                light.outer_cone_angle = gltf_light.spot_outer_cone_angle;
             }
             TransformGltfLight(light, glm::dmat4(1.0));
-            GfxMetadata& light_metadata = light_metadata_[light_ref];
+            GfxMetadata &light_metadata = light_metadata_[light_ref];
             light_metadata.asset_file = asset_file;    // set up metadata
-            light_metadata.object_name = gltf_light.name;
-            lights[(int32_t)i] = light_ref;
+            light_metadata.object_name = (gltf_light.name != nullptr) ? gltf_light.name : "Light" + std::to_string(i);
+            lights[&gltf_light] = light_ref;
         }
-        std::map<int32_t, GfxConstRef<GfxImage>> images;
-        for(size_t i = 0; i < gltf_model.textures.size(); ++i)
+        std::map<cgltf_image const*, GfxConstRef<GfxImage>> images;
+        for(size_t i = 0; i < gltf_model->textures_count; ++i)
         {
-            tinygltf::Texture const &gltf_texture = gltf_model.textures[i];
-            if(gltf_texture.source < 0 || gltf_texture.source >= (int32_t)gltf_model.images.size()) continue;
-            tinygltf::Image const &gltf_image = gltf_model.images[gltf_texture.source];
-            if(gltf_image.image.empty()) continue;  // failed to load image
-            if(gltf_image.bits != 8 && gltf_image.bits != 16) continue;
-            char const *image_name = gltf_texture.name.c_str();
-            std::string image_file = asset_file;
-            if(!gltf_image.uri.empty())
-            {
-                char const *filename = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '//'));
-                image_file = (filename != nullptr ? std::string(asset_file, 0, filename - asset_file) : std::string(""));
-                if(!image_file.empty() && image_file.back() != '/' && image_file.back() != '\\') image_file += '/';
-                filename = GFX_MAX(strrchr(gltf_image.uri.c_str(), '/'), strrchr(gltf_image.uri.c_str(), '//'));
-                image_name  = (filename != nullptr ? filename + 1 : gltf_image.uri.c_str());
-                image_file += gltf_image.uri.c_str();
-            }
-            GfxRef<GfxImage> image_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
-            if(!image_ref)
-            {
-                image_ref = gfxSceneCreateImage(scene);
-                image_ref->width = (uint32_t)gltf_image.width;
-                image_ref->height = (uint32_t)gltf_image.height;
-                image_ref->channel_count = (uint32_t)(gltf_image.component == 3 ? 4 : gltf_image.component);
-                image_ref->bytes_per_channel = (((uint32_t)gltf_image.bits) >> 3);
-                image_ref->format = gfxImageGetFormat(*image_ref);
-                image_ref->data.resize((size_t)image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel);
-                uint32_t const resolved_channel_count = image_ref->channel_count;
-                switch(gltf_image.bits)
-                {
-                case 8:
-                    {
-                        uint8_t const *image_data = gltf_image.image.data();
-                        uint8_t *data = image_ref->data.data();
-                        uint8_t alpha_check = 255;  // check alpha
-                        for(int32_t y = 0; y < gltf_image.height; ++y)
-                            for(int32_t x = 0; x < gltf_image.width; ++x)
-                                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
-                                {
-                                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * gltf_image.width) + k;
-                                    int32_t const src_index = gltf_image.component * (x + y * gltf_image.width) + k;
-                                    uint8_t const source = (k < gltf_image.component ? image_data[src_index] : (uint8_t)255);
-                                    if(k == 3) alpha_check &= source;
-                                    data[dst_index] = source;
-                                }
-                        image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_AlphaChannel);
-                    }
-                    break;
-                case 16:
-                    {
-                        uint16_t const *image_data = (uint16_t const *)gltf_image.image.data();
-                        uint16_t *data = (uint16_t *)image_ref->data.data();
-                        uint16_t alpha_check = 65535;   // check alpha
-                        for(int32_t y = 0; y < gltf_image.height; ++y)
-                            for(int32_t x = 0; x < gltf_image.width; ++x)
-                                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
-                                {
-                                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * gltf_image.width) + k;
-                                    int32_t const src_index = gltf_image.component * (x + y * gltf_image.width) + k;
-                                    uint16_t const source = (k < gltf_image.component ? image_data[src_index] : (uint16_t)65535);
-                                    if(k == 3) alpha_check &= source;
-                                    data[dst_index] = source;
-                                }
-                        image_ref->flags = (alpha_check == 65535 ? 0 : kGfxImageFlag_AlphaChannel);
-                    }
-                    break;
-                default:
-                    GFX_ASSERT(0);
-                    break;  // should never happen
-                }
-                GfxMetadata &image_metadata = image_metadata_[image_ref];
-                image_metadata.asset_file = image_file; // set up metadata
-                image_metadata.object_name = image_name;
-            }
-            images[(int32_t)i] = image_ref;
+            cgltf_texture const &gltf_texture = gltf_model->textures[i];
+            if(gltf_texture.image == nullptr && gltf_texture.basisu_image == nullptr)
+                continue;
+            cgltf_image const *gltf_image = gltf_texture.has_basisu ? gltf_texture.basisu_image : gltf_texture.image;
+            GfxRef<GfxImage> image_ref;
+            if(gltf_image->uri == nullptr) continue; // no image to be loaded
+            char const *filename = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '//'));
+            std::string image_folder = (filename != nullptr ? std::string(asset_file, 0, filename - asset_file) : std::string(""));
+            if(!image_folder.empty() && image_folder.back() != '/' && image_folder.back() != '\\') image_folder += '/';
+            std::string image_file = image_folder + gltf_image->uri;
+            if(gfxSceneImport(scene, image_file.c_str()) != kGfxResult_NoError)
+                continue; // unable to load image file
+            image_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
+            images[gltf_image] = image_ref;
         }
-        auto const GetParameter = [&](tinygltf::Material const &gltf_material, char const *parameter_name) -> std::pair<bool, glm::vec4>
+        std::map<cgltf_material const*, GfxConstRef<GfxMaterial>> materials;
+        std::map<cgltf_image const*, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
+        for(size_t i = 0; i < gltf_model->materials_count; ++i)
         {
-            std::pair<bool, glm::vec4> parameter = std::pair<bool, glm::vec4>(false, glm::vec4(0.0f));
-            tinygltf::ParameterMap::const_iterator it = gltf_material.values.find(parameter_name);
-            if(it == gltf_material.values.end())
-            {
-                it = gltf_material.additionalValues.find(parameter_name);
-                if(it == gltf_material.additionalValues.end())
-                    return parameter;   // not found
-            }
-            if(!(*it).second.number_array.empty())
-                parameter.second = glm::vec4(                                       (float)(*it).second.number_array[0],
-                                             (*it).second.number_array.size() > 1 ? (float)(*it).second.number_array[1] : 1.0f,
-                                             (*it).second.number_array.size() > 2 ? (float)(*it).second.number_array[2] : 1.0f,
-                                             (*it).second.number_array.size() > 3 ? (float)(*it).second.number_array[3] : 1.0f);
-            else if(!(*it).second.has_number_value)
-                return parameter;   // not found
-            else
-                parameter.second = glm::vec4((float)(*it).second.number_value);
-            parameter.first = true;
-            return parameter;
-        };
-        auto const GetTextureIndex = [&](tinygltf::Material const &gltf_material, char const *texture_name) -> int32_t
-        {
-            tinygltf::ParameterMap::const_iterator it = gltf_material.values.find(texture_name);
-            if(it == gltf_material.values.end())
-            {
-                it = gltf_material.additionalValues.find(texture_name);
-                if(it == gltf_material.additionalValues.end())
-                    return -1;  // not found
-            }
-            std::map<std::string, double>::const_iterator const it2 = (*it).second.json_double_value.find("index");
-            if(it2 == (*it).second.json_double_value.end())
-                return -1;  // not found
-            std::map<std::string, double>::const_iterator const it3 = (*it).second.json_double_value.find("texCoord");
-            if(it3 != (*it).second.json_double_value.end() && (*it3).second != 0.0)
-                return -1;  // only a single uv stream is supported for now
-            return (int32_t)(*it2).second;
-        };
-        std::pair<bool, glm::vec4> parameter;
-        std::map<int32_t, GfxConstRef<GfxMaterial>> materials;
-        std::map<int32_t, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
-        for(size_t i = 0; i < gltf_model.materials.size(); ++i)
-        {
-            std::map<int32_t, GfxConstRef<GfxImage>>::const_iterator it;
-            tinygltf::Material const &gltf_material = gltf_model.materials[i];
+            std::map<cgltf_image const*, GfxConstRef<GfxImage>>::const_iterator it;
+            cgltf_material const &gltf_material = gltf_model->materials[i];
+            if(!gltf_material.has_pbr_metallic_roughness)
+                continue; // unsupported material type
             GfxRef<GfxMaterial> material_ref = gfxSceneCreateMaterial(scene);
             GfxMetadata &material_metadata = material_metadata_[material_ref];
             material_metadata.asset_file = asset_file;  // set up metadata
             material_metadata.object_name = gltf_material.name;
             GfxMaterial &material = *material_ref;
-            parameter = GetParameter(gltf_material, "baseColorFactor");
-            if(parameter.first) material.albedo = glm::vec4(parameter.second);
-                           else material.albedo = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
-            parameter = GetParameter(gltf_material, "roughnessFactor");
-            if(parameter.first) material.roughness = parameter.second.x;
-                           else material.roughness = 1.0f;
-            parameter = GetParameter(gltf_material, "metallicFactor");
-            if(parameter.first) material.metallicity = parameter.second.x;
-                           else material.metallicity = 1.0f;
-            parameter = GetParameter(gltf_material, "emissiveFactor");
-            if(parameter.first) material.emissivity = glm::vec3(parameter.second);
-                           else material.emissivity = glm::vec3(0.0f, 0.0f, 0.0f);
-            int32_t const albedo_map = GetTextureIndex(gltf_material, "baseColorTexture");
-            it = (albedo_map >= 0 ? images.find(albedo_map) : images.end());
+            cgltf_pbr_metallic_roughness const &gltf_material_pbr = gltf_material.pbr_metallic_roughness;
+            material.albedo = glm::vec4(gltf_material_pbr.base_color_factor[0], gltf_material_pbr.base_color_factor[1],
+                gltf_material_pbr.base_color_factor[2], gltf_material_pbr.base_color_factor[3]);
+            material.roughness = gltf_material_pbr.roughness_factor;
+            material.metallicity = gltf_material_pbr.metallic_factor;
+            material.emissivity = glm::vec3(gltf_material.emissive_factor[0], gltf_material.emissive_factor[1],
+                gltf_material.emissive_factor[2]);
+            cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
+            it = (albedo_map_text != nullptr ? images.find(albedo_map_text->basisu_image != nullptr ?
+                albedo_map_text->basisu_image : albedo_map_text->image) : images.end());
             if(it != images.end())
             {
-                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                if(temp->bytes_per_channel <= 1)
+                    temp->format = ConvertImageFormatSRGB(temp->format);
                 material.albedo_map = (*it).second;
             }
-            int32_t const metallicity_roughness_map = GetTextureIndex(gltf_material, "metallicRoughnessTexture");
-            it = (metallicity_roughness_map >= 0 ? images.find(metallicity_roughness_map) : images.end());
+            cgltf_texture const* metallicity_roughness_map_text = gltf_material_pbr.metallic_roughness_texture.texture;
+            it = (metallicity_roughness_map_text != nullptr ? images.find(metallicity_roughness_map_text->basisu_image != nullptr ?
+                metallicity_roughness_map_text->basisu_image : metallicity_roughness_map_text->image) : images.end());
             if(it != images.end())
             {
-                std::map<int32_t, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 = maps.find(metallicity_roughness_map);
+                std::map<cgltf_image const*, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 =
+                    maps.find(metallicity_roughness_map_text->basisu_image != nullptr ?
+                    metallicity_roughness_map_text->basisu_image : metallicity_roughness_map_text->image);
                 if(it2 != maps.end())
                 {
                     material_ref->roughness_map = (*it2).second.first;
@@ -1441,6 +1297,8 @@ private:
                     GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                     if(!metallicity_map_ref || !roughness_map_ref)
                     {
+                        if (gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
+                            continue; // unsupported compressed texture
                         metallicity_map_ref = gfxSceneCreateImage(scene);
                         roughness_map_ref = gfxSceneCreateImage(scene);
                         GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
@@ -1458,16 +1316,18 @@ private:
                         metallicity_map.height = image.height;
                         metallicity_map.channel_count = 1;
                         metallicity_map.bytes_per_channel = image.bytes_per_channel;
-                        metallicity_map.format = gfxImageGetFormat(metallicity_map);
+                        metallicity_map.format = GetImageFormat(metallicity_map);
                         metallicity_map.flags = 0;
-                        metallicity_map.data.resize(metallicity_map.width * metallicity_map.height * metallicity_map.bytes_per_channel);
+                        metallicity_map.data.resize((size_t)metallicity_map.width * metallicity_map.height *
+                            metallicity_map.bytes_per_channel);
                         roughness_map.width = image.width;
                         roughness_map.height = image.height;
                         roughness_map.channel_count = 1;
                         roughness_map.bytes_per_channel = image.bytes_per_channel;
-                        roughness_map.format = gfxImageGetFormat(roughness_map);
+                        roughness_map.format = GetImageFormat(roughness_map);
                         roughness_map.flags = 0;
-                        roughness_map.data.resize(roughness_map.width * roughness_map.height * roughness_map.bytes_per_channel);
+                        roughness_map.data.resize((size_t)roughness_map.width * roughness_map.height *
+                            roughness_map.bytes_per_channel);
                         uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
                         uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
                         for(uint32_t j = 0; j < texel_count; ++j)
@@ -1475,108 +1335,82 @@ private:
                             uint32_t index = j * byte_stride + image.bytes_per_channel;
                             if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
                                 for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                                    roughness_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                                    roughness_map.data[(size_t)j * image.bytes_per_channel + k] = image.data[index++];
                             if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
                                 for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                                    metallicity_map.data[j * image.bytes_per_channel + k] = image.data[index++];
+                                    metallicity_map.data[(size_t)j * image.bytes_per_channel + k] = image.data[index++];
                         }
                     }
                     material.roughness_map = roughness_map_ref;
                     material.metallicity_map = metallicity_map_ref;
-                    maps[metallicity_roughness_map] =
+                    maps[metallicity_roughness_map_text->image] =
                         std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>(roughness_map_ref, metallicity_map_ref);
                 }
             }
-            int32_t const emissivity_map = GetTextureIndex(gltf_material, "emissiveTexture");
-            it = (emissivity_map >= 0 ? images.find(emissivity_map) : images.end());
+            cgltf_texture const *emissivity_map_text = gltf_material.emissive_texture.texture;
+            it = (emissivity_map_text != nullptr ? images.find(emissivity_map_text->basisu_image != nullptr ?
+                emissivity_map_text->basisu_image : emissivity_map_text->image) : images.end());
             if(it != images.end())
             {
-                if(it->second->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, (*it).second)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                if (temp->bytes_per_channel <= 1)
+                    temp->format = ConvertImageFormatSRGB(temp->format);
                 material.emissivity_map = (*it).second;
             }
-            int32_t const normal_map = GetTextureIndex(gltf_material, "normalTexture");
-            it = (normal_map >= 0 ? images.find(normal_map) : images.end());
-            if(it != images.end()) material.normal_map = (*it).second;
-            int32_t const ao_map = GetTextureIndex(gltf_material, "occlusionTexture");
-            it = (ao_map >= 0 ? images.find(ao_map) : images.end());
-            if(it != images.end()) material.ao_map = (*it).second;
-            materials[(int32_t)i] = material_ref;
-        }
-        auto const GetBuffer = [&](int32_t accessor_index)
-        {
-            GltfBuffer buffer = {};
-            if(accessor_index < 0 || accessor_index >= (int32_t)gltf_model.accessors.size())
-                return buffer;  // out of bounds
-            tinygltf::Accessor const &gltf_accessor = gltf_model.accessors[accessor_index];
-            if(gltf_accessor.sparse.isSparse) { GFX_ASSERT(0); return buffer; } // sparse accessors aren't supported yet
-            if(tinygltf::GetNumComponentsInType((uint32_t)gltf_accessor.type) < 0 ||
-               tinygltf::GetComponentSizeInBytes((uint32_t)gltf_accessor.componentType) < 0)
-                return buffer;  // unrecognized data type
-            if(gltf_accessor.bufferView < 0 || gltf_accessor.bufferView >= (int32_t)gltf_model.bufferViews.size())
-                return buffer;  // out of bounds
-            tinygltf::BufferView const &gltf_buffer_view = gltf_model.bufferViews[gltf_accessor.bufferView];
-            if(gltf_buffer_view.buffer < 0 || gltf_buffer_view.buffer >= (int32_t)gltf_model.buffers.size())
-                return buffer;  // ouf of bounds
-            tinygltf::Buffer const &gltf_buffer = gltf_model.buffers[gltf_buffer_view.buffer];
-            if(gltf_buffer_view.byteOffset + gltf_buffer_view.byteLength > gltf_buffer.data.size())
-                return buffer;  // out of bounds
-            if(gltf_accessor.byteOffset +
-               tinygltf::GetNumComponentsInType((uint32_t)gltf_accessor.type) *
-               tinygltf::GetComponentSizeInBytes((uint32_t)gltf_accessor.componentType) *
-               gltf_accessor.count > gltf_buffer_view.byteLength)
-                return buffer;  // out of bounds
-            buffer.type_ = (uint32_t)gltf_accessor.type;
-            buffer.count_ = (uint32_t)gltf_accessor.count;
-            buffer.normalize_ = (gltf_accessor.normalized ? 1 : 0);
-            buffer.data_ = gltf_buffer.data.data() + gltf_buffer_view.byteOffset + gltf_accessor.byteOffset;
-            buffer.stride_ = (uint32_t)gltf_buffer_view.byteStride;
-            buffer.component_type_ = (uint32_t)gltf_accessor.componentType;
-            if(buffer.stride_ == 0)
-            {
-                buffer.stride_ = tinygltf::GetNumComponentsInType(buffer.type_)
-                               * tinygltf::GetComponentSizeInBytes(buffer.component_type_);
+            cgltf_texture const *normal_map_text = gltf_material.normal_texture.texture;
+            it = (normal_map_text != nullptr ? images.find(normal_map_text->basisu_image != nullptr ?
+                normal_map_text->basisu_image : normal_map_text->image) : images.end());
+            if(it != images.end()) {
+                GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                temp->format = ConvertImageFormatLinear(temp->format);
+                material.normal_map = (*it).second;
             }
-            return buffer;
-        };
-        std::map<int32_t, std::vector<GfxConstRef<GfxMesh>>> meshes;
-        for(size_t i = 0; i < gltf_model.meshes.size(); ++i)
+            cgltf_texture const *ao_map_text = gltf_material.occlusion_texture.texture;
+            it = (ao_map_text != nullptr ? images.find(ao_map_text->basisu_image != nullptr ?
+                ao_map_text->basisu_image : ao_map_text->image) : images.end());
+            if(it != images.end()) material.ao_map = (*it).second;
+            materials[&gltf_material] = material_ref;
+        }
+        std::map<cgltf_mesh const*, std::vector<GfxConstRef<GfxMesh>>> meshes;
+        for(size_t i = 0; i < gltf_model->meshes_count; ++i)
         {
-            tinygltf::Mesh const &gltf_mesh = gltf_model.meshes[i];
-            std::vector<GfxConstRef<GfxMesh>> &mesh_list = meshes[(int32_t)i];
-            for(size_t j = 0; j < gltf_mesh.primitives.size(); ++j)
+            cgltf_mesh const &gltf_mesh = gltf_model->meshes[i];
+            std::vector<GfxConstRef<GfxMesh>> &mesh_list = meshes[&gltf_mesh];
+            for(size_t j = 0; j < gltf_mesh.primitives_count; ++j)
             {
-                std::map<std::string, int32_t>::const_iterator it;
-                static std::string const position_attribute = "POSITION";
-                static std::string const normal_attribute   = "NORMAL";
-                static std::string const uv_attribute       = "TEXCOORD_0";
-                tinygltf::Primitive const &gltf_primitive = gltf_mesh.primitives[j];
-                if(!gltf_primitive.targets.empty()) continue;   // morph targets aren't supported
-                if(gltf_primitive.mode != TINYGLTF_MODE_TRIANGLES) continue;    // only support triangle meshes
-                GltfBuffer const index_buffer = GetBuffer(gltf_primitive.indices);
-                it = gltf_primitive.attributes.find(position_attribute);    // locate position stream
-                GltfBuffer const position_buffer = GetBuffer(it != gltf_primitive.attributes.end() ? (*it).second : -1);
-                it = gltf_primitive.attributes.find(normal_attribute);  // locate normal stream
-                GltfBuffer const normal_buffer = GetBuffer(it != gltf_primitive.attributes.end() ? (*it).second : -1);
-                it = gltf_primitive.attributes.find(uv_attribute);  // locate uv stream
-                GltfBuffer const uv_buffer = GetBuffer(it != gltf_primitive.attributes.end() ? (*it).second : -1);
-                if(!index_buffer.data_ || !position_buffer.data_) continue; // invalid mesh primitive
+                cgltf_primitive const &gltf_primitive = gltf_mesh.primitives[j];
+                if(gltf_primitive.targets_count > 0) continue;   // morph targets aren't supported
+                if(gltf_primitive.type != cgltf_primitive_type_triangles) continue;    // only support triangle meshes
+                cgltf_accessor const *index_buffer = gltf_primitive.indices;
+                cgltf_attribute *gltf_primitive_attributes_end = gltf_primitive.attributes + gltf_primitive.attributes_count;
+                cgltf_attribute const *it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_position; });  // locate position stream
+                cgltf_accessor const *position_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_normal; });  // locate normal stream
+                cgltf_accessor const *normal_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });  // locate uv stream
+                cgltf_accessor const *uv_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                if(index_buffer->buffer_view == nullptr || position_buffer == nullptr) continue; // invalid mesh primitive
+                if(index_buffer->is_sparse || position_buffer->is_sparse) continue; // unsupported sparse accessor
                 GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
                 mesh_list.push_back(mesh_ref);
                 GfxMesh &mesh = *mesh_ref;
-                std::map<uint32_t, uint32_t> indices;
-                for(uint32_t k = 0; k < index_buffer.count_; ++k)
+                std::map<size_t, uint32_t> indices;
+                for(uint32_t k = 0; k < index_buffer->count; ++k)
                 {
-                    uint32_t const gltf_index = ReadAs<uint32_t>(index_buffer, k);
-                    std::map<uint32_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
+                    size_t const gltf_index = cgltf_accessor_read_index(index_buffer, k);
+                    std::map<size_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
                     if(it2 != indices.end())
                         mesh.indices.push_back((*it2).second);
                     else
                     {
                         GfxVertex vertex = {};
-                        vertex.position = ReadAs<glm::vec3>(position_buffer, gltf_index);
-                        vertex.normal   = ReadAs<glm::vec3>(normal_buffer, gltf_index);
-                        vertex.uv       = ReadAs<glm::vec2>(uv_buffer, gltf_index);
+                        cgltf_accessor_read_float(position_buffer, gltf_index, (float*)&vertex.position, sizeof(glm::vec3));
+                        cgltf_accessor_read_float(normal_buffer, gltf_index, (float*)&vertex.normal, sizeof(glm::vec3));
+                        if(uv_buffer != nullptr)
+                            cgltf_accessor_read_float(uv_buffer, gltf_index, (float*)&vertex.uv, sizeof(glm::vec2));
                         uint32_t const index = (uint32_t)mesh.vertices.size();
                         if(index == 0)
                         {
@@ -1595,49 +1429,59 @@ private:
                 }
                 GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
                 mesh_metadata.asset_file = asset_file;  // set up metadata
-                mesh_metadata.object_name = gltf_mesh.name;
+                mesh_metadata.object_name = (gltf_mesh.name != nullptr) ? gltf_mesh.name : "Mesh" + std::to_string(j);
                 if(j > 0)
                 {
                     mesh_metadata.object_name += ".";
                     mesh_metadata.object_name += std::to_string(j);
                 }
-                if(gltf_primitive.material >= 0 && gltf_primitive.material < (int32_t)gltf_model.materials.size())
+                if(gltf_primitive.material != nullptr)
                 {
-                    std::map<int32_t, GfxConstRef<GfxMaterial>>::const_iterator const it2 = materials.find(gltf_primitive.material);
+                    std::map<cgltf_material const*, GfxConstRef<GfxMaterial>>::const_iterator const it2 =
+                        materials.find(gltf_primitive.material);
                     if(it2 != materials.end()) mesh.material = (*it2).second;
                 }
             }
         }
         std::set<uint64_t> unparented_nodes;
-        std::map<int32_t, std::set<GfxConstRef<GfxAnimation>>> node_animations;
-        std::map<int32_t, uint64_t> animated_nodes;
+        std::map<cgltf_node const*, std::set<GfxConstRef<GfxAnimation>>> node_animations;
+        std::map<cgltf_node const*, uint64_t> animated_nodes;
         std::map<size_t, GfxConstRef<GfxAnimation>> animations;
-        for(size_t i = 0; i < gltf_model.animations.size(); ++i)
+        for(size_t i = 0; i < gltf_model->animations_count; ++i)
         {
             GfxRef<GfxAnimation> animation_ref;
             GltfAnimation *animation_object = nullptr;
-            tinygltf::Animation const &gltf_animation = gltf_model.animations[i];
-            for(size_t j = 0; j < gltf_animation.channels.size(); ++j)
+            cgltf_animation const &gltf_animation = gltf_model->animations[i];
+            for(size_t j = 0; j < gltf_animation.channels_count; ++j)
             {
                 uint64_t animated_node_handle;
-                tinygltf::AnimationChannel const &gltf_animation_channel = gltf_animation.channels[j];
-                if(gltf_animation_channel.target_node < 0 || gltf_animation_channel.target_node >= (int32_t)gltf_model.nodes.size()) continue;
+                cgltf_animation_channel const &gltf_animation_channel = gltf_animation.channels[j];
+                if(gltf_animation_channel.target_node == nullptr) continue;
                 GltfAnimationChannelType type = kGltfAnimationChannelType_Count;
-                     if(gltf_animation_channel.target_path == "translation") type = kGltfAnimationChannelType_Translate;
-                else if(gltf_animation_channel.target_path == "rotation")    type = kGltfAnimationChannelType_Rotate;
-                else if(gltf_animation_channel.target_path == "scale")       type = kGltfAnimationChannelType_Scale;
+                     if(gltf_animation_channel.target_path == cgltf_animation_path_type_translation)
+                         type = kGltfAnimationChannelType_Translate;
+                else if(gltf_animation_channel.target_path == cgltf_animation_path_type_rotation)
+                         type = kGltfAnimationChannelType_Rotate;
+                else if(gltf_animation_channel.target_path == cgltf_animation_path_type_scale)
+                         type = kGltfAnimationChannelType_Scale;
                 if(type == kGltfAnimationChannelType_Count) continue;   // unsupported animation channel type
-                if(gltf_animation_channel.sampler < 0 || gltf_animation_channel.sampler >= (int32_t)gltf_animation.samplers.size()) continue;
-                tinygltf::AnimationSampler const &gltf_animation_sampler = gltf_animation.samplers[gltf_animation_channel.sampler];
+                if(gltf_animation_channel.sampler == nullptr) continue;
+                cgltf_animation_sampler const &gltf_animation_sampler = *gltf_animation_channel.sampler;
                 GltfAnimationChannelMode mode = kGltfAnimationChannelMode_Count;
-                     if(gltf_animation_sampler.interpolation == "LINEAR")      mode = kGltfAnimationChannelMode_Linear;
-                else if(gltf_animation_sampler.interpolation == "STEP")        mode = kGltfAnimationChannelMode_Step;
-                else if(gltf_animation_sampler.interpolation == "CUBICSPLINE") mode = kGltfAnimationChannelMode_Count;  // not supported yet
+                     if(gltf_animation_sampler.interpolation == cgltf_interpolation_type_linear)
+                         mode = kGltfAnimationChannelMode_Linear;
+                else if(gltf_animation_sampler.interpolation == cgltf_interpolation_type_step)
+                         mode = kGltfAnimationChannelMode_Step;
+                else if(gltf_animation_sampler.interpolation == cgltf_interpolation_type_cubic_spline)
+                         mode = kGltfAnimationChannelMode_Count;  // not supported yet
                 if(mode == kGltfAnimationChannelMode_Count) continue;   // unsupported animation channel mode
-                GltfBuffer const input_buffer  = GetBuffer(gltf_animation_sampler.input);
-                GltfBuffer const output_buffer = GetBuffer(gltf_animation_sampler.output);
-                if(!input_buffer.count_ || !output_buffer.count_ || input_buffer.count_ != output_buffer.count_) continue;
-                std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(gltf_animation_channel.target_node);
+                cgltf_accessor const *input_buffer  = gltf_animation_sampler.input;
+                cgltf_accessor const *output_buffer = gltf_animation_sampler.output;
+                if(input_buffer == nullptr || output_buffer == nullptr ||
+                    input_buffer->count == 0 || input_buffer->count != output_buffer->count) continue;
+                if(input_buffer->is_sparse || output_buffer->is_sparse) continue;
+                std::map<cgltf_node const*, uint64_t>::const_iterator const it =
+                    animated_nodes.find(gltf_animation_channel.target_node);
                 if(it != animated_nodes.end())
                     animated_node_handle = (*it).second;
                 else
@@ -1661,68 +1505,38 @@ private:
                 GFX_ASSERT(animation_object != nullptr);
                 animation_object->channels_.emplace_back();
                 GltfAnimationChannel &animation_channel = animation_object->channels_.back();
-                animation_channel.keyframes_.resize(input_buffer.count_);
-                for(uint32_t k = 0; k < input_buffer.count_; ++k)
-                    animation_channel.keyframes_[k] = ReadAs<float>(input_buffer, k);
-                animation_channel.values_.resize(output_buffer.count_);
-                for(uint32_t k = 0; k < output_buffer.count_; ++k)
-                    animation_channel.values_[k]    = ReadAs<glm::vec4>(output_buffer, k);
+                animation_channel.keyframes_.resize(input_buffer->count);
+                for(uint32_t k = 0; k < input_buffer->count; ++k)
+                    cgltf_accessor_read_float(input_buffer, k, &animation_channel.keyframes_[k], sizeof(float));
+                animation_channel.values_.resize(output_buffer->count);
+                for(uint32_t k = 0; k < output_buffer->count; ++k)
+                    cgltf_accessor_read_float(output_buffer, k, (float*)&animation_channel.values_[k], sizeof(glm::vec4));
                 animation_channel.node_ = animated_node_handle;
                 animation_channel.mode_ = mode;
                 animation_channel.type_ = type;
             }
         }
-        for(std::map<int32_t, std::set<GfxConstRef<GfxAnimation>>>::const_iterator it = node_animations.begin(); it != node_animations.end(); ++it)
+        for(std::map<cgltf_node const*, std::set<GfxConstRef<GfxAnimation>>>::const_iterator it = node_animations.begin();
+            it != node_animations.end(); ++it)
             if((*it).second.size() > 1)
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Some nodes are targeted by several animations...");
-        std::map<int32_t, std::set<GfxConstRef<GfxAnimation>>> propagated_node_animations;
-        std::function<std::set<GfxConstRef<GfxAnimation>> (int32_t node_index, glm::dmat4 const &parent_transform, std::set<GfxConstRef<GfxAnimation>> const& parent_animations)> VisitNode;
-        VisitNode = [&](int32_t node_index, glm::dmat4 const &parent_transform, const std::set<GfxConstRef<GfxAnimation>>& parent_animations) -> std::set<GfxConstRef<GfxAnimation>>
+        std::map<cgltf_node const*, std::set<GfxConstRef<GfxAnimation>>> propagated_node_animations;
+        std::function<std::set<GfxConstRef<GfxAnimation>> (cgltf_node const * gltf_node, glm::mat4 const &parent_transform,
+            std::set<GfxConstRef<GfxAnimation>> const &parent_animations)> VisitNode;
+        VisitNode = [&](cgltf_node const *gltf_node, glm::mat4 const &parent_transform,
+            const std::set<GfxConstRef<GfxAnimation>> &parent_animations) -> std::set<GfxConstRef<GfxAnimation>>
         {
-            glm::dvec3 T(0.0), S(1.0);
-            glm::dquat R(1.0, 0.0, 0.0, 0.0);
-            glm::dmat4 local_transform(1.0);    // default to identity
-            if(node_index < 0 || node_index >= (int32_t)gltf_model.nodes.size())
+            glm::vec3 T(0.0), S(1.0);
+            glm::quat R(1.0, 0.0, 0.0, 0.0);
+            glm::mat4 local_transform(1.0);    // default to identity
+            if(gltf_node == nullptr)
                 return {};   // out of bounds
-            tinygltf::Node const &gltf_node = gltf_model.nodes[node_index];
-            if(!gltf_node.matrix.empty())
-            {
-                for(uint32_t col = 0; col < 4; ++col)
-                    for(uint32_t row = 0; row < 4; ++row)
-                        if(4 * col + row < gltf_node.matrix.size())
-                            local_transform[col][row] = gltf_node.matrix[4 * col + row];
-            }
-            else
-            {
-                glm::dmat4 translate(1.0), rotate(1.0), scale(1.0);
-                if(!gltf_node.translation.empty())
-                {
-                    for(uint32_t i = 0; i < 3; ++i)
-                        if(i < (uint32_t)gltf_node.translation.size())
-                            T[i] = gltf_node.translation[i];
-                    translate = glm::translate(glm::dmat4(1.0), T);
-                }
-                if(!gltf_node.rotation.empty())
-                {
-                    for(uint32_t i = 0; i < 4; ++i)
-                        if(i < (uint32_t)gltf_node.rotation.size())
-                            R[i] = gltf_node.rotation[i];
-                    rotate = glm::toMat4(R);
-                }
-                if(!gltf_node.scale.empty())
-                {
-                    for(uint32_t i = 0; i < 3; ++i)
-                        if(i < (uint32_t)gltf_node.scale.size())
-                            S[i] = gltf_node.scale[i];
-                    scale = glm::scale(glm::dmat4(1.0), S);
-                }
-                local_transform = translate * rotate * scale;
-            }
+            cgltf_node_transform_local(gltf_node, (float*)&local_transform);
             std::vector<GfxRef<GfxInstance>> instances;
-            glm::dmat4 const transform = parent_transform * local_transform;
-            if(gltf_node.mesh >= 0 && gltf_node.weights.empty())
+            glm::mat4 const transform = parent_transform * local_transform;
+            if(gltf_node->mesh != nullptr && gltf_node->weights_count == 0)
             {
-                std::map<int32_t, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node.mesh);
+                std::map<cgltf_mesh const*, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
                     for(size_t i = 0; i < (*it).second.size(); ++i)
                     {
@@ -1739,9 +1553,9 @@ private:
                     }
             }
             GfxRef<GfxCamera> camera;
-            if(gltf_node.camera >= 0)
+            if(gltf_node->camera != nullptr)
             {
-                std::map<int32_t, GfxConstRef<GfxCamera>>::const_iterator const it = cameras.find(gltf_node.camera);
+                std::map<cgltf_camera const*, GfxConstRef<GfxCamera>>::const_iterator const it = cameras.find(gltf_node->camera);
                 if(it != cameras.end())
                 {
                     camera = (*it).second;
@@ -1749,10 +1563,9 @@ private:
                 }
             }
             GfxRef<GfxLight> light;
-            if(gltf_node.extensions.find("KHR_lights_punctual") != gltf_node.extensions.end())
+            if(gltf_node->light != nullptr)
             {
-                auto t = gltf_node.extensions.find("KHR_lights_punctual");
-                std::map<int32_t, GfxConstRef<GfxLight>>::const_iterator const it = lights.find((uint32_t)t->second.Get("light").GetNumberAsInt());
+                std::map<cgltf_light const*, GfxConstRef<GfxLight>>::const_iterator const it = lights.find(gltf_node->light);
                 if(it != lights.end())
                 {
                     light = (*it).second;
@@ -1760,17 +1573,17 @@ private:
                 }
             }
             std::set<GfxConstRef<GfxAnimation>> children_animations;
-            for(size_t i = 0; i < gltf_node.children.size(); ++i)
+            for(size_t i = 0; i < gltf_node->children_count; ++i)
             {
-                auto child_animations = VisitNode(gltf_node.children[i], transform, node_animations[node_index]);
+                auto child_animations = VisitNode(gltf_node->children[i], transform, node_animations[gltf_node]);
                 children_animations.insert(child_animations.begin(), child_animations.end());
             }
-            children_animations.insert(node_animations[node_index].begin(), node_animations[node_index].end());
-            propagated_node_animations[node_index].insert(children_animations.begin(), children_animations.end());
-            propagated_node_animations[node_index].insert(parent_animations.begin(), parent_animations.end());
-            if(propagated_node_animations[node_index].size() > 0)
+            children_animations.insert(node_animations[gltf_node].begin(), node_animations[gltf_node].end());
+            propagated_node_animations[gltf_node].insert(children_animations.begin(), children_animations.end());
+            propagated_node_animations[gltf_node].insert(parent_animations.begin(), parent_animations.end());
+            if(propagated_node_animations[gltf_node].size() > 0)
             {
-                std::map<int32_t, uint64_t>::const_iterator const it = animated_nodes.find(node_index);
+                std::map<cgltf_node const*, uint64_t>::const_iterator const it = animated_nodes.find(gltf_node);
                 GltfNode *node = nullptr;
                 GltfAnimatedNode *animated_node = nullptr;
                 if(it != animated_nodes.end())
@@ -1781,16 +1594,16 @@ private:
                 }
                 else
                 {
-                    GFX_ASSERT(node_animations[node_index].size() < 1);
+                    GFX_ASSERT(node_animations[gltf_node].size() < 1);
                     uint64_t const animated_node_handle = gltf_node_handles_.allocate_handle();
                     node = &gltf_nodes_.insert(GetObjectIndex(animated_node_handle));
-                    animated_nodes[node_index] = animated_node_handle;
+                    animated_nodes[gltf_node] = animated_node_handle;
                     *node = {};
                 }
                 std::vector<uint64_t> children;
-                for(size_t i = 0; i < gltf_node.children.size(); ++i)
+                for(size_t i = 0; i < gltf_node->children_count; ++i)
                 {
-                    std::map<int32_t, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node.children[i]);
+                    std::map<cgltf_node const*, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node->children[i]);
                     if(it2 != animated_nodes.end()) children.push_back((*it2).second);
                 }
                 if(animated_node != nullptr)
@@ -1811,28 +1624,29 @@ private:
             }
             return children_animations;
         };
-        tinygltf::Scene const &gltf_scene = gltf_model.scenes[glm::clamp(gltf_model.defaultScene, 0, (int32_t)gltf_model.scenes.size() - 1)];
-        for(size_t i = 0; i < gltf_scene.nodes.size(); ++i)
-            VisitNode(gltf_scene.nodes[i], glm::dmat4(1.0), {});
+        cgltf_scene const &gltf_scene = *gltf_model->scene;
+        for(size_t i = 0; i < gltf_scene.nodes_count; ++i)
+            VisitNode(gltf_scene.nodes[i], glm::mat4(1.0), {});
         for(std::set<uint64_t>::const_iterator it = unparented_nodes.begin(); it != unparented_nodes.end(); ++it)
         {
             gltf_node_handles_.free_handle(*it);
             gltf_nodes_.erase(GetObjectIndex(*it));
             gltf_animated_nodes_.erase(GetObjectIndex(*it));
         }
-        for(size_t j = 0; j < gltf_scene.nodes.size(); ++j)
+        for(size_t j = 0; j < gltf_scene.nodes_count; ++j)
         {
             auto it0 = animated_nodes.find(gltf_scene.nodes[j]);
             if(it0 == animated_nodes.end())
                 continue;
-            auto const& animations = propagated_node_animations[gltf_scene.nodes[j]];
+            auto const &animations = propagated_node_animations[gltf_scene.nodes[j]];
             GFX_ASSERT(animations.size() > 0);
-            for(auto const& animation : animations)
+            for(auto const &animation : animations)
             {
                 GltfAnimation &animation_object = gltf_animations_[GetObjectIndex(animation)];
                 animation_object.nodes_.push_back((*it0).second);
             }
         }
+        cgltf_free(gltf_model);
         return kGfxResult_NoError;
     }
 
@@ -1886,39 +1700,170 @@ private:
         return kGfxResult_NoError;
     }
 
+    static inline KTX_error_code IterateKtxImage(int miplevel, int face, int width, int height, int depth,
+        ktx_uint64_t faceLodSize, void* pixels, void* userdata)
+    {
+        GfxRef<GfxImage>* image_ref = (GfxRef<GfxImage>*)userdata;
+        uint8_t* back = &*((*image_ref)->data.end());
+        uint64_t current_pos = (*image_ref)->data.size();
+        (*image_ref)->data.resize((*image_ref)->data.size() + faceLodSize);
+        memcpy(back, pixels, faceLodSize);
+        return KTX_SUCCESS;
+    }
+
+    GfxResult importKtx(GfxScene const& scene, char const* asset_file)
+    {
+        GFX_ASSERT(asset_file != nullptr);
+        if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
+            return kGfxResult_NoError;  // image was already imported
+        ktxTexture2* ktx_texture;
+        KTX_error_code result;
+        result = ktxTexture2_CreateFromNamedFile(asset_file, KTX_TEXTURE_CREATE_NO_FLAGS, &ktx_texture);
+        if(result != KTX_SUCCESS)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to open image `%s': %s", asset_file, ktxErrorString(result));
+        if(ktx_texture->numDimensions != 2)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Only 2D textures are supported `%s'", asset_file);
+        char const* file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
+        file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
+        GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
+        auto vk_to_dxgi = [](const uint32_t vk_format) -> DXGI_FORMAT {
+            switch(vk_format)
+            {
+            case VK_FORMAT_R8_UNORM:
+            case VK_FORMAT_R8_UINT: return DXGI_FORMAT_R8_UNORM;
+            case VK_FORMAT_R8G8_UNORM:
+            case VK_FORMAT_R8G8_UINT: return DXGI_FORMAT_R8G8_UNORM;
+            case VK_FORMAT_R8G8B8A8_UNORM:
+            case VK_FORMAT_R8G8B8A8_UINT: return DXGI_FORMAT_R8G8B8A8_UNORM;
+            case VK_FORMAT_R8G8B8A8_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+            case VK_FORMAT_R16_UNORM:
+            case VK_FORMAT_R16_UINT: return DXGI_FORMAT_R16_UNORM;
+            case VK_FORMAT_R16G16_UNORM:
+            case VK_FORMAT_R16G16_UINT: return DXGI_FORMAT_R16G16_UNORM;
+            case VK_FORMAT_R16G16B16A16_UNORM:
+            case VK_FORMAT_R16G16B16A16_UINT: return DXGI_FORMAT_R16G16B16A16_UNORM;
+            case VK_FORMAT_R32_SFLOAT: return DXGI_FORMAT_R32_FLOAT;
+            case VK_FORMAT_R32G32_SFLOAT: return DXGI_FORMAT_R32G32_FLOAT;
+            case VK_FORMAT_R32G32B32_SFLOAT: return DXGI_FORMAT_R32G32B32_FLOAT;
+            case VK_FORMAT_R32G32B32A32_SFLOAT: return DXGI_FORMAT_R32G32B32A32_FLOAT;
+            case VK_FORMAT_BC1_RGB_UNORM_BLOCK: return DXGI_FORMAT_BC1_UNORM;
+            case VK_FORMAT_BC1_RGBA_UNORM_BLOCK: return DXGI_FORMAT_BC1_UNORM;
+            case VK_FORMAT_BC1_RGB_SRGB_BLOCK: return DXGI_FORMAT_BC1_UNORM;
+            case VK_FORMAT_BC1_RGBA_SRGB_BLOCK: return DXGI_FORMAT_BC1_UNORM_SRGB;
+            case VK_FORMAT_BC2_UNORM_BLOCK: return DXGI_FORMAT_BC2_UNORM;
+            case VK_FORMAT_BC2_SRGB_BLOCK: return DXGI_FORMAT_BC2_UNORM_SRGB;
+            case VK_FORMAT_BC3_UNORM_BLOCK: return DXGI_FORMAT_BC3_UNORM;
+            case VK_FORMAT_BC3_SRGB_BLOCK: return DXGI_FORMAT_BC3_UNORM_SRGB;
+            case VK_FORMAT_BC4_UNORM_BLOCK: return DXGI_FORMAT_BC4_UNORM;
+            case VK_FORMAT_BC5_UNORM_BLOCK: return DXGI_FORMAT_BC5_UNORM;
+            case VK_FORMAT_BC6H_UFLOAT_BLOCK: return DXGI_FORMAT_BC6H_UF16;
+            case VK_FORMAT_BC6H_SFLOAT_BLOCK: return DXGI_FORMAT_BC6H_SF16;
+            case VK_FORMAT_BC7_UNORM_BLOCK: return DXGI_FORMAT_BC7_UNORM;
+            case VK_FORMAT_BC7_SRGB_BLOCK: return DXGI_FORMAT_BC7_UNORM_SRGB;
+            case VK_FORMAT_UNDEFINED:
+            default: return DXGI_FORMAT_UNKNOWN;
+            }
+        };
+        image_ref->data.resize(0);
+        image_ref->data.reserve(ktxTexture_GetDataSizeUncompressed((ktxTexture*)ktx_texture));
+        image_ref->channel_count = ktxTexture2_GetNumComponents(ktx_texture);
+        uint32_t temp;
+        ktxTexture2_GetComponentInfo(ktx_texture, &temp, &image_ref->bytes_per_channel);
+        if(ktxTexture2_NeedsTranscoding(ktx_texture))
+        {
+            // Need to determine number of texture channels
+            ktx_transcode_fmt_e tf;
+            switch(image_ref->channel_count)
+            {
+            case 1: tf = KTX_TTF_BC4_R; break;
+            case 2: tf = KTX_TTF_BC5_RG; break;
+            default: tf = KTX_TTF_BC7_RGBA; break;
+            }
+            result = ktxTexture2_TranscodeBasis(ktx_texture, tf, KTX_TF_HIGH_QUALITY);
+            if(result != KTX_SUCCESS)
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to transcode image `%s': %s", asset_file, ktxErrorString(result));
+            image_ref->data.reserve(ktxTexture_GetDataSize((ktxTexture*)ktx_texture));
+            result = ktxTexture_IterateLevelFaces((ktxTexture*)ktx_texture, &IterateKtxImage, &image_ref);
+        }
+        else
+        {
+            result = ktxTexture_IterateLoadLevelFaces((ktxTexture*)ktx_texture, &IterateKtxImage, &image_ref);
+        }
+        if(result != KTX_SUCCESS)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, ktxErrorString(result));
+        image_ref->format = vk_to_dxgi(ktx_texture->vkFormat);
+        image_ref->width = ktx_texture->baseWidth;
+        image_ref->height = ktx_texture->baseHeight;
+        if(image_ref->format == DXGI_FORMAT_UNKNOWN)
+            image_ref->format = GetImageFormat(*image_ref);
+        image_ref->mips = ktx_texture->numLevels > 1;
+        image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_AlphaChannel);
+
+        GfxMetadata& image_metadata = image_metadata_[image_ref];
+        image_metadata.asset_file = asset_file; // set up metadata
+        image_metadata.object_name = file;
+        ktxTexture_Destroy((ktxTexture*)ktx_texture);
+        return kGfxResult_NoError;
+    }
+
     GfxResult importImage(GfxScene const &scene, char const *asset_file)
     {
         GFX_ASSERT(asset_file != nullptr);
         int32_t image_width, image_height, channel_count;
         if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
             return kGfxResult_NoError;  // image was already imported
-        stbi_uc *image_data = stbi_load(asset_file, &image_width, &image_height, &channel_count, 0);
+        stbi_uc *image_data = nullptr;
+        uint32_t bytes_per_channel = 2;
+        if(stbi_is_16_bit(asset_file))
+            image_data = (stbi_uc*)stbi_load_16(asset_file, &image_width, &image_height, &channel_count, 0);
+        if(image_data == nullptr)
+        {
+            image_data = stbi_load(asset_file, &image_width, &image_height, &channel_count, 0);
+            bytes_per_channel = 1;
+        }
         if(image_data == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, stbi_failure_reason());
         uint32_t const resolved_channel_count = (uint32_t)(channel_count != 3 ? channel_count : 4);
         char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
         file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
-        size_t const image_data_size = (size_t)image_width * image_height * resolved_channel_count;
+        size_t const image_data_size = (size_t)image_width * image_height * resolved_channel_count * bytes_per_channel;
         GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
         image_ref->data.resize(image_data_size);
         image_ref->width = (uint32_t)image_width;
         image_ref->height = (uint32_t)image_height;
         image_ref->channel_count = resolved_channel_count;
-        image_ref->bytes_per_channel = (uint32_t)1;
-        image_ref->format = gfxImageGetFormat(*image_ref);
-        uint8_t *data = image_ref->data.data();
-        uint8_t alpha_check = 255;  // check alpha
-        for(int32_t y = 0; y < image_height; ++y)
-            for(int32_t x = 0; x < image_width; ++x)
-                for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
-                {
-                    int32_t const dst_index = (int32_t)resolved_channel_count * (x + (image_height - y - 1) * image_width) + k;
-                    int32_t const src_index = channel_count * (x + y * image_width) + k;
-                    uint8_t const source = (k < channel_count ? image_data[src_index] : (uint8_t)255);
-                    if(k == 3) alpha_check &= source;
-                    data[dst_index] = source;
-                }
-        image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_AlphaChannel);
+        image_ref->bytes_per_channel = bytes_per_channel;
+        image_ref->format = GetImageFormat(*image_ref);
+        if(bytes_per_channel == 1)
+        {
+            uint8_t *data = image_ref->data.data();
+            uint8_t alpha_check = 255;  // check alpha
+            for (int32_t y = 0; y < image_height; ++y)
+                for (int32_t x = 0; x < image_width; ++x)
+                    for (int32_t k = 0; k < (int32_t)resolved_channel_count; ++k) {
+                        int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * image_width) + k;
+                        int32_t const src_index = channel_count * (x + y * image_width) + k;
+                        uint8_t const source = (k < channel_count ? image_data[src_index] : (uint8_t)255);
+                        if (k == 3) alpha_check &= source;
+                        data[dst_index] = source;
+                    }
+            image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_AlphaChannel);
+        }
+        else
+        {
+            uint16_t *data = (uint16_t*)image_ref->data.data();
+            uint16_t alpha_check = 65535;   // check alpha
+            for (int32_t y = 0; y < image_height; ++y)
+                for (int32_t x = 0; x < image_width; ++x)
+                    for (int32_t k = 0; k < (int32_t)resolved_channel_count; ++k) {
+                        int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * image_width) + k;
+                        int32_t const src_index = channel_count * (x + y * image_width) + k;
+                        uint16_t const source = (k < channel_count ? image_data[src_index] : (uint16_t)65535);
+                        if (k == 3) alpha_check &= source;
+                        data[dst_index] = source;
+                    }
+            image_ref->flags = (alpha_check == 65535 ? 0 : kGfxImageFlag_AlphaChannel);
+        }
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
