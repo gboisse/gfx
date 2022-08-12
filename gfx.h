@@ -2758,24 +2758,17 @@ public:
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
-        uint32_t pixels_per_block = 1;
         uint32_t const bytes_per_pixel = GetBytesPerPixel(dst.format);
         if(bytes_per_pixel == 0)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to texture object of unsupported format");
-        if(dst.format >= DXGI_FORMAT_BC1_TYPELESS && dst.format <= DXGI_FORMAT_BC5_SNORM)
-        {
-            pixels_per_block = 4 * 4;   // BC formats have 4*4 pixels per block
-            pixels_per_block /= 4;  // we need to divide by 4 because GetCopyableFootprints introduces a *2 stride divides the rows /4
-        }
         for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
         {
             Buffer *texture_upload_buffer = nullptr;
             if(buffer_offset >= src.size)
                 break;  // further mips aren't available
-            GFX_ASSERT(num_rows[mip_level] == GFX_MAX(dst.height >> mip_level, 1u));
-            uint32_t const buffer_row_pitch = (GFX_MAX(dst.width >> mip_level, 1u) * bytes_per_pixel) / pixels_per_block;
-            uint32_t const texture_row_pitch = subresource_footprints[mip_level].Footprint.RowPitch;
-            uint64_t const buffer_size = GFX_MAX(dst.height >> mip_level, 1u) * buffer_row_pitch;
+            uint64_t const buffer_row_pitch = row_sizes[mip_level];
+            uint64_t const texture_row_pitch = subresource_footprints[mip_level].Footprint.RowPitch;
+            uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
             if(buffer_offset + buffer_size > src.size)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to mip level %u from buffer object with insufficient storage", mip_level);
             if(buffer_row_pitch != texture_row_pitch || // we must respect the 256-byte pitch alignment
@@ -2799,7 +2792,7 @@ public:
                 transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
                 submitPipelineBarriers();   // transition our resources if needed
                 for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
-                    command_list_->CopyBufferRegion(texture_upload_buffer->resource_, i * texture_row_pitch, gfx_buffer.resource_, i * buffer_row_pitch, buffer_row_pitch);
+                    command_list_->CopyBufferRegion(texture_upload_buffer->resource_, i * texture_row_pitch, gfx_buffer.resource_, i * buffer_row_pitch + buffer_offset, buffer_row_pitch);
             }
             Buffer &gfx_buffer = buffers_[src]; SetObjectName(gfx_buffer, src.name);
             if(texture_upload_buffer != nullptr) transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
