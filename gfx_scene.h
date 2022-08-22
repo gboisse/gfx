@@ -1291,14 +1291,30 @@ private:
                 }
                 else
                 {
-                    std::string const metallicity_map_file = image_metadata_[(*it).second].asset_file + ".b";
-                    std::string const roughness_map_file = image_metadata_[(*it).second].asset_file + ".g";
+                    size_t const asset_file_ext = image_metadata_[(*it).second].asset_file.rfind('.');
+                    std::string const asset_file_name = image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
+                    std::string const asset_file_extension = image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
+                    std::string const metallicity_map_file = asset_file_name + ".metallicity" + asset_file_extension;
+                    std::string const roughness_map_file = asset_file_name + ".roughness" + asset_file_extension;
                     GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
                     GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
+                    if (!metallicity_map_ref)
+                    {
+                        if (gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
+                            metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
+                    }
+                    if (!metallicity_map_ref)
+                    {
+                        if (gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
+                            roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
+                    }
                     if(!metallicity_map_ref || !roughness_map_ref)
                     {
                         if (gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
-                            continue; // unsupported compressed texture
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Compressed textures require separate metal/roughness textures '%s'", image_metadata_[(*it).second].asset_file);
+                            continue;
+                        }
                         metallicity_map_ref = gfxSceneCreateImage(scene);
                         roughness_map_ref = gfxSceneCreateImage(scene);
                         GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
