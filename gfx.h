@@ -7108,8 +7108,10 @@ private:
         {
             GFX_SNPRINTF(shader_file, sizeof(shader_file), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
             mbstowcs(wshader_file, shader_file, ARRAYSIZE(shader_file));
+            // check file existence before LoadFile call. LoadFile spams hlsl::Exception messages if file not found.
+            if (GetFileAttributesW(wshader_file) == INVALID_FILE_ATTRIBUTES) return;
             dxc_utils_->LoadFile(wshader_file, nullptr, &dxc_source);
-            if(!dxc_source) return; // no source found for this shader
+            if(!dxc_source) return; // failed to load source file
             shader_source.Ptr = dxc_source->GetBufferPointer();
             shader_source.Size = dxc_source->GetBufferSize();
         }
