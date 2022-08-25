@@ -2,6 +2,13 @@ cmake_minimum_required(VERSION 3.10.0)
 
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm-0.9.9.8)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader-2.0-rc1)
+set(KTX_FEATURE_TESTS OFF)
+set(KTX_FEATURE_VULKAN OFF)
+set(KTX_FEATURE_GL_UPLOAD OFF)
+set(KTX_FEATURE_TOOLS OFF)
+set(KTX_FEATURE_DOC OFF)
+set(KTX_FEATURE_STATIC_LIBRARY ON)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software)
 
 option(GFX_BUILD_EXAMPLES "Build gfx examples" ON)
 
@@ -23,10 +30,13 @@ target_include_directories(gfx PUBLIC ${GFX_DXC_PATH})
 target_include_directories(gfx PUBLIC ${GFX_PIX_PATH}/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui-1.79)
-target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinygltf-2.5.0)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator-1.0.0/src)
 
-target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader
+target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader ktx
     ${GFX_DXC_PATH}/lib/x64/dxcompiler.lib
     ${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib)
 
