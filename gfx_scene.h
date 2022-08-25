@@ -1308,7 +1308,7 @@ private:
                         if (gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
                             roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                     }
-                    if(!metallicity_map_ref || !roughness_map_ref)
+                    if(!metallicity_map_ref && !roughness_map_ref)
                     {
                         if (gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
                         {
@@ -1320,11 +1320,11 @@ private:
                         GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
                         metallicity_map_metadata = image_metadata_[(*it).second];   // set up metadata
                         metallicity_map_metadata.asset_file = metallicity_map_file;
-                        metallicity_map_metadata.object_name += ".b";
+                        metallicity_map_metadata.object_name = metallicity_map_file;
                         GfxMetadata &roughness_map_metadata = image_metadata_[roughness_map_ref];
                         roughness_map_metadata = image_metadata_[(*it).second];
                         roughness_map_metadata.asset_file = roughness_map_file;
-                        roughness_map_metadata.object_name += ".g";
+                        roughness_map_metadata.object_name += roughness_map_file;
                         GfxImage &metallicity_map = *metallicity_map_ref;
                         GfxImage &roughness_map = *roughness_map_ref;
                         GfxImage const &image = *(*it).second;
