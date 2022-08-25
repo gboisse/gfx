@@ -7157,8 +7157,8 @@ private:
 
         std::vector<LPCWSTR> shader_args;
         shader_args.push_back(wshader_file);
-        shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
+        shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
         if(debug_shaders_)
         {
@@ -7173,10 +7173,13 @@ private:
             size_t max_define_length = 0;
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
                 max_define_length = GFX_MAX(max_define_length, strlen(kernel.defines_[i].c_str()));
-            WCHAR *wdefine = (WCHAR *)alloca((max_define_length + 1) << 1);
+            max_define_length += 3; // `//' + null terminator: https://github.com/gboisse/gfx/issues/41
+            WCHAR *wdefine = (WCHAR *)alloca(max_define_length << 1);
+            char *define = (char *)alloca(max_define_length);
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
             {
-                mbstowcs(wdefine, kernel.defines_[i].c_str(), max_define_length + 1);
+                GFX_SNPRINTF(define, max_define_length, "%s//", kernel.defines_[i].c_str());
+                mbstowcs(wdefine, define, max_define_length);
                 user_defines.push_back(wdefine);
             }
             for(size_t i = 0; i < user_defines.size(); ++i)
