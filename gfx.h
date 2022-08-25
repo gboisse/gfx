@@ -454,6 +454,7 @@ class GfxInternal
     uint32_t max_frames_in_flight_ = 0;
 
     ID3D12Device *device_ = nullptr;
+    IDXGIAdapter1 *adapter_ = nullptr;
     ID3D12Device5 *dxr_device_ = nullptr;
     ID3D12CommandQueue *command_queue_ = nullptr;
     ID3D12GraphicsCommandList *command_list_ = nullptr;
@@ -1138,38 +1139,26 @@ public:
         };
         DXGIFactoryReleaser const factory_releaser(factory);
 
-        DXGI_ADAPTER_DESC1 adapter_desc = {};
         if(adapter != nullptr)
         {
-            IDXGIAdapter1 *adapter1 = nullptr;
-
-            struct DXGIAdapterReleaser
-            {
-                IDXGIAdapter1 *adapter;
-                GFX_NON_COPYABLE(DXGIAdapterReleaser);
-                DXGIAdapterReleaser(IDXGIAdapter1 *adapter) : adapter(adapter) {}
-                ~DXGIAdapterReleaser() { if(adapter) adapter->Release(); }
-            };
-            DXGIAdapterReleaser const adapter_releaser(adapter1);
-
             DXGI_ADAPTER_DESC desc = {}; adapter->GetDesc(&desc);
-            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter1))))
+            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
-            if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+            if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
             {
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
                 device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
-                if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+                if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                     return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             }
-            adapter1->GetDesc1(&adapter_desc);
         }
         else
         {
             IDXGIAdapter1 *adapters[8] = {};
             uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
+            DXGI_ADAPTER_DESC1 adapter_desc;
             DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
             for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
             {
@@ -1231,7 +1220,8 @@ public:
                 if(!SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                     return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             }
-            adapters[i]->GetDesc1(&adapter_desc);
+            adapter_ = adapters[i];
+            adapters[i] = nullptr;
         }
         debug_shaders_ = ((flags & kGfxCreateContextFlag_EnableShaderDebugging) != 0);
         device_->QueryInterface(IID_PPV_ARGS(&dxr_device_));
@@ -1311,7 +1301,7 @@ public:
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         command_list_->ResourceBarrier(1, &resource_barrier);
 
-        return initializeCommon(adapter_desc, context);
+        return initializeCommon(context);
     }
 
     GfxResult initialize(ID3D12Device *device, uint32_t max_frames_in_flight, GfxContext &context)
@@ -1322,12 +1312,8 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
-        IDXGIAdapter1 *adapter = nullptr;
-        DXGI_ADAPTER_DESC1 adapter_desc = {};
-        if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter))))
+        if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to find interop adapter");
-        adapter->GetDesc1(&adapter_desc);
-        adapter->Release();
 
         device_ = device;
         max_frames_in_flight_ = GFX_MAX(max_frames_in_flight, 1u);
@@ -1344,10 +1330,10 @@ public:
         command_queue->GetTimestampFrequency(&timestamp_query_ticks_per_second_);
         command_queue->Release();
 
-        return initializeCommon(adapter_desc, context);
+        return initializeCommon(context);
     }
 
-    GfxResult initializeCommon(DXGI_ADAPTER_DESC1 const &adapter_desc, GfxContext &context)
+    GfxResult initializeCommon(GfxContext &context)
     {
         D3D12_FEATURE_DATA_D3D12_OPTIONS5 rt_features = {};
         device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5));
@@ -1355,9 +1341,10 @@ public:
         if(dxr_device_ == nullptr && dxr_command_list_ != nullptr) { dxr_command_list_->Release(); dxr_command_list_ = nullptr; }
 
         D3D12MA::ALLOCATOR_DESC
-        allocator_desc         = {};
-        allocator_desc.Flags   = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
-        allocator_desc.pDevice = device_;
+        allocator_desc          = {};
+        allocator_desc.Flags    = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
+        allocator_desc.pDevice  = device_;
+        allocator_desc.pAdapter = adapter_;
         if(!SUCCEEDED(D3D12MA::CreateAllocator(&allocator_desc, &mem_allocator_)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create memory allocator");
 
@@ -1438,6 +1425,8 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the graphics kernel for copying to the backbuffer");
         }
 
+        DXGI_ADAPTER_DESC1 adapter_desc = {};
+        adapter_->GetDesc1(&adapter_desc);
         context.vendor_id = adapter_desc.VendorId;
         GFX_SNPRINTF(context.name, sizeof(context.name), "%ws", adapter_desc.Description);
         GFX_PRINTLN("Created %s `%ws'", isInterop() ? "interop context" : "Direct3D12 device", adapter_desc.Description);
