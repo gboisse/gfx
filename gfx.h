@@ -6222,7 +6222,7 @@ private:
         uint32_t const key = ((texture_type << 2) | channels);  // lookup key
         std::map<uint32_t, MipKernels>::const_iterator const it = mip_kernels_.find(key);
         if(it != mip_kernels_.end()) return (*it).second;   // already compiled
-        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr;
+        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr, *select_string = nullptr;
         switch(texture_type)
         {
         case GfxTexture::kType_2D:
@@ -6246,15 +6246,19 @@ private:
         {
         case 1:
             channel_type_str = "float";
+            select_string = "float select(bool a, float b, float c){return a ? b : c;}";
             break;
         case 2:
             channel_type_str = "float2";
+            select_string = "float2 select(bool2 a, float2 b, float2 c){return a ? b : c;}";
             break;
         case 3:
             channel_type_str = "float3";
+            select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         case 4:
             channel_type_str = "float4";
+            select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         default:
             GFX_ASSERT(0);
@@ -6264,7 +6268,9 @@ private:
         texture_type_combined += '<';
         texture_type_combined += channel_type_str;
         texture_type_combined += '>';
-        std::string mip_program_source;
+        std::string mip_program_source = "#if __HLSL_VERSION < 2021\r\n";
+        mip_program_source += select_string;
+        mip_program_source += "\r\n#endif\r\n";
         mip_program_source += texture_type_combined;
         mip_program_source += " InputBuffer;\r\n";
         mip_program_source += texture_type_combined;
