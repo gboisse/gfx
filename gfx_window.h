@@ -68,7 +68,7 @@ bool gfxWindowIsMaximized(GfxWindow window);
 #pragma once
 
 #include "gfx_imgui.h"  // for (optional) ImGui integration
-#include "examples/imgui_impl_win32.h"
+#include "backends/imgui_impl_win32.h"
 
 class GfxWindowInternal
 {
@@ -78,7 +78,6 @@ class GfxWindowInternal
     bool is_minimized_ = false;
     bool is_maximized_ = false;
     bool is_close_requested_ = false;
-    bool is_imgui_initialized_ = false;
     bool is_key_down_[VK_OEM_CLEAR] = {};
     bool is_previous_key_down_[VK_OEM_CLEAR] = {};
 
@@ -135,7 +134,7 @@ public:
     {
         if(window_)
             DestroyWindow(window_);
-        if(is_imgui_initialized_)
+        if(ImGui_ImplWin32_GetBackendData() != nullptr)
             ImGui_ImplWin32_Shutdown();
 
         return kGfxResult_NoError;
@@ -200,23 +199,11 @@ private:
         default:
             return;
         }
-        if(gfxImGuiIsInitialized())
-        {
-            ImGuiIO &io = ImGui::GetIO();
-            if(key_code < ARRAYSIZE(io.KeysDown))
-                io.KeysDown[key_code] = is_down;
-        }
         is_key_down_[key_code] = is_down;
     }
 
     inline void resetKeyBindings()
     {
-        if(gfxImGuiIsInitialized())
-        {
-            ImGuiIO &io = ImGui::GetIO();
-            for(uint32_t i = 0; i < ARRAYSIZE(io.KeysDown); ++i)
-                io.KeysDown[i] = false;
-        }
         for(uint32_t i = 0; i < ARRAYSIZE(is_key_down_); ++i)
             is_key_down_[i] = false;
     }
@@ -226,8 +213,8 @@ private:
         GfxWindowInternal *gfx_window = (GfxWindowInternal *)GetWindowLongPtrA(window, GWLP_USERDATA);
         if(gfx_window != nullptr)
         {
-            if(!gfx_window->is_imgui_initialized_ && gfxImGuiIsInitialized())
-                gfx_window->is_imgui_initialized_ = ImGui_ImplWin32_Init(gfx_window->window_);
+            if(ImGui_ImplWin32_GetBackendData() == nullptr && gfxImGuiIsInitialized())
+                ImGui_ImplWin32_Init(gfx_window->window_);
             switch(message)
             {
             case WM_SIZE:
@@ -260,7 +247,7 @@ private:
             case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
                 if(w_param < ARRAYSIZE(is_key_down_))
                     gfx_window->updateKeyBinding(message, (uint32_t)w_param);
-                if(gfx_window->is_imgui_initialized_)
+                if(ImGui_ImplWin32_GetBackendData() != nullptr)
                     ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
                 break;
             default:

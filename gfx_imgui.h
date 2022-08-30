@@ -49,8 +49,9 @@ bool gfxImGuiIsInitialized();
 
 #include "imgui.cpp"
 #include "imgui_draw.cpp"
+#include "imgui_tables.cpp"
 #include "imgui_widgets.cpp"
-#include "examples/imgui_impl_win32.cpp"
+#include "backends/imgui_impl_win32.cpp"
 
 class GfxImGuiInternal
 {
@@ -158,28 +159,6 @@ public:
         imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state);
         if(!imgui_program_ || !imgui_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
-
-        io.KeyMap[ImGuiKey_Tab]        = VK_TAB;
-        io.KeyMap[ImGuiKey_LeftArrow]  = VK_LEFT;
-        io.KeyMap[ImGuiKey_RightArrow] = VK_RIGHT;
-        io.KeyMap[ImGuiKey_UpArrow]    = VK_UP;
-        io.KeyMap[ImGuiKey_DownArrow]  = VK_DOWN;
-        io.KeyMap[ImGuiKey_PageUp]     = VK_PRIOR;
-        io.KeyMap[ImGuiKey_PageDown]   = VK_NEXT;
-        io.KeyMap[ImGuiKey_Home]       = VK_HOME;
-        io.KeyMap[ImGuiKey_End]        = VK_END;
-        io.KeyMap[ImGuiKey_Insert]     = VK_INSERT;
-        io.KeyMap[ImGuiKey_Delete]     = VK_DELETE;
-        io.KeyMap[ImGuiKey_Backspace]  = VK_BACK;
-        io.KeyMap[ImGuiKey_Space]      = VK_SPACE;
-        io.KeyMap[ImGuiKey_Enter]      = VK_RETURN;
-        io.KeyMap[ImGuiKey_Escape]     = VK_ESCAPE;
-        io.KeyMap[ImGuiKey_A]          = 0x41;  // https://docs.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes
-        io.KeyMap[ImGuiKey_C]          = 0x43;
-        io.KeyMap[ImGuiKey_V]          = 0x56;
-        io.KeyMap[ImGuiKey_X]          = 0x58;
-        io.KeyMap[ImGuiKey_Y]          = 0x59;
-        io.KeyMap[ImGuiKey_Z]          = 0x5A;
 
         index_buffers_ = (GfxBuffer *)malloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         vertex_buffers_ = (GfxBuffer *)malloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -319,12 +298,13 @@ public:
 
         io.MouseWheel  = mouse_wheel;
         io.MouseWheelH = mouse_wheelh;
-        if(g_hWnd != 0)
+        ImGui_ImplWin32_Data* bd = ImGui_ImplWin32_GetBackendData();
+        if(bd != nullptr && bd->hWnd != 0)
         {
             POINT pos = {};
             GetCursorPos(&pos);
             ImGui_ImplWin32_NewFrame();
-            ScreenToClient(g_hWnd, &pos);
+            ScreenToClient(bd->hWnd, &pos);
             io.MousePos.x = (float)GFX_MIN(GFX_MAX(pos.x, (LONG)0), (LONG)gfxGetBackBufferWidth(gfx_)  - 1);
             io.MousePos.y = (float)GFX_MIN(GFX_MAX(pos.y, (LONG)0), (LONG)gfxGetBackBufferHeight(gfx_) - 1);
         }
