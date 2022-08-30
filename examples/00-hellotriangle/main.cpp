@@ -36,7 +36,7 @@ int main()
     auto program = gfxCreateProgram(gfx, "triangle");
     auto kernel = gfxCreateGraphicsKernel(gfx, program);
 
-    for(auto time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
+    for(float time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
     {
         gfxWindowPumpEvents(window);
 
