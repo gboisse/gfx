@@ -205,8 +205,6 @@ public:
     {
         char buffer[256];
         ImGuiIO &io = ImGui::GetIO();
-        float const mouse_wheel  = io.MouseWheel;
-        float const mouse_wheelh = io.MouseWheelH;
         ImGui::Render();    // implicit ImGui::EndFrame()
         ImDrawData const *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
@@ -296,8 +294,6 @@ public:
             gfxCommandSetScissorRect(gfx_); // reset scissor test
         }
 
-        io.MouseWheel  = mouse_wheel;
-        io.MouseWheelH = mouse_wheelh;
         ImGui_ImplWin32_Data* bd = ImGui_ImplWin32_GetBackendData();
         if(bd != nullptr && bd->hWnd != 0)
         {
@@ -311,7 +307,6 @@ public:
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         ImGui::NewFrame();  // can start recording new commands again
-        io.MouseWheel = io.MouseWheelH = 0.0f;
 
         return kGfxResult_NoError;
     }
