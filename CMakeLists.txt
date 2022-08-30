@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10.0)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm-0.9.9.8)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
 
 option(GFX_BUILD_EXAMPLES "Build gfx examples" ON)
