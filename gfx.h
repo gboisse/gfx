@@ -6211,7 +6211,7 @@ private:
         uint32_t const key = ((texture_type << 2) | channels);  // lookup key
         std::map<uint32_t, MipKernels>::const_iterator const it = mip_kernels_.find(key);
         if(it != mip_kernels_.end()) return (*it).second;   // already compiled
-        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr;
+        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr, *select_string = nullptr;
         switch(texture_type)
         {
         case GfxTexture::kType_2D:
@@ -6235,15 +6235,19 @@ private:
         {
         case 1:
             channel_type_str = "float";
+            select_string = "float select(bool a, float b, float c){return a ? b : c;}";
             break;
         case 2:
             channel_type_str = "float2";
+            select_string = "float2 select(bool2 a, float2 b, float2 c){return a ? b : c;}";
             break;
         case 3:
             channel_type_str = "float3";
+            select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         case 4:
             channel_type_str = "float4";
+            select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         default:
             GFX_ASSERT(0);
@@ -6253,7 +6257,9 @@ private:
         texture_type_combined += '<';
         texture_type_combined += channel_type_str;
         texture_type_combined += '>';
-        std::string mip_program_source;
+        std::string mip_program_source = "#if __HLSL_VERSION < 2021\r\n";
+        mip_program_source += select_string;
+        mip_program_source += "\r\n#endif\r\n";
         mip_program_source += texture_type_combined;
         mip_program_source += " InputBuffer;\r\n";
         mip_program_source += texture_type_combined;
@@ -6271,13 +6277,13 @@ private:
         std::string val_string = "val";
         if(channels == 4)
             val_string += ".xyz";
-        mip_program_source += '(';
+        mip_program_source += "(select(";
         mip_program_source += val_string;
-        mip_program_source += " < 0.0031308f ? 12.92f * ";
+        mip_program_source += " < 0.0031308f, 12.92f * ";
         mip_program_source += val_string;
-        mip_program_source += " : 1.055f * pow(abs(";
+        mip_program_source += ", 1.055f * pow(abs(";
         mip_program_source += val_string;
-        mip_program_source += "), 1.0f / 2.4f) - 0.055f";
+        mip_program_source += "), 1.0f / 2.4f) - 0.055f)";
         if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
@@ -6292,13 +6298,13 @@ private:
             "    if(isSRGB)\r\n"
             "        return ";
         mip_program_source += channel_type_str;
-        mip_program_source += '(';
+        mip_program_source += "(select(";
         mip_program_source += val_string;
-        mip_program_source += " < 0.04045f ? ";
+        mip_program_source += " < 0.04045f, ";
         mip_program_source += val_string;
-        mip_program_source += " / 12.92f : pow((";
+        mip_program_source += " / 12.92f, pow((";
         mip_program_source += val_string;
-        mip_program_source += " + 0.055f) / 1.055f, 2.4f)";
+        mip_program_source += " + 0.055f) / 1.055f, 2.4f))";
         if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
@@ -7149,6 +7155,7 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+        shader_args.push_back(L"-HV 2021");
         if(debug_shaders_)
         {
             shader_args.push_back(DXC_ARG_DEBUG);
