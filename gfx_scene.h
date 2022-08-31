@@ -1113,7 +1113,7 @@ private:
                         if(std::get<2>(key) >= 0)
                         {
                             vertex.uv.x = obj_reader.GetAttrib().texcoords[2 * std::get<2>(key) + 0];
-                            vertex.uv.y = obj_reader.GetAttrib().texcoords[2 * std::get<2>(key) + 1];
+                            vertex.uv.y = 1.0f - obj_reader.GetAttrib().texcoords[2 * std::get<2>(key) + 1];
                         }
                         uint32_t const index = (uint32_t)vertex_map.size();
                         vertex_map[key] = std::pair<uint32_t, GfxVertex>(index, vertex);
