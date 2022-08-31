@@ -454,6 +454,7 @@ class GfxInternal
     uint32_t max_frames_in_flight_ = 0;
 
     ID3D12Device *device_ = nullptr;
+    IDXGIAdapter1 *adapter_ = nullptr;
     ID3D12Device5 *dxr_device_ = nullptr;
     ID3D12CommandQueue *command_queue_ = nullptr;
     ID3D12GraphicsCommandList *command_list_ = nullptr;
@@ -1138,38 +1139,26 @@ public:
         };
         DXGIFactoryReleaser const factory_releaser(factory);
 
-        DXGI_ADAPTER_DESC1 adapter_desc = {};
         if(adapter != nullptr)
         {
-            IDXGIAdapter1 *adapter1 = nullptr;
-
-            struct DXGIAdapterReleaser
-            {
-                IDXGIAdapter1 *adapter;
-                GFX_NON_COPYABLE(DXGIAdapterReleaser);
-                DXGIAdapterReleaser(IDXGIAdapter1 *adapter) : adapter(adapter) {}
-                ~DXGIAdapterReleaser() { if(adapter) adapter->Release(); }
-            };
-            DXGIAdapterReleaser const adapter_releaser(adapter1);
-
             DXGI_ADAPTER_DESC desc = {}; adapter->GetDesc(&desc);
-            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter1))))
+            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
-            if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+            if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
             {
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
                 device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
-                if(!SUCCEEDED(D3D12CreateDevice(adapter1, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
+                if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                     return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             }
-            adapter1->GetDesc1(&adapter_desc);
         }
         else
         {
             IDXGIAdapter1 *adapters[8] = {};
             uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
+            DXGI_ADAPTER_DESC1 adapter_desc;
             DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
             for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
             {
@@ -1231,7 +1220,8 @@ public:
                 if(!SUCCEEDED(D3D12CreateDevice(adapters[i], D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                     return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
             }
-            adapters[i]->GetDesc1(&adapter_desc);
+            adapter_ = adapters[i];
+            adapters[i] = nullptr;
         }
         debug_shaders_ = ((flags & kGfxCreateContextFlag_EnableShaderDebugging) != 0);
         device_->QueryInterface(IID_PPV_ARGS(&dxr_device_));
@@ -1311,7 +1301,7 @@ public:
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         command_list_->ResourceBarrier(1, &resource_barrier);
 
-        return initializeCommon(adapter_desc, context);
+        return initializeCommon(context);
     }
 
     GfxResult initialize(ID3D12Device *device, uint32_t max_frames_in_flight, GfxContext &context)
@@ -1322,12 +1312,8 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
-        IDXGIAdapter1 *adapter = nullptr;
-        DXGI_ADAPTER_DESC1 adapter_desc = {};
-        if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter))))
+        if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to find interop adapter");
-        adapter->GetDesc1(&adapter_desc);
-        adapter->Release();
 
         device_ = device;
         max_frames_in_flight_ = GFX_MAX(max_frames_in_flight, 1u);
@@ -1344,10 +1330,10 @@ public:
         command_queue->GetTimestampFrequency(&timestamp_query_ticks_per_second_);
         command_queue->Release();
 
-        return initializeCommon(adapter_desc, context);
+        return initializeCommon(context);
     }
 
-    GfxResult initializeCommon(DXGI_ADAPTER_DESC1 const &adapter_desc, GfxContext &context)
+    GfxResult initializeCommon(GfxContext &context)
     {
         D3D12_FEATURE_DATA_D3D12_OPTIONS5 rt_features = {};
         device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5));
@@ -1355,9 +1341,10 @@ public:
         if(dxr_device_ == nullptr && dxr_command_list_ != nullptr) { dxr_command_list_->Release(); dxr_command_list_ = nullptr; }
 
         D3D12MA::ALLOCATOR_DESC
-        allocator_desc         = {};
-        allocator_desc.Flags   = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
-        allocator_desc.pDevice = device_;
+        allocator_desc          = {};
+        allocator_desc.Flags    = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
+        allocator_desc.pDevice  = device_;
+        allocator_desc.pAdapter = adapter_;
         if(!SUCCEEDED(D3D12MA::CreateAllocator(&allocator_desc, &mem_allocator_)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create memory allocator");
 
@@ -1438,6 +1425,8 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the graphics kernel for copying to the backbuffer");
         }
 
+        DXGI_ADAPTER_DESC1 adapter_desc = {};
+        adapter_->GetDesc1(&adapter_desc);
         context.vendor_id = adapter_desc.VendorId;
         GFX_SNPRINTF(context.name, sizeof(context.name), "%ws", adapter_desc.Description);
         GFX_PRINTLN("Created %s `%ws'", isInterop() ? "interop context" : "Direct3D12 device", adapter_desc.Description);
@@ -6215,7 +6204,7 @@ private:
         uint32_t const key = ((texture_type << 2) | channels);  // lookup key
         std::map<uint32_t, MipKernels>::const_iterator const it = mip_kernels_.find(key);
         if(it != mip_kernels_.end()) return (*it).second;   // already compiled
-        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr;
+        char const *texture_type_str = nullptr, *channel_type_str = nullptr, *did_type_str = nullptr, *select_string = nullptr;
         switch(texture_type)
         {
         case GfxTexture::kType_2D:
@@ -6239,15 +6228,19 @@ private:
         {
         case 1:
             channel_type_str = "float";
+            select_string = "float select(bool a, float b, float c){return a ? b : c;}";
             break;
         case 2:
             channel_type_str = "float2";
+            select_string = "float2 select(bool2 a, float2 b, float2 c){return a ? b : c;}";
             break;
         case 3:
             channel_type_str = "float3";
+            select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         case 4:
             channel_type_str = "float4";
+            select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         default:
             GFX_ASSERT(0);
@@ -6257,7 +6250,9 @@ private:
         texture_type_combined += '<';
         texture_type_combined += channel_type_str;
         texture_type_combined += '>';
-        std::string mip_program_source;
+        std::string mip_program_source = "#if __HLSL_VERSION < 2021\r\n";
+        mip_program_source += select_string;
+        mip_program_source += "\r\n#endif\r\n";
         mip_program_source += texture_type_combined;
         mip_program_source += " InputBuffer;\r\n";
         mip_program_source += texture_type_combined;
@@ -6275,13 +6270,13 @@ private:
         std::string val_string = "val";
         if(channels == 4)
             val_string += ".xyz";
-        mip_program_source += '(';
+        mip_program_source += "(select(";
         mip_program_source += val_string;
-        mip_program_source += " < 0.0031308f ? 12.92f * ";
+        mip_program_source += " < 0.0031308f, 12.92f * ";
         mip_program_source += val_string;
-        mip_program_source += " : 1.055f * pow(abs(";
+        mip_program_source += ", 1.055f * pow(abs(";
         mip_program_source += val_string;
-        mip_program_source += "), 1.0f / 2.4f) - 0.055f";
+        mip_program_source += "), 1.0f / 2.4f) - 0.055f)";
         if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
@@ -6296,13 +6291,13 @@ private:
             "    if(isSRGB)\r\n"
             "        return ";
         mip_program_source += channel_type_str;
-        mip_program_source += '(';
+        mip_program_source += "(select(";
         mip_program_source += val_string;
-        mip_program_source += " < 0.04045f ? ";
+        mip_program_source += " < 0.04045f, ";
         mip_program_source += val_string;
-        mip_program_source += " / 12.92f : pow((";
+        mip_program_source += " / 12.92f, pow((";
         mip_program_source += val_string;
-        mip_program_source += " + 0.055f) / 1.055f, 2.4f)";
+        mip_program_source += " + 0.055f) / 1.055f, 2.4f))";
         if(channels == 4)
             mip_program_source += ", val.w";
         mip_program_source += "); \r\n"
@@ -7101,8 +7096,10 @@ private:
         {
             GFX_SNPRINTF(shader_file, sizeof(shader_file), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
             mbstowcs(wshader_file, shader_file, ARRAYSIZE(shader_file));
+            // Check file existence before LoadFile call. LoadFile spams hlsl::Exception messages if file not found.
+            if(GetFileAttributesW(wshader_file) == INVALID_FILE_ATTRIBUTES) return;
             dxc_utils_->LoadFile(wshader_file, nullptr, &dxc_source);
-            if(!dxc_source) return; // no source found for this shader
+            if(!dxc_source) return; // failed to load source file
             shader_source.Ptr = dxc_source->GetBufferPointer();
             shader_source.Size = dxc_source->GetBufferSize();
         }
@@ -7148,9 +7145,10 @@ private:
 
         std::vector<LPCWSTR> shader_args;
         shader_args.push_back(wshader_file);
-        shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
+        shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+        shader_args.push_back(L"-HV 2021");
         if(debug_shaders_)
         {
             shader_args.push_back(DXC_ARG_DEBUG);
@@ -7164,10 +7162,13 @@ private:
             size_t max_define_length = 0;
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
                 max_define_length = GFX_MAX(max_define_length, strlen(kernel.defines_[i].c_str()));
-            WCHAR *wdefine = (WCHAR *)alloca((max_define_length + 1) << 1);
+            max_define_length += 3; // `//' + null terminator: https://github.com/gboisse/gfx/issues/41
+            WCHAR *wdefine = (WCHAR *)alloca(max_define_length << 1);
+            char *define = (char *)alloca(max_define_length);
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
             {
-                mbstowcs(wdefine, kernel.defines_[i].c_str(), max_define_length + 1);
+                GFX_SNPRINTF(define, max_define_length, "%s//", kernel.defines_[i].c_str());
+                mbstowcs(wdefine, define, max_define_length);
                 user_defines.push_back(wdefine);
             }
             for(size_t i = 0; i < user_defines.size(); ++i)
