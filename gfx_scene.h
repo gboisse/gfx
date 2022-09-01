@@ -1300,12 +1300,14 @@ private:
                     GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                     if (!metallicity_map_ref)
                     {
-                        if (gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
+                        std::ifstream f(metallicity_map_file.c_str(), std::ios_base::in);
+                        if (f.good() && gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
                             metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
                     }
                     if (!metallicity_map_ref)
                     {
-                        if (gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
+                        std::ifstream f(roughness_map_file.c_str(), std::ios_base::in);
+                        if (f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
                             roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                     }
                     if(!metallicity_map_ref && !roughness_map_ref)
