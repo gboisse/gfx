@@ -1795,7 +1795,8 @@ private:
             {
             case 1: tf = KTX_TTF_BC4_R; break;
             case 2: tf = KTX_TTF_BC5_RG; break;
-            default: tf = KTX_TTF_BC7_RGBA; break;
+            case 3: tf = KTX_TTF_BC1_RGB; break; //TODO: Use BC7 once transcoding correctly handles setting alpha
+            default: tf = KTX_TTF_BC3_RGBA; break;
             }
             result = ktxTexture2_TranscodeBasis(ktx_texture, tf, KTX_TF_HIGH_QUALITY);
             if(result != KTX_SUCCESS)
