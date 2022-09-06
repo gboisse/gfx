@@ -1282,8 +1282,7 @@ private:
             if(it != images.end())
             {
                 std::map<cgltf_image const*, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 =
-                    maps.find(metallicity_roughness_map_text->basisu_image != nullptr ?
-                    metallicity_roughness_map_text->basisu_image : metallicity_roughness_map_text->image);
+                    maps.find(it->first);
                 if(it2 != maps.end())
                 {
                     material_ref->roughness_map = (*it2).second.first;
@@ -1361,7 +1360,7 @@ private:
                     }
                     material.roughness_map = roughness_map_ref;
                     material.metallicity_map = metallicity_map_ref;
-                    maps[metallicity_roughness_map_text->image] =
+                    maps[it->first] =
                         std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>(roughness_map_ref, metallicity_map_ref);
                 }
             }
