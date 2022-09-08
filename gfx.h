@@ -5114,9 +5114,14 @@ private:
                 case Kernel::Parameter::kType_RWTexture3D:
                 case Kernel::Parameter::kType_RWTexture2DArray:
                     if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_ &&
-                       parameter.parameter_->type_ == Program::Parameter::kType_Image &&
-                       texture_handles_.has_handle(parameter.parameter_->data_.image_.textures_->handle))
-                        ensureTextureHasUsageFlag(textures_[*parameter.parameter_->data_.image_.textures_], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                       parameter.parameter_->type_ == Program::Parameter::kType_Image)
+                    {
+                        for (uint32_t j = 0; j < parameter.parameter_->data_.image_.texture_count; ++j)
+                        {
+                            if (texture_handles_.has_handle(parameter.parameter_->data_.image_.textures_[j].handle))
+                                ensureTextureHasUsageFlag(textures_[parameter.parameter_->data_.image_.textures_[j]], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                        }
+                    }
                     break;
                 case Kernel::Parameter::kType_AccelerationStructure:
                     if(parameter.parameter_ != nullptr && parameter.id_ == parameter.parameter_->id_)
