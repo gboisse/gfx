@@ -194,14 +194,15 @@ enum GfxBuildRaytracingPrimitiveFlag
 {
     kGfxBuildRaytracingPrimitiveFlag_Opaque = 1 << 0
 };
+typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 
 class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, uint32_t build_flags = 0);
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, uint32_t build_flags = 0);
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
@@ -2166,7 +2167,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, uint32_t build_flags)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -2180,13 +2181,13 @@ public:
         if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion vertices");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        gfx_raytracing_primitive.build_flags_ = build_flags;
+        gfx_raytracing_primitive.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.vertex_stride_ = vertex_stride;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, uint32_t build_flags)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -2205,7 +2206,7 @@ public:
         if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion vertices");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        gfx_raytracing_primitive.build_flags_ = build_flags;
+        gfx_raytracing_primitive.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.index_buffer_ = createBufferRange(index_buffer, 0, index_buffer.size);
         gfx_raytracing_primitive.index_stride_ = index_stride;
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
@@ -5106,10 +5107,10 @@ private:
                 case Kernel::Parameter::kType_RWTexture2D:
                 case Kernel::Parameter::kType_RWTexture3D:
                 case Kernel::Parameter::kType_RWTexture2DArray:
-                    if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_ &&
-                       parameter.parameter_->type_ == Program::Parameter::kType_Image &&
-                       texture_handles_.has_handle(parameter.parameter_->data_.image_.textures_->handle))
-                        ensureTextureHasUsageFlag(textures_[*parameter.parameter_->data_.image_.textures_], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+                    if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_ && parameter.parameter_->type_ == Program::Parameter::kType_Image)
+                        for(uint32_t j = 0; j < parameter.parameter_->data_.image_.texture_count; ++j)
+                            if(texture_handles_.has_handle(parameter.parameter_->data_.image_.textures_[j].handle))
+                                ensureTextureHasUsageFlag(textures_[parameter.parameter_->data_.image_.textures_[j]], D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
                     break;
                 case Kernel::Parameter::kType_AccelerationStructure:
                     if(parameter.parameter_ != nullptr && parameter.id_ == parameter.parameter_->id_)
@@ -7694,14 +7695,14 @@ GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimiti
     return gfx->destroyRaytracingPrimitive(raytracing_primitive);
 }
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride, uint32_t build_flags)
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->buildRaytracingPrimitive(raytracing_primitive, vertex_buffer, vertex_stride, build_flags);
 }
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, uint32_t build_flags)
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
