@@ -1301,13 +1301,19 @@ private:
                     {
                         std::ifstream f(metallicity_map_file.c_str(), std::ios_base::in);
                         if (f.good() && gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
+                        {
                             metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
+                            metallicity_map_ref->format = ConvertImageFormatLinear(metallicity_map_ref->format);
+                        }
                     }
                     if (!metallicity_map_ref)
                     {
                         std::ifstream f(roughness_map_file.c_str(), std::ios_base::in);
                         if (f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
+                        {
                             roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
+                            roughness_map_ref->format = ConvertImageFormatLinear(roughness_map_ref->format);
+                        }
                     }
                     if(!metallicity_map_ref && !roughness_map_ref)
                     {
@@ -1784,8 +1790,7 @@ private:
         image_ref->data.resize(0);
         image_ref->data.reserve(ktxTexture_GetDataSizeUncompressed((ktxTexture*)ktx_texture));
         image_ref->channel_count = ktxTexture2_GetNumComponents(ktx_texture);
-        uint32_t temp;
-        ktxTexture2_GetComponentInfo(ktx_texture, &temp, &image_ref->bytes_per_channel);
+        image_ref->bytes_per_channel = 1; //basisu only support 8bit
         if(ktxTexture2_NeedsTranscoding(ktx_texture))
         {
             // Need to determine number of texture channels
