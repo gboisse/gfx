@@ -218,15 +218,16 @@ enum GfxImageFlag
     kGfxImageFlag_HasAlphaChannel = 1 << 0,
     kGfxImageFlag_HasMipLevels    = 1 << 1
 };
+typedef uint32_t GfxImageFlags;
 
 struct GfxImage
 {
-    uint32_t    width             = 0;
-    uint32_t    height            = 0;
-    uint32_t    channel_count     = 0;
-    uint32_t    bytes_per_channel = 0;
-    DXGI_FORMAT format            = DXGI_FORMAT_UNKNOWN;
-    uint32_t    flags             = 0;
+    uint32_t      width             = 0;
+    uint32_t      height            = 0;
+    uint32_t      channel_count     = 0;
+    uint32_t      bytes_per_channel = 0;
+    DXGI_FORMAT   format            = DXGI_FORMAT_UNKNOWN;
+    GfxImageFlags flags             = 0;
 
     std::vector<uint8_t> data;
 };

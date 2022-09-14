@@ -1,13 +1,14 @@
 cmake_minimum_required(VERSION 3.10.0)
 
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm)
-add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
 set(KTX_FEATURE_TESTS OFF)
 set(KTX_FEATURE_VULKAN OFF)
 set(KTX_FEATURE_GL_UPLOAD OFF)
 set(KTX_FEATURE_TOOLS OFF)
 set(KTX_FEATURE_DOC OFF)
 set(KTX_FEATURE_STATIC_LIBRARY ON)
+
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software)
 
 option(GFX_BUILD_EXAMPLES "Build gfx examples" ON)
@@ -36,6 +37,11 @@ target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/st
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
+
+target_compile_options(ktx      PRIVATE "/wd4005")  # 'KTX_API': macro redefinition
+target_compile_options(ktx      PRIVATE "/wd4244")  # '=': conversion from '__int64' to 'ktx_uint32_t', possible loss of data
+target_compile_options(ktx      PRIVATE "/wd4267")  # 'initializing': conversion from 'size_t' to 'ktx_uint32_t', possible loss of data
+target_compile_options(ktx_read PRIVATE "/wd4005")
 
 target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader ktx
     ${GFX_DXC_PATH}/lib/x64/dxcompiler.lib
