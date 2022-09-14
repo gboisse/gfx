@@ -215,7 +215,8 @@ GfxMetadata const& gfxSceneGetLightMetadata(GfxScene scene, uint64_t light_handl
 
 enum GfxImageFlag
 {
-    kGfxImageFlag_AlphaChannel = 1 << 0
+    kGfxImageFlag_HasAlphaChannel = 1 << 0,
+    kGfxImageFlag_HasMipLevels    = 1 << 1
 };
 
 struct GfxImage
@@ -225,7 +226,6 @@ struct GfxImage
     uint32_t    channel_count     = 0;
     uint32_t    bytes_per_channel = 0;
     DXGI_FORMAT format            = DXGI_FORMAT_UNKNOWN;
-    bool        mips              = false;
     uint32_t    flags             = 0;
 
     std::vector<uint8_t> data;
@@ -247,18 +247,32 @@ GfxMetadata const &gfxSceneGetImageMetadata(GfxScene scene, uint64_t image_handl
 
 inline bool gfxImageIsFormatCompressed(GfxImage const& image)
 {
-    if (image.format == DXGI_FORMAT_BC1_TYPELESS || image.format == DXGI_FORMAT_BC1_UNORM ||
-        image.format == DXGI_FORMAT_BC1_UNORM_SRGB || image.format == DXGI_FORMAT_BC2_TYPELESS ||
-        image.format == DXGI_FORMAT_BC2_UNORM || image.format == DXGI_FORMAT_BC2_UNORM_SRGB ||
-        image.format == DXGI_FORMAT_BC3_TYPELESS || image.format == DXGI_FORMAT_BC3_UNORM ||
-        image.format == DXGI_FORMAT_BC3_UNORM_SRGB || image.format == DXGI_FORMAT_BC4_TYPELESS ||
-        image.format == DXGI_FORMAT_BC4_UNORM || image.format == DXGI_FORMAT_BC4_SNORM ||
-        image.format == DXGI_FORMAT_BC5_TYPELESS || image.format == DXGI_FORMAT_BC5_UNORM ||
-        image.format == DXGI_FORMAT_BC5_SNORM || image.format == DXGI_FORMAT_BC6H_TYPELESS ||
-        image.format == DXGI_FORMAT_BC6H_UF16 || image.format == DXGI_FORMAT_BC6H_SF16 ||
-        image.format == DXGI_FORMAT_BC7_TYPELESS || image.format == DXGI_FORMAT_BC7_UNORM ||
-        image.format == DXGI_FORMAT_BC7_UNORM_SRGB)             {
+    switch(image.format)
+    {
+    case DXGI_FORMAT_BC1_TYPELESS:
+    case DXGI_FORMAT_BC1_UNORM: // fall through
+    case DXGI_FORMAT_BC1_UNORM_SRGB:
+    case DXGI_FORMAT_BC2_TYPELESS:
+    case DXGI_FORMAT_BC2_UNORM:
+    case DXGI_FORMAT_BC2_UNORM_SRGB:
+    case DXGI_FORMAT_BC3_TYPELESS:
+    case DXGI_FORMAT_BC3_UNORM:
+    case DXGI_FORMAT_BC3_UNORM_SRGB:
+    case DXGI_FORMAT_BC4_TYPELESS:
+    case DXGI_FORMAT_BC4_UNORM:
+    case DXGI_FORMAT_BC4_SNORM:
+    case DXGI_FORMAT_BC5_TYPELESS:
+    case DXGI_FORMAT_BC5_UNORM:
+    case DXGI_FORMAT_BC5_SNORM:
+    case DXGI_FORMAT_BC6H_TYPELESS:
+    case DXGI_FORMAT_BC6H_UF16:
+    case DXGI_FORMAT_BC6H_SF16:
+    case DXGI_FORMAT_BC7_TYPELESS:
+    case DXGI_FORMAT_BC7_UNORM:
+    case DXGI_FORMAT_BC7_UNORM_SRGB:
         return true;
+    default:
+        break;
     }
     return false;
 }
@@ -998,13 +1012,15 @@ private:
         case DXGI_FORMAT_B8G8R8A8_TYPELESS: return DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;
         case DXGI_FORMAT_B8G8R8X8_TYPELESS: return DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
         default:
-            return format;
+            break;
         }
+        return format;
     }
 
     static inline DXGI_FORMAT ConvertImageFormatLinear(const DXGI_FORMAT format)
     {
-        switch (format) {
+        switch(format)
+        {
         case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB: return DXGI_FORMAT_R8G8B8A8_UNORM;
         case DXGI_FORMAT_BC1_UNORM_SRGB: return DXGI_FORMAT_BC1_UNORM;
         case DXGI_FORMAT_BC2_UNORM_SRGB: return DXGI_FORMAT_BC2_UNORM;
@@ -1013,8 +1029,9 @@ private:
         case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8A8_TYPELESS;
         case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB: return DXGI_FORMAT_B8G8R8X8_TYPELESS;
         default:
-            return format;
+            break;
         }
+        return format;
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1177,14 +1194,12 @@ private:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to parse gltf file `%s'", asset_file);
         }
         result = cgltf_load_buffers(&options, gltf_model, asset_file);
-        if (result != cgltf_result_success) {
+        if(result != cgltf_result_success)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to load gltf file `%s'", asset_file);
-        }
 #ifndef NDEBUG
-        if (cgltf_validate(gltf_model) != cgltf_result_success) {
+        if(cgltf_validate(gltf_model) != cgltf_result_success)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Invalid gltf file `%s'", asset_file);
-        }
-#endif
+#endif //! NDEBUG
         if(gltf_model->scenes_count == 0)
             return kGfxResult_NoError;  // nothing needs loading
         std::map<cgltf_camera const*, GfxConstRef<GfxCamera>> cameras;
@@ -1297,19 +1312,19 @@ private:
                     std::string const roughness_map_file = asset_file_name + ".roughness" + asset_file_extension;
                     GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
                     GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
-                    if (!metallicity_map_ref)
+                    if(!metallicity_map_ref)
                     {
                         std::ifstream f(metallicity_map_file.c_str(), std::ios_base::in);
-                        if (f.good() && gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
+                        if(f.good() && gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
                         {
                             metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
                             metallicity_map_ref->format = ConvertImageFormatLinear(metallicity_map_ref->format);
                         }
                     }
-                    if (!metallicity_map_ref)
+                    if(!metallicity_map_ref)
                     {
                         std::ifstream f(roughness_map_file.c_str(), std::ios_base::in);
-                        if (f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
+                        if(f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
                         {
                             roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                             roughness_map_ref->format = ConvertImageFormatLinear(roughness_map_ref->format);
@@ -1317,7 +1332,7 @@ private:
                     }
                     if(!metallicity_map_ref && !roughness_map_ref)
                     {
-                        if (gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
+                        if(gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
                         {
                             GFX_PRINT_ERROR(kGfxResult_InternalError, "Compressed textures require separate metal/roughness textures '%s'", image_metadata_[(*it).second].asset_file);
                             continue;
@@ -1376,7 +1391,7 @@ private:
             if(it != images.end())
             {
                 GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
-                if (temp->bytes_per_channel <= 1)
+                if(temp->bytes_per_channel <= 1)
                     temp->format = ConvertImageFormatSRGB(temp->format);
                 material.emissivity_map = (*it).second;
             }
@@ -1715,7 +1730,7 @@ private:
                     }
                     data[dst_index] = source;
                 }
-        image_ref->flags = (!alpha_check ? 0 : kGfxImageFlag_AlphaChannel);
+        image_ref->flags = (!alpha_check ? 0 : kGfxImageFlag_HasAlphaChannel);
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
@@ -1819,8 +1834,8 @@ private:
         image_ref->height = ktx_texture->baseHeight;
         if(image_ref->format == DXGI_FORMAT_UNKNOWN)
             image_ref->format = GetImageFormat(*image_ref);
-        image_ref->mips = ktx_texture->numLevels > 1;
-        image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_AlphaChannel);
+        image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_HasAlphaChannel);
+        image_ref->flags |= (ktx_texture->numLevels > 1 ? kGfxImageFlag_HasMipLevels : 0);
 
         GfxMetadata& image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
@@ -1861,31 +1876,33 @@ private:
         {
             uint8_t *data = image_ref->data.data();
             uint8_t alpha_check = 255;  // check alpha
-            for (int32_t y = 0; y < image_height; ++y)
-                for (int32_t x = 0; x < image_width; ++x)
-                    for (int32_t k = 0; k < (int32_t)resolved_channel_count; ++k) {
+            for(int32_t y = 0; y < image_height; ++y)
+                for(int32_t x = 0; x < image_width; ++x)
+                    for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
+                    {
                         int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * image_width) + k;
                         int32_t const src_index = channel_count * (x + y * image_width) + k;
                         uint8_t const source = (k < channel_count ? image_data[src_index] : (uint8_t)255);
-                        if (k == 3) alpha_check &= source;
+                        if(k == 3) alpha_check &= source;
                         data[dst_index] = source;
                     }
-            image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_AlphaChannel);
+            image_ref->flags = (alpha_check == 255 ? 0 : kGfxImageFlag_HasAlphaChannel);
         }
         else
         {
             uint16_t *data = (uint16_t*)image_ref->data.data();
             uint16_t alpha_check = 65535;   // check alpha
-            for (int32_t y = 0; y < image_height; ++y)
-                for (int32_t x = 0; x < image_width; ++x)
-                    for (int32_t k = 0; k < (int32_t)resolved_channel_count; ++k) {
+            for(int32_t y = 0; y < image_height; ++y)
+                for(int32_t x = 0; x < image_width; ++x)
+                    for(int32_t k = 0; k < (int32_t)resolved_channel_count; ++k)
+                    {
                         int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * image_width) + k;
                         int32_t const src_index = channel_count * (x + y * image_width) + k;
                         uint16_t const source = (k < channel_count ? image_data[src_index] : (uint16_t)65535);
-                        if (k == 3) alpha_check &= source;
+                        if(k == 3) alpha_check &= source;
                         data[dst_index] = source;
                     }
-            image_ref->flags = (alpha_check == 65535 ? 0 : kGfxImageFlag_AlphaChannel);
+            image_ref->flags = (alpha_check == 65535 ? 0 : kGfxImageFlag_HasAlphaChannel);
         }
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
