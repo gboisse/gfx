@@ -175,7 +175,7 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
     {
         GfxConstRef<GfxImage> const image_ref = gfxSceneGetImageHandle(scene, i);
 
-        GfxTexture texture = gfxCreateTexture2D(gfx, image_ref->width, image_ref->height, gfxImageGetFormat(*image_ref), gfxCalculateMipCount(image_ref->width, image_ref->height));
+        GfxTexture texture = gfxCreateTexture2D(gfx, image_ref->width, image_ref->height, image_ref->format, gfxCalculateMipCount(image_ref->width, image_ref->height));
 
         uint32_t const texture_size = image_ref->width * image_ref->height * image_ref->channel_count * image_ref->bytes_per_channel;
 

@@ -103,7 +103,7 @@ int32_t main()
             GfxImage const &albedo_map = *material_ref->albedo_map;
             uint32_t const mip_count   = gfxCalculateMipCount(albedo_map.width, albedo_map.height);
 
-            albedo_buffer = gfxCreateTexture2D(gfx, albedo_map.width, albedo_map.height, gfxImageGetFormat(albedo_map), mip_count);
+            albedo_buffer = gfxCreateTexture2D(gfx, albedo_map.width, albedo_map.height, albedo_map.format, mip_count);
 
             GfxBuffer upload_buffer = gfxCreateBuffer(gfx, albedo_map.width * albedo_map.height * albedo_map.channel_count, albedo_map.data.data());
             gfxCommandCopyBufferToTexture(gfx, albedo_buffer, upload_buffer);

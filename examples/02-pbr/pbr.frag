@@ -125,7 +125,7 @@ Result main(in Params params)
     }
 
     // Post-process our material properties
-    //material.albedo.xyz            = pow(material.albedo.xyz, 2.2f);
+    material.albedo.xyz              = sqrt(material.albedo.xyz);
     material.metallicity_roughness.x = saturate(material.metallicity_roughness.x);
     material.metallicity_roughness.z = clamp(material.metallicity_roughness.z * material.metallicity_roughness.z, 0.01f, 1.0f);
 
@@ -159,7 +159,7 @@ Result main(in Params params)
     color *= 0.75f;
     color /= 1.0f + color;
     color  = saturate(color);
-    color  = pow(color, 1.0f / 2.2f);
+    color  = sqrt(color);
     color  = color * color * (3.0f - 2.0f * color);
 
     // Populate our multiple render targets (i.e., MRT)
