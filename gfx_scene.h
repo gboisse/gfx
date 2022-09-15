@@ -284,16 +284,28 @@ inline bool gfxImageIsFormatCompressed(GfxImage const& image)
 
 struct GfxMaterial
 {
-    glm::vec4 albedo      = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
-    float     roughness   = 1.0f;
-    float     metallicity = 0.0f;
-    glm::vec3 emissivity  = glm::vec3(0.0f, 0.0f, 0.0f);
+    glm::vec4 albedo              = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
+    float     roughness           = 1.0f;
+    float     metallicity         = 0.0f;
+    glm::vec3 emissivity          = glm::vec3(0.0f, 0.0f, 0.0f);
+    float     ior                 = 1.5f;
+    glm::vec4 specular            = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); //.w=specular factor
+    float     transmission        = 0.0f;
+    glm::vec4 sheen               = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); //.w=sheen roughness
+    float     clearcoat           = 0.0f;
+    float     clearcoat_roughness = 0.0f;
+
 
     GfxConstRef<GfxImage> albedo_map;
     GfxConstRef<GfxImage> roughness_map;
     GfxConstRef<GfxImage> metallicity_map;
     GfxConstRef<GfxImage> emissivity_map;
+    GfxConstRef<GfxImage> specular_map;
     GfxConstRef<GfxImage> normal_map;
+    GfxConstRef<GfxImage> transmission_map;
+    GfxConstRef<GfxImage> sheen_map;
+    GfxConstRef<GfxImage> clearcoat_map;
+    GfxConstRef<GfxImage> clearcoat_roughness_map;
     GfxConstRef<GfxImage> ao_map;
 };
 
@@ -1069,11 +1081,13 @@ private:
             material_ref->roughness = obj_material.roughness;
             material_ref->metallicity = obj_material.metallic;
             material_ref->emissivity = glm::vec3(obj_material.emission[0], obj_material.emission[1], obj_material.emission[2]);
+            material_ref->ior = obj_material.ior;
+            material_ref->specular = glm::vec4(obj_material.specular[0], obj_material.specular[1], obj_material.specular[2], 1.0f);
             LoadImage(obj_material.diffuse_texname, material_ref->albedo_map);
             if(material_ref->albedo_map)
             {
-                if(material_ref->albedo_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->albedo_map->bytes_per_channel <= 1)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = ConvertImageFormatSRGB(material_ref->albedo_map->format);
                 material_ref->albedo = glm::vec4(glm::vec3(1.0f), material_ref->albedo.w);
             }
             LoadImage(obj_material.roughness_texname, material_ref->roughness_map);
@@ -1083,9 +1097,15 @@ private:
             LoadImage(obj_material.emissive_texname, material_ref->emissivity_map);
             if(material_ref->emissivity_map)
             {
-                if(material_ref->emissivity_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->emissivity_map->bytes_per_channel <= 1)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = ConvertImageFormatSRGB(material_ref->emissivity_map->format);
                 material_ref->emissivity = glm::vec3(1.0f);
+            }
+            LoadImage(obj_material.specular_texname, material_ref->specular_map);
+            if (material_ref->specular_map) {
+                if(material_ref->specular_map->bytes_per_channel <= 1)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->specular_map)->format = ConvertImageFormatSRGB(material_ref->specular_map->format);
+                material_ref->specular = glm::vec4(1.0f);
             }
             materials[i] = material_ref;    // append the new material
         }
@@ -1282,6 +1302,19 @@ private:
             material.metallicity = gltf_material_pbr.metallic_factor;
             material.emissivity = glm::vec3(gltf_material.emissive_factor[0], gltf_material.emissive_factor[1],
                 gltf_material.emissive_factor[2]);
+            if(gltf_material.has_ior)
+                material.ior = gltf_material.ior.ior;
+            if(gltf_material.has_specular)
+                material.specular = glm::vec4(gltf_material.specular.specular_color_factor[0], gltf_material.specular.specular_color_factor[1], gltf_material.specular.specular_color_factor[2], gltf_material.specular.specular_factor);
+            if(gltf_material.has_transmission)
+                material.transmission = gltf_material.transmission.transmission_factor;
+            if(gltf_material.has_sheen)
+                material.sheen = glm::vec4(gltf_material.sheen.sheen_color_factor[0], gltf_material.sheen.sheen_color_factor[1], gltf_material.sheen.sheen_color_factor[2], gltf_material.sheen.sheen_roughness_factor);
+            if(gltf_material.has_clearcoat)
+            {
+                material.clearcoat = gltf_material.clearcoat.clearcoat_factor;
+                material.clearcoat_roughness = gltf_material.clearcoat.clearcoat_roughness_factor;
+            }
             cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
             it = (albedo_map_text != nullptr ? images.find(albedo_map_text->basisu_image != nullptr ?
                 albedo_map_text->basisu_image : albedo_map_text->image) : images.end());
@@ -1396,13 +1429,77 @@ private:
                     temp->format = ConvertImageFormatSRGB(temp->format);
                 material.emissivity_map = (*it).second;
             }
+            if(gltf_material.has_specular)
+            {
+                cgltf_texture const* specular_map_text = gltf_material.specular.specular_color_texture.texture;
+                it = (specular_map_text != nullptr ? images.find(specular_map_text->basisu_image != nullptr ?
+                    specular_map_text->basisu_image : specular_map_text->image) : images.end());
+                if(it != images.end())
+                {
+                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    if (temp->bytes_per_channel <= 1)
+                        temp->format = ConvertImageFormatSRGB(temp->format);
+                    material.specular_map = (*it).second;
+                }
+                if(gltf_material.specular.specular_texture.texture != nullptr &&
+                    gltf_material.specular.specular_texture.texture != specular_map_text)
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Specular factor texture should be stored in Specular color texture alpha channel");
+            }
             cgltf_texture const *normal_map_text = gltf_material.normal_texture.texture;
             it = (normal_map_text != nullptr ? images.find(normal_map_text->basisu_image != nullptr ?
                 normal_map_text->basisu_image : normal_map_text->image) : images.end());
-            if(it != images.end()) {
+            if(it != images.end())
+            {
                 GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                 temp->format = ConvertImageFormatLinear(temp->format);
                 material.normal_map = (*it).second;
+            }
+            if(gltf_material.has_transmission)
+            {
+                cgltf_texture const* transmission_map_text = gltf_material.transmission.transmission_texture.texture;
+                it = (transmission_map_text != nullptr ? images.find(transmission_map_text->basisu_image != nullptr ?
+                    transmission_map_text->basisu_image : transmission_map_text->image) : images.end());
+                if(it != images.end())
+                {
+                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    temp->format = ConvertImageFormatLinear(temp->format);
+                    material.transmission_map = (*it).second;
+                }
+            }
+            if(gltf_material.has_sheen)
+            {
+                cgltf_texture const* sheen_map_text = gltf_material.sheen.sheen_color_texture.texture;
+                it = (sheen_map_text != nullptr ? images.find(sheen_map_text->basisu_image != nullptr ?
+                    sheen_map_text->basisu_image : sheen_map_text->image) : images.end());
+                if(it != images.end())
+                {
+                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    if (temp->bytes_per_channel <= 1)
+                        temp->format = ConvertImageFormatSRGB(temp->format);
+                    material.sheen_map = (*it).second;
+                }
+                if(gltf_material.sheen.sheen_roughness_texture.texture != nullptr &&
+                    gltf_material.sheen.sheen_roughness_texture.texture != sheen_map_text)
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Sheen roughness texture should be stored in Sheen color texture alpha channel");
+            }
+            if(gltf_material.has_clearcoat)
+            {
+                cgltf_texture const* clearcoat_map_text = gltf_material.clearcoat.clearcoat_texture.texture;
+                it = (clearcoat_map_text != nullptr ? images.find(clearcoat_map_text->basisu_image != nullptr ?
+                    clearcoat_map_text->basisu_image : clearcoat_map_text->image) : images.end());
+                if (it != images.end()) {
+                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    temp->format = ConvertImageFormatLinear(temp->format);
+                    material.clearcoat_map = (*it).second;
+                }
+                cgltf_texture const* clearcoat_rough_map_text = gltf_material.clearcoat.clearcoat_roughness_texture.texture;
+                it = (clearcoat_rough_map_text != nullptr ? images.find(clearcoat_rough_map_text->basisu_image != nullptr ?
+                    clearcoat_rough_map_text->basisu_image : clearcoat_rough_map_text->image) : images.end());
+                if (it != images.end()) {
+                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    temp->format = ConvertImageFormatLinear(temp->format);
+                    material.clearcoat_roughness_map = (*it).second;
+                }
             }
             cgltf_texture const *ao_map_text = gltf_material.occlusion_texture.texture;
             it = (ao_map_text != nullptr ? images.find(ao_map_text->basisu_image != nullptr ?
