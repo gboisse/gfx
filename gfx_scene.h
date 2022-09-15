@@ -1086,8 +1086,8 @@ private:
             LoadImage(obj_material.diffuse_texname, material_ref->albedo_map);
             if(material_ref->albedo_map)
             {
-                if(material_ref->albedo_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->albedo_map->bytes_per_channel <= 1)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->albedo_map)->format = ConvertImageFormatSRGB(material_ref->albedo_map->format);
                 material_ref->albedo = glm::vec4(glm::vec3(1.0f), material_ref->albedo.w);
             }
             LoadImage(obj_material.roughness_texname, material_ref->roughness_map);
@@ -1097,14 +1097,14 @@ private:
             LoadImage(obj_material.emissive_texname, material_ref->emissivity_map);
             if(material_ref->emissivity_map)
             {
-                if(material_ref->emissivity_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->emissivity_map->bytes_per_channel <= 1)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->emissivity_map)->format = ConvertImageFormatSRGB(material_ref->emissivity_map->format);
                 material_ref->emissivity = glm::vec3(1.0f);
             }
             LoadImage(obj_material.specular_texname, material_ref->specular_map);
             if (material_ref->specular_map) {
-                if (material_ref->specular_map->format == DXGI_FORMAT_R8G8B8A8_UNORM)
-                    gfxSceneGetObject<GfxImage>(scene, material_ref->specular_map)->format = DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+                if(material_ref->specular_map->bytes_per_channel <= 1)
+                    gfxSceneGetObject<GfxImage>(scene, material_ref->specular_map)->format = ConvertImageFormatSRGB(material_ref->specular_map->format);
                 material_ref->specular = glm::vec4(1.0f);
             }
             materials[i] = material_ref;    // append the new material
