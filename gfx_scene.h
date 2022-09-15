@@ -204,8 +204,8 @@ GfxResult gfxSceneDestroyLight(GfxScene scene, uint64_t light_handle);
 GfxResult gfxSceneDestroyAllLights(GfxScene scene);
 
 uint32_t gfxSceneGetLightCount(GfxScene scene);
-GfxLight const* gfxSceneGetLights(GfxScene scene);
-GfxLight* gfxSceneGetLight(GfxScene scene, uint64_t light_handle);
+GfxLight const *gfxSceneGetLights(GfxScene scene);
+GfxLight *gfxSceneGetLight(GfxScene scene, uint64_t light_handle);
 GfxRef<GfxLight> gfxSceneGetLightHandle(GfxScene scene, uint32_t light_index);
 GfxMetadata const& gfxSceneGetLightMetadata(GfxScene scene, uint64_t light_handle);
 
@@ -398,8 +398,8 @@ template<> inline GfxRef<GfxCamera> gfxSceneGetObjectHandle<GfxCamera>(GfxScene 
 template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxCamera>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetCameraMetadata(scene, object_handle); }
 
 template<> inline uint32_t gfxSceneGetObjectCount<GfxLight>(GfxScene scene) { return gfxSceneGetLightCount(scene); }
-template<> inline GfxLight const* gfxSceneGetObjects<GfxLight>(GfxScene scene) { return gfxSceneGetLights(scene); }
-template<> inline GfxLight* gfxSceneGetObject<GfxLight>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetLight(scene, object_handle); }
+template<> inline GfxLight const *gfxSceneGetObjects<GfxLight>(GfxScene scene) { return gfxSceneGetLights(scene); }
+template<> inline GfxLight *gfxSceneGetObject<GfxLight>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetLight(scene, object_handle); }
 template<> inline GfxRef<GfxLight> gfxSceneGetObjectHandle<GfxLight>(GfxScene scene, uint32_t object_index) { return gfxSceneGetLightHandle(scene, object_index); }
 template<> inline GfxMetadata const& gfxSceneGetObjectMetadata<GfxLight>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetLightMetadata(scene, object_handle); }
 
@@ -1102,7 +1102,8 @@ private:
                 material_ref->emissivity = glm::vec3(1.0f);
             }
             LoadImage(obj_material.specular_texname, material_ref->specular_map);
-            if (material_ref->specular_map) {
+            if(material_ref->specular_map)
+            {
                 if(material_ref->specular_map->bytes_per_channel <= 1)
                     gfxSceneGetObject<GfxImage>(scene, material_ref->specular_map)->format = ConvertImageFormatSRGB(material_ref->specular_map->format);
                 material_ref->specular = glm::vec4(1.0f);
@@ -1223,7 +1224,7 @@ private:
 #endif //! NDEBUG
         if(gltf_model->scenes_count == 0)
             return kGfxResult_NoError;  // nothing needs loading
-        std::map<cgltf_camera const*, GfxConstRef<GfxCamera>> cameras;
+        std::map<cgltf_camera const *, GfxConstRef<GfxCamera>> cameras;
         for(size_t i = 0; i < gltf_model->cameras_count; ++i)
         {
             cgltf_camera const &gltf_camera = gltf_model->cameras[i];
@@ -1242,7 +1243,7 @@ private:
             camera_metadata.object_name = (gltf_camera.name != nullptr) ? gltf_camera.name : "Camera" + std::to_string(i);
             cameras[&gltf_camera] = camera_ref;
         }
-        std::map<cgltf_light const*, GfxConstRef<GfxLight>> lights;
+        std::map<cgltf_light const *, GfxConstRef<GfxLight>> lights;
         for(size_t i = 0; i < gltf_model->lights_count; ++i)
         {
             cgltf_light const &gltf_light = gltf_model->lights[i];
@@ -1264,7 +1265,7 @@ private:
             light_metadata.object_name = (gltf_light.name != nullptr) ? gltf_light.name : "Light" + std::to_string(i);
             lights[&gltf_light] = light_ref;
         }
-        std::map<cgltf_image const*, GfxConstRef<GfxImage>> images;
+        std::map<cgltf_image const *, GfxConstRef<GfxImage>> images;
         for(size_t i = 0; i < gltf_model->textures_count; ++i)
         {
             cgltf_texture const &gltf_texture = gltf_model->textures[i];
@@ -1282,11 +1283,11 @@ private:
             image_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
             images[gltf_image] = image_ref;
         }
-        std::map<cgltf_material const*, GfxConstRef<GfxMaterial>> materials;
-        std::map<cgltf_image const*, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
+        std::map<cgltf_material const *, GfxConstRef<GfxMaterial>> materials;
+        std::map<cgltf_image const *, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
         for(size_t i = 0; i < gltf_model->materials_count; ++i)
         {
-            std::map<cgltf_image const*, GfxConstRef<GfxImage>>::const_iterator it;
+            std::map<cgltf_image const *, GfxConstRef<GfxImage>>::const_iterator it;
             cgltf_material const &gltf_material = gltf_model->materials[i];
             if(!gltf_material.has_pbr_metallic_roughness)
                 continue; // unsupported material type
@@ -1317,7 +1318,7 @@ private:
             }
             cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
             it = (albedo_map_text != nullptr ? images.find(albedo_map_text->basisu_image != nullptr ?
-                albedo_map_text->basisu_image : albedo_map_text->image) : images.end());
+                  albedo_map_text->basisu_image : albedo_map_text->image) : images.end());
             if(it != images.end())
             {
                 GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
@@ -1325,12 +1326,12 @@ private:
                     temp->format = ConvertImageFormatSRGB(temp->format);
                 material.albedo_map = (*it).second;
             }
-            cgltf_texture const* metallicity_roughness_map_text = gltf_material_pbr.metallic_roughness_texture.texture;
+            cgltf_texture const *metallicity_roughness_map_text = gltf_material_pbr.metallic_roughness_texture.texture;
             it = (metallicity_roughness_map_text != nullptr ? images.find(metallicity_roughness_map_text->basisu_image != nullptr ?
-                metallicity_roughness_map_text->basisu_image : metallicity_roughness_map_text->image) : images.end());
+                  metallicity_roughness_map_text->basisu_image : metallicity_roughness_map_text->image) : images.end());
             if(it != images.end())
             {
-                std::map<cgltf_image const*, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 =
+                std::map<cgltf_image const *, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 =
                     maps.find(it->first);
                 if(it2 != maps.end())
                 {
@@ -1421,93 +1422,95 @@ private:
             }
             cgltf_texture const *emissivity_map_text = gltf_material.emissive_texture.texture;
             it = (emissivity_map_text != nullptr ? images.find(emissivity_map_text->basisu_image != nullptr ?
-                emissivity_map_text->basisu_image : emissivity_map_text->image) : images.end());
+                  emissivity_map_text->basisu_image : emissivity_map_text->image) : images.end());
             if(it != images.end())
             {
-                GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                 if(temp->bytes_per_channel <= 1)
                     temp->format = ConvertImageFormatSRGB(temp->format);
                 material.emissivity_map = (*it).second;
             }
             if(gltf_material.has_specular)
             {
-                cgltf_texture const* specular_map_text = gltf_material.specular.specular_color_texture.texture;
+                cgltf_texture const *specular_map_text = gltf_material.specular.specular_color_texture.texture;
                 it = (specular_map_text != nullptr ? images.find(specular_map_text->basisu_image != nullptr ?
-                    specular_map_text->basisu_image : specular_map_text->image) : images.end());
+                      specular_map_text->basisu_image : specular_map_text->image) : images.end());
                 if(it != images.end())
                 {
-                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
-                    if (temp->bytes_per_channel <= 1)
+                    GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    if(temp->bytes_per_channel <= 1)
                         temp->format = ConvertImageFormatSRGB(temp->format);
                     material.specular_map = (*it).second;
                 }
                 if(gltf_material.specular.specular_texture.texture != nullptr &&
-                    gltf_material.specular.specular_texture.texture != specular_map_text)
+                   gltf_material.specular.specular_texture.texture != specular_map_text)
                     GFX_PRINT_ERROR(kGfxResult_InternalError, "Specular factor texture should be stored in Specular color texture alpha channel");
             }
             cgltf_texture const *normal_map_text = gltf_material.normal_texture.texture;
             it = (normal_map_text != nullptr ? images.find(normal_map_text->basisu_image != nullptr ?
-                normal_map_text->basisu_image : normal_map_text->image) : images.end());
+                  normal_map_text->basisu_image : normal_map_text->image) : images.end());
             if(it != images.end())
             {
-                GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                 temp->format = ConvertImageFormatLinear(temp->format);
                 material.normal_map = (*it).second;
             }
             if(gltf_material.has_transmission)
             {
-                cgltf_texture const* transmission_map_text = gltf_material.transmission.transmission_texture.texture;
+                cgltf_texture const *transmission_map_text = gltf_material.transmission.transmission_texture.texture;
                 it = (transmission_map_text != nullptr ? images.find(transmission_map_text->basisu_image != nullptr ?
-                    transmission_map_text->basisu_image : transmission_map_text->image) : images.end());
+                      transmission_map_text->basisu_image : transmission_map_text->image) : images.end());
                 if(it != images.end())
                 {
-                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     temp->format = ConvertImageFormatLinear(temp->format);
                     material.transmission_map = (*it).second;
                 }
             }
             if(gltf_material.has_sheen)
             {
-                cgltf_texture const* sheen_map_text = gltf_material.sheen.sheen_color_texture.texture;
+                cgltf_texture const *sheen_map_text = gltf_material.sheen.sheen_color_texture.texture;
                 it = (sheen_map_text != nullptr ? images.find(sheen_map_text->basisu_image != nullptr ?
-                    sheen_map_text->basisu_image : sheen_map_text->image) : images.end());
+                      sheen_map_text->basisu_image : sheen_map_text->image) : images.end());
                 if(it != images.end())
                 {
-                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
-                    if (temp->bytes_per_channel <= 1)
+                    GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                    if(temp->bytes_per_channel <= 1)
                         temp->format = ConvertImageFormatSRGB(temp->format);
                     material.sheen_map = (*it).second;
                 }
                 if(gltf_material.sheen.sheen_roughness_texture.texture != nullptr &&
-                    gltf_material.sheen.sheen_roughness_texture.texture != sheen_map_text)
+                   gltf_material.sheen.sheen_roughness_texture.texture != sheen_map_text)
                     GFX_PRINT_ERROR(kGfxResult_InternalError, "Sheen roughness texture should be stored in Sheen color texture alpha channel");
             }
             if(gltf_material.has_clearcoat)
             {
-                cgltf_texture const* clearcoat_map_text = gltf_material.clearcoat.clearcoat_texture.texture;
+                cgltf_texture const *clearcoat_map_text = gltf_material.clearcoat.clearcoat_texture.texture;
                 it = (clearcoat_map_text != nullptr ? images.find(clearcoat_map_text->basisu_image != nullptr ?
-                    clearcoat_map_text->basisu_image : clearcoat_map_text->image) : images.end());
-                if (it != images.end()) {
-                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                      clearcoat_map_text->basisu_image : clearcoat_map_text->image) : images.end());
+                if(it != images.end())
+                {
+                    GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     temp->format = ConvertImageFormatLinear(temp->format);
                     material.clearcoat_map = (*it).second;
                 }
-                cgltf_texture const* clearcoat_rough_map_text = gltf_material.clearcoat.clearcoat_roughness_texture.texture;
+                cgltf_texture const *clearcoat_rough_map_text = gltf_material.clearcoat.clearcoat_roughness_texture.texture;
                 it = (clearcoat_rough_map_text != nullptr ? images.find(clearcoat_rough_map_text->basisu_image != nullptr ?
-                    clearcoat_rough_map_text->basisu_image : clearcoat_rough_map_text->image) : images.end());
-                if (it != images.end()) {
-                    GfxImage* temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                      clearcoat_rough_map_text->basisu_image : clearcoat_rough_map_text->image) : images.end());
+                if(it != images.end())
+                {
+                    GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     temp->format = ConvertImageFormatLinear(temp->format);
                     material.clearcoat_roughness_map = (*it).second;
                 }
             }
             cgltf_texture const *ao_map_text = gltf_material.occlusion_texture.texture;
             it = (ao_map_text != nullptr ? images.find(ao_map_text->basisu_image != nullptr ?
-                ao_map_text->basisu_image : ao_map_text->image) : images.end());
+                  ao_map_text->basisu_image : ao_map_text->image) : images.end());
             if(it != images.end()) material.ao_map = (*it).second;
             materials[&gltf_material] = material_ref;
         }
-        std::map<cgltf_mesh const*, std::vector<GfxConstRef<GfxMesh>>> meshes;
+        std::map<cgltf_mesh const *, std::vector<GfxConstRef<GfxMesh>>> meshes;
         for(size_t i = 0; i < gltf_model->meshes_count; ++i)
         {
             cgltf_mesh const &gltf_mesh = gltf_model->meshes[i];
@@ -1573,15 +1576,15 @@ private:
                 }
                 if(gltf_primitive.material != nullptr)
                 {
-                    std::map<cgltf_material const*, GfxConstRef<GfxMaterial>>::const_iterator const it2 =
+                    std::map<cgltf_material const *, GfxConstRef<GfxMaterial>>::const_iterator const it2 =
                         materials.find(gltf_primitive.material);
                     if(it2 != materials.end()) mesh.material = (*it2).second;
                 }
             }
         }
         std::set<uint64_t> unparented_nodes;
-        std::map<cgltf_node const*, std::set<GfxConstRef<GfxAnimation>>> node_animations;
-        std::map<cgltf_node const*, uint64_t> animated_nodes;
+        std::map<cgltf_node const *, std::set<GfxConstRef<GfxAnimation>>> node_animations;
+        std::map<cgltf_node const *, uint64_t> animated_nodes;
         std::map<size_t, GfxConstRef<GfxAnimation>> animations;
         for(size_t i = 0; i < gltf_model->animations_count; ++i)
         {
@@ -1616,7 +1619,7 @@ private:
                 if(input_buffer == nullptr || output_buffer == nullptr ||
                     input_buffer->count == 0 || input_buffer->count != output_buffer->count) continue;
                 if(input_buffer->is_sparse || output_buffer->is_sparse) continue;
-                std::map<cgltf_node const*, uint64_t>::const_iterator const it =
+                std::map<cgltf_node const *, uint64_t>::const_iterator const it =
                     animated_nodes.find(gltf_animation_channel.target_node);
                 if(it != animated_nodes.end())
                     animated_node_handle = (*it).second;
@@ -1652,11 +1655,11 @@ private:
                 animation_channel.type_ = type;
             }
         }
-        for(std::map<cgltf_node const*, std::set<GfxConstRef<GfxAnimation>>>::const_iterator it = node_animations.begin();
+        for(std::map<cgltf_node const *, std::set<GfxConstRef<GfxAnimation>>>::const_iterator it = node_animations.begin();
             it != node_animations.end(); ++it)
             if((*it).second.size() > 1)
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Some nodes are targeted by several animations...");
-        std::map<cgltf_node const*, std::set<GfxConstRef<GfxAnimation>>> propagated_node_animations;
+        std::map<cgltf_node const *, std::set<GfxConstRef<GfxAnimation>>> propagated_node_animations;
         std::function<std::set<GfxConstRef<GfxAnimation>> (cgltf_node const * gltf_node, glm::mat4 const &parent_transform,
             std::set<GfxConstRef<GfxAnimation>> const &parent_animations)> VisitNode;
         VisitNode = [&](cgltf_node const *gltf_node, glm::mat4 const &parent_transform,
@@ -1672,7 +1675,7 @@ private:
             glm::mat4 const transform = parent_transform * local_transform;
             if(gltf_node->mesh != nullptr && gltf_node->weights_count == 0)
             {
-                std::map<cgltf_mesh const*, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node->mesh);
+                std::map<cgltf_mesh const *, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
                     for(size_t i = 0; i < (*it).second.size(); ++i)
                     {
@@ -1691,7 +1694,7 @@ private:
             GfxRef<GfxCamera> camera;
             if(gltf_node->camera != nullptr)
             {
-                std::map<cgltf_camera const*, GfxConstRef<GfxCamera>>::const_iterator const it = cameras.find(gltf_node->camera);
+                std::map<cgltf_camera const *, GfxConstRef<GfxCamera>>::const_iterator const it = cameras.find(gltf_node->camera);
                 if(it != cameras.end())
                 {
                     camera = (*it).second;
@@ -1701,7 +1704,7 @@ private:
             GfxRef<GfxLight> light;
             if(gltf_node->light != nullptr)
             {
-                std::map<cgltf_light const*, GfxConstRef<GfxLight>>::const_iterator const it = lights.find(gltf_node->light);
+                std::map<cgltf_light const *, GfxConstRef<GfxLight>>::const_iterator const it = lights.find(gltf_node->light);
                 if(it != lights.end())
                 {
                     light = (*it).second;
@@ -1719,7 +1722,7 @@ private:
             propagated_node_animations[gltf_node].insert(parent_animations.begin(), parent_animations.end());
             if(propagated_node_animations[gltf_node].size() > 0)
             {
-                std::map<cgltf_node const*, uint64_t>::const_iterator const it = animated_nodes.find(gltf_node);
+                std::map<cgltf_node const *, uint64_t>::const_iterator const it = animated_nodes.find(gltf_node);
                 GltfNode *node = nullptr;
                 GltfAnimatedNode *animated_node = nullptr;
                 if(it != animated_nodes.end())
@@ -1739,7 +1742,7 @@ private:
                 std::vector<uint64_t> children;
                 for(size_t i = 0; i < gltf_node->children_count; ++i)
                 {
-                    std::map<cgltf_node const*, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node->children[i]);
+                    std::map<cgltf_node const *, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node->children[i]);
                     if(it2 != animated_nodes.end()) children.push_back((*it2).second);
                 }
                 if(animated_node != nullptr)
@@ -1847,7 +1850,7 @@ private:
         return KTX_SUCCESS;
     }
 
-    GfxResult importKtx(GfxScene const& scene, char const* asset_file)
+    GfxResult importKtx(GfxScene const& scene, char const *asset_file)
     {
         GFX_ASSERT(asset_file != nullptr);
         if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
@@ -1859,7 +1862,7 @@ private:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to open image `%s': %s", asset_file, ktxErrorString(result));
         if(ktx_texture->numDimensions != 2)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Only 2D textures are supported `%s'", asset_file);
-        char const* file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
+        char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
         file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
         GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
         auto vk_to_dxgi = [](const uint32_t vk_format) -> DXGI_FORMAT {
@@ -2228,42 +2231,42 @@ GfxMetadata const &gfxSceneGetCameraMetadata(GfxScene scene, uint64_t camera_han
 GfxRef<GfxLight> gfxSceneCreateLight(GfxScene scene)
 {
     GfxRef<GfxLight> const light_ref = {};
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return light_ref;    // invalid parameter
     return gfx_scene->createObject<GfxLight>(scene);
 }
 
 GfxResult gfxSceneDestroyLight(GfxScene scene, uint64_t light_handle)
 {
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
     return gfx_scene->destroyObject<GfxLight>(light_handle);
 }
 
 GfxResult gfxSceneDestroyAllLights(GfxScene scene)
 {
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
     return gfx_scene->clearObjects<GfxLight>();
 }
 
 uint32_t gfxSceneGetLightCount(GfxScene scene)
 {
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return 0;    // invalid parameter
     return gfx_scene->getObjectCount<GfxLight>();
 }
 
-GfxLight const* gfxSceneGetLights(GfxScene scene)
+GfxLight const *gfxSceneGetLights(GfxScene scene)
 {
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return nullptr;  // invalid parameter
     return gfx_scene->getObjects<GfxLight>();
 }
 
-GfxLight* gfxSceneGetLight(GfxScene scene, uint64_t light_handle)
+GfxLight *gfxSceneGetLight(GfxScene scene, uint64_t light_handle)
 {
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return nullptr;  // invalid parameter
     return gfx_scene->getObject<GfxLight>(light_handle);
 }
@@ -2271,7 +2274,7 @@ GfxLight* gfxSceneGetLight(GfxScene scene, uint64_t light_handle)
 GfxRef<GfxLight> gfxSceneGetLightHandle(GfxScene scene, uint32_t light_index)
 {
     GfxRef<GfxLight> const light_ref = {};
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return light_ref;    // invalid parameter
     return gfx_scene->getObjectHandle<GfxLight>(scene, light_index);
 }
@@ -2279,7 +2282,7 @@ GfxRef<GfxLight> gfxSceneGetLightHandle(GfxScene scene, uint32_t light_index)
 GfxMetadata const& gfxSceneGetLightMetadata(GfxScene scene, uint64_t light_handle)
 {
     static GfxMetadata const metadata = {};
-    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return metadata; // invalid parameter
     return gfx_scene->getObjectMetadata<GfxLight>(light_handle);
 }

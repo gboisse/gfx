@@ -2821,7 +2821,7 @@ public:
         GFX_TRY(encodeBindKernel(mip_kernels.mip_kernel_));
         bool const isSRGB = IsSRGBFormat(texture.format);
         uint32_t elements = (texture.is2D()) ? 1 : texture.getDepth();
-        uint32_t const* num_threads = getKernelNumThreads(mip_kernels.mip_kernel_);
+        uint32_t const *num_threads = getKernelNumThreads(mip_kernels.mip_kernel_);
         uint32_t const num_groups_z = (elements + num_threads[2] - 1) / num_threads[2];
         for(uint32_t mip_level = 1; mip_level < texture.mip_levels; ++mip_level)
         {
