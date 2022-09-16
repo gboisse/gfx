@@ -1294,7 +1294,7 @@ private:
             GfxRef<GfxMaterial> material_ref = gfxSceneCreateMaterial(scene);
             GfxMetadata &material_metadata = material_metadata_[material_ref];
             material_metadata.asset_file = asset_file;  // set up metadata
-            material_metadata.object_name = gltf_material.name;
+            if(gltf_material.name != nullptr) material_metadata.object_name = gltf_material.name;
             GfxMaterial &material = *material_ref;
             cgltf_pbr_metallic_roughness const &gltf_material_pbr = gltf_material.pbr_metallic_roughness;
             material.albedo = glm::vec4(gltf_material_pbr.base_color_factor[0], gltf_material_pbr.base_color_factor[1],
