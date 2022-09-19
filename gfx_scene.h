@@ -1294,7 +1294,7 @@ private:
             GfxRef<GfxMaterial> material_ref = gfxSceneCreateMaterial(scene);
             GfxMetadata &material_metadata = material_metadata_[material_ref];
             material_metadata.asset_file = asset_file;  // set up metadata
-            if(gltf_material.name != nullptr) material_metadata.object_name = gltf_material.name;
+            material_metadata.object_name = (gltf_material.name != nullptr) ? gltf_material.name : "Material" + std::to_string(i);
             GfxMaterial &material = *material_ref;
             cgltf_pbr_metallic_roughness const &gltf_material_pbr = gltf_material.pbr_metallic_roughness;
             material.albedo = glm::vec4(gltf_material_pbr.base_color_factor[0], gltf_material_pbr.base_color_factor[1],
@@ -1568,7 +1568,7 @@ private:
                 }
                 GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
                 mesh_metadata.asset_file = asset_file;  // set up metadata
-                mesh_metadata.object_name = (gltf_mesh.name != nullptr) ? gltf_mesh.name : "Mesh" + std::to_string(j);
+                mesh_metadata.object_name = (gltf_mesh.name != nullptr) ? gltf_mesh.name : "Mesh" + std::to_string(i);
                 if(j > 0)
                 {
                     mesh_metadata.object_name += ".";
@@ -1638,7 +1638,12 @@ private:
                     animation_object = &gltf_animations_.insert(GetObjectIndex(animation_ref));
                     GfxMetadata &animation_metadata = animation_metadata_[animation_ref];
                     animation_metadata.asset_file = asset_file; // set up metadata
-                    animation_metadata.object_name = gltf_animation.name;
+                    animation_metadata.object_name = (gltf_animation.name != nullptr) ? gltf_animation.name : "Animation" + std::to_string(i);
+                    if(j > 0)
+                    {
+                        animation_metadata.object_name += ".";
+                        animation_metadata.object_name += std::to_string(j);
+                    }
                 }
                 node_animations[gltf_animation_channel.target_node].insert(animation_ref);
                 GFX_ASSERT(animation_object != nullptr);
