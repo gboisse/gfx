@@ -40,6 +40,13 @@ target_compile_options(ktx      PRIVATE "/wd4244")  # '=': conversion from '__in
 target_compile_options(ktx      PRIVATE "/wd4267")  # 'initializing': conversion from 'size_t' to 'ktx_uint32_t', possible loss of data
 target_compile_options(ktx_read PRIVATE "/wd4005")
 
+target_compile_features(gfx PUBLIC cxx_std_14)
+target_compile_options(gfx PRIVATE
+    -DUSE_PIX
+    /W3 /WX
+    -D_HAS_EXCEPTIONS=0
+)
+
 add_library(dxcompiler SHARED IMPORTED)
 set_target_properties(dxcompiler PROPERTIES
     IMPORTED_LOCATION ${GFX_DXC_PATH}/bin/x64/dxcompiler.dll
