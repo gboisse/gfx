@@ -1252,7 +1252,7 @@ private:
             light.color = glm::vec3(gltf_light.color[0], gltf_light.color[1], gltf_light.color[2]);
             float const lumens_to_watts = 683.f;
             light.intensity             = gltf_light.intensity / lumens_to_watts;
-            if (gltf_light.type == cgltf_light_type_point || gltf_light.type == cgltf_light_type_spot)
+            if(gltf_light.type == cgltf_light_type_point || gltf_light.type == cgltf_light_type_spot)
                 light.intensity *= 4.0f * 3.1415926535897932384626433832795f;
             light.range = gltf_light.range > 0.0 ? gltf_light.range : FLT_MAX;
             light.type = gltf_light.type == cgltf_light_type_point ? kGfxLightType_Point :
