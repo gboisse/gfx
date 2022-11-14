@@ -1276,15 +1276,34 @@ private:
                 continue;
             cgltf_image const *gltf_image = gltf_texture.has_basisu ? gltf_texture.basisu_image : gltf_texture.image;
             GfxRef<GfxImage> image_ref;
-            if(gltf_image->uri == nullptr) continue; // no image to be loaded
-            char const *filename = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '//'));
-            std::string image_folder = (filename != nullptr ? std::string(asset_file, 0, filename - asset_file) : std::string(""));
-            if(!image_folder.empty() && image_folder.back() != '/' && image_folder.back() != '\\') image_folder += '/';
-            std::string image_file = image_folder + gltf_image->uri;
-            if(gfxSceneImport(scene, image_file.c_str()) != kGfxResult_NoError)
-                continue; // unable to load image file
-            image_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
-            images[gltf_image] = image_ref;
+            if(gltf_image->uri != nullptr)
+            {
+                char const *filename = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '//'));
+                std::string image_folder =
+                    (filename != nullptr ? std::string(asset_file, 0, filename - asset_file)
+                                         : std::string(""));
+                if(!image_folder.empty() && image_folder.back() != '/' && image_folder.back() != '\\')
+                    image_folder += '/';
+                std::string image_file = image_folder + gltf_image->uri;
+                if(gfxSceneImport(scene, image_file.c_str()) != kGfxResult_NoError)
+                    continue; // unable to load image file
+                image_ref          = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
+                images[gltf_image] = image_ref;
+            }
+            else if(gltf_image->buffer_view != nullptr)
+            {
+                const std::string mime(gltf_image->mime_type);
+                if(mime != "image/jpeg" && mime != "image/png")
+                {
+                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Unsupported embedded texture type '%s'", mime.c_str());
+                    continue;
+                }
+                void *ptr = (uint8_t*)gltf_image->buffer_view->buffer->data + gltf_image->buffer_view->offset;
+                if(importImage(scene, gltf_image->name, ptr, gltf_image->buffer_view->size) != kGfxResult_NoError)
+                    continue; // unable to load image file
+                image_ref          = gfxSceneFindObjectByAssetFile<GfxImage>(scene, gltf_image->name);
+                images[gltf_image] = image_ref;
+            }
         }
         std::map<cgltf_material const *, GfxConstRef<GfxMaterial>> materials;
         std::map<cgltf_image const *, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
@@ -1344,10 +1363,25 @@ private:
                 else
                 {
                     size_t const asset_file_ext = image_metadata_[(*it).second].asset_file.rfind('.');
-                    std::string const asset_file_name = image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
-                    std::string const asset_file_extension = image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
-                    std::string const metallicity_map_file = asset_file_name + ".metallicity" + asset_file_extension;
-                    std::string const roughness_map_file = asset_file_name + ".roughness" + asset_file_extension;
+                    std::string  metallicity_map_file;
+                    std::string  roughness_map_file;
+                    if(asset_file_ext != std::string::npos)
+                    {
+                        std::string const asset_file_name =
+                            image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
+                        std::string const asset_file_extension =
+                            image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
+                        metallicity_map_file =
+                            asset_file_name + ".metallicity" + asset_file_extension;
+                        roughness_map_file =
+                            asset_file_name + ".roughness" + asset_file_extension;
+                    }
+                    else
+                    {
+                        // Embedded texture
+                        metallicity_map_file = image_metadata_[(*it).second].asset_file + ".metallicity";
+                        metallicity_map_file = image_metadata_[(*it).second].asset_file + ".roughness";
+                    }
                     GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
                     GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
                     if(!metallicity_map_ref)
@@ -1372,7 +1406,8 @@ private:
                     {
                         if(gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
                         {
-                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Compressed textures require separate metal/roughness textures '%s'", image_metadata_[(*it).second].asset_file);
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Compressed textures require separate metal/roughness textures '%s'",
+                                image_metadata_[(*it).second].asset_file);
                             continue;
                         }
                         metallicity_map_ref = gfxSceneCreateImage(scene);
@@ -1447,7 +1482,8 @@ private:
                 }
                 if(gltf_material.specular.specular_texture.texture != nullptr &&
                    gltf_material.specular.specular_texture.texture != specular_map_text)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Specular factor texture should be stored in Specular color texture alpha channel");
+                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation,
+                        "Specular factor texture should be stored in Specular color texture alpha channel");
             }
             cgltf_texture const *normal_map_text = gltf_material.normal_texture.texture;
             it = (normal_map_text != nullptr ? images.find(normal_map_text->basisu_image != nullptr ?
@@ -1484,7 +1520,8 @@ private:
                 }
                 if(gltf_material.sheen.sheen_roughness_texture.texture != nullptr &&
                    gltf_material.sheen.sheen_roughness_texture.texture != sheen_map_text)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Sheen roughness texture should be stored in Sheen color texture alpha channel");
+                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation,
+                        "Sheen roughness texture should be stored in Sheen color texture alpha channel");
             }
             if(gltf_material.has_clearcoat)
             {
@@ -1534,40 +1571,56 @@ private:
                 it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
                     [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });  // locate uv stream
                 cgltf_accessor const *uv_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
-                if(index_buffer->buffer_view == nullptr || position_buffer == nullptr) continue; // invalid mesh primitive
-                if(index_buffer->is_sparse || position_buffer->is_sparse) continue; // unsupported sparse accessor
+                if(position_buffer == nullptr) continue; // invalid mesh primitive
+                if(index_buffer->is_sparse || position_buffer->is_sparse)
+                {
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Sparse accessors are not supported");
+                    continue; // unsupported sparse accessor
+                }
                 GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
                 mesh_list.push_back(mesh_ref);
                 GfxMesh &mesh = *mesh_ref;
-                std::map<size_t, uint32_t> indices;
-                for(uint32_t k = 0; k < index_buffer->count; ++k)
+                if(index_buffer->buffer_view != nullptr)
                 {
-                    size_t const gltf_index = cgltf_accessor_read_index(index_buffer, k);
-                    std::map<size_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
-                    if(it2 != indices.end())
-                        mesh.indices.push_back((*it2).second);
-                    else
+                    std::map<size_t, uint32_t> indices;
+                    for(uint32_t k = 0; k < index_buffer->count; ++k)
                     {
-                        GfxVertex vertex = {};
-                        cgltf_accessor_read_float(position_buffer, gltf_index, (float*)&vertex.position, sizeof(glm::vec3));
-                        cgltf_accessor_read_float(normal_buffer, gltf_index, (float*)&vertex.normal, sizeof(glm::vec3));
-                        if(uv_buffer != nullptr)
-                            cgltf_accessor_read_float(uv_buffer, gltf_index, (float*)&vertex.uv, sizeof(glm::vec2));
-                        uint32_t const index = (uint32_t)mesh.vertices.size();
-                        if(index == 0)
-                        {
-                            mesh.bounds_min = vertex.position;
-                            mesh.bounds_max = vertex.position;
-                        }
+                        size_t const gltf_index = cgltf_accessor_read_index(index_buffer, k);
+                        std::map<size_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
+                        if(it2 != indices.end())
+                            mesh.indices.push_back((*it2).second);
                         else
                         {
-                            mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
-                            mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
+                            GfxVertex vertex = {};
+                            cgltf_accessor_read_float(
+                                position_buffer, gltf_index, (float *)&vertex.position, sizeof(glm::vec3));
+                            if(normal_buffer != nullptr)
+                                cgltf_accessor_read_float(
+                                    normal_buffer, gltf_index, (float *)&vertex.normal, sizeof(glm::vec3));
+                            if(uv_buffer != nullptr)
+                                cgltf_accessor_read_float(
+                                    uv_buffer, gltf_index, (float *)&vertex.uv, sizeof(glm::vec2));
+                            uint32_t const index = (uint32_t)mesh.vertices.size();
+                            if(index == 0)
+                            {
+                                mesh.bounds_min = vertex.position;
+                                mesh.bounds_max = vertex.position;
+                            }
+                            else
+                            {
+                                mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
+                                mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
+                            }
+                            mesh.vertices.push_back(vertex);
+                            mesh.indices.push_back(index);
+                            indices[gltf_index] = index;
                         }
-                        mesh.vertices.push_back(vertex);
-                        mesh.indices.push_back(index);
-                        indices[gltf_index] = index;
                     }
+                }
+                else
+                {
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Meshes require index buffers");
+                    continue;
                 }
                 GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
                 mesh_metadata.asset_file = asset_file;  // set up metadata
@@ -1953,7 +2006,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult importImage(GfxScene const &scene, char const *asset_file)
+    GfxResult importImage(GfxScene const &scene, char const *asset_file, void const *memory = nullptr, size_t size = 0)
     {
         GFX_ASSERT(asset_file != nullptr);
         int32_t image_width, image_height, channel_count;
@@ -1961,12 +2014,28 @@ private:
             return kGfxResult_NoError;  // image was already imported
         stbi_uc *image_data = nullptr;
         uint32_t bytes_per_channel = 2;
-        if(stbi_is_16_bit(asset_file))
-            image_data = (stbi_uc*)stbi_load_16(asset_file, &image_width, &image_height, &channel_count, 0);
-        if(image_data == nullptr)
+        if(memory == nullptr)
         {
-            image_data = stbi_load(asset_file, &image_width, &image_height, &channel_count, 0);
-            bytes_per_channel = 1;
+            if(stbi_is_16_bit(asset_file))
+                image_data =
+                    (stbi_uc *)stbi_load_16(asset_file, &image_width, &image_height, &channel_count, 0);
+            if(image_data == nullptr)
+            {
+                image_data        = stbi_load(asset_file, &image_width, &image_height, &channel_count, 0);
+                bytes_per_channel = 1;
+            }
+        }
+        else
+        {
+            if(stbi_is_16_bit_from_memory((stbi_uc *)memory, (int)size))
+                image_data = (stbi_uc *)stbi_load_16_from_memory(
+                    (stbi_uc *)memory, (int)size, &image_width, &image_height, &channel_count, 0);
+            if(image_data == nullptr)
+            {
+                image_data = stbi_load_from_memory(
+                    (stbi_uc *)memory, (int)size, &image_width, &image_height, &channel_count, 0);
+                bytes_per_channel = 1;
+            }
         }
         if(image_data == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, stbi_failure_reason());
