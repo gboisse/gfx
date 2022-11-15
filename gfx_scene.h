@@ -1572,18 +1572,99 @@ private:
                     [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });  // locate uv stream
                 cgltf_accessor const *uv_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
                 if(position_buffer == nullptr) continue; // invalid mesh primitive
-                if(index_buffer->is_sparse || position_buffer->is_sparse)
+                std::vector<cgltf_float> sparse_position_buffer;
+                std::vector<cgltf_float> sparse_normal_buffer;
+                std::vector<cgltf_float> sparse_uv_buffer;
+                std::vector<cgltf_float> sparse_index_buffer;
+                auto unpack_sparse = [](cgltf_accessor const *buffer,
+                                        std::vector<cgltf_float> &sparse_buffer) -> bool {
+                    if(buffer != nullptr && buffer->is_sparse)
+                    {
+                        cgltf_size buffer_size = cgltf_num_components(buffer->type) * buffer->count;
+                        sparse_buffer.resize(buffer_size);
+                        if (cgltf_accessor_unpack_floats(buffer, &sparse_buffer[0], buffer_size) < buffer_size)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to unpack sparse accessor");
+                            return false;
+                        }
+                    }
+                    return true;
+                };
+                bool failed_unpack = !unpack_sparse(position_buffer, sparse_position_buffer);
+                failed_unpack      = failed_unpack || !unpack_sparse(normal_buffer, sparse_normal_buffer);
+                failed_unpack      = failed_unpack || !unpack_sparse(uv_buffer, sparse_uv_buffer);
+                failed_unpack      = failed_unpack || !unpack_sparse(index_buffer, sparse_index_buffer);
+                if(failed_unpack)
                 {
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Sparse accessors are not supported");
-                    continue; // unsupported sparse accessor
+                    continue;
                 }
                 GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
                 mesh_list.push_back(mesh_ref);
                 GfxMesh &mesh = *mesh_ref;
-                if(index_buffer->buffer_view != nullptr)
+                auto unpack_vertex = [&](size_t const gltf_index) {
+                    GfxVertex vertex = {};
+                    if(sparse_position_buffer.empty())
+                    {
+                        cgltf_accessor_read_float(
+                            position_buffer, gltf_index, (float *)&vertex.position, sizeof(glm::vec3));
+                    }
+                    else
+                    {
+                        uint8_t *element = (uint8_t *)sparse_position_buffer.data();
+                        element += position_buffer->offset + position_buffer->stride * gltf_index;
+                        cgltf_element_read_float(element, position_buffer->type,
+                                position_buffer->component_type, position_buffer->normalized,
+                                (float *)&vertex.position, sizeof(glm::vec3));
+                    }
+                    if(normal_buffer != nullptr)
+                    {
+                        if(sparse_normal_buffer.empty())
+                        {
+                            cgltf_accessor_read_float(
+                                normal_buffer, gltf_index, (float *)&vertex.normal, sizeof(glm::vec3));
+                        }
+                        else
+                        {
+                            uint8_t *element = (uint8_t *)sparse_normal_buffer.data();
+                            element += normal_buffer->offset + normal_buffer->stride * gltf_index;
+                            cgltf_element_read_float(element, normal_buffer->type,
+                                    normal_buffer->component_type, normal_buffer->normalized,
+                                    (float *)&vertex.normal, sizeof(glm::vec3));
+                        }
+                    }
+                    if(uv_buffer != nullptr)
+                    {
+                        if(sparse_uv_buffer.empty())
+                        {
+                            cgltf_accessor_read_float(
+                                uv_buffer, gltf_index, (float *)&vertex.uv, sizeof(glm::vec2));
+                        }
+                        else
+                        {
+                            uint8_t *element = (uint8_t *)sparse_uv_buffer.data();
+                            element += uv_buffer->offset + uv_buffer->stride * gltf_index;
+                            cgltf_element_read_float(element, uv_buffer->type, uv_buffer->component_type,
+                                    uv_buffer->normalized, (float *)&vertex.uv, sizeof(glm::vec2));
+                        }
+                    }
+                    uint32_t const index = (uint32_t)mesh.vertices.size();
+                    if(index == 0)
+                    {
+                        mesh.bounds_min = vertex.position;
+                        mesh.bounds_max = vertex.position;
+                    }
+                    else
+                    {
+                        mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
+                        mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
+                    }
+                    mesh.vertices.push_back(vertex);
+                    mesh.indices.push_back(index);
+                };
+                if(index_buffer != nullptr)
                 {
                     std::map<size_t, uint32_t> indices;
-                    for(uint32_t k = 0; k < index_buffer->count; ++k)
+                    for(size_t k = 0; k < index_buffer->count; ++k)
                     {
                         size_t const gltf_index = cgltf_accessor_read_index(index_buffer, k);
                         std::map<size_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
@@ -1591,36 +1672,18 @@ private:
                             mesh.indices.push_back((*it2).second);
                         else
                         {
-                            GfxVertex vertex = {};
-                            cgltf_accessor_read_float(
-                                position_buffer, gltf_index, (float *)&vertex.position, sizeof(glm::vec3));
-                            if(normal_buffer != nullptr)
-                                cgltf_accessor_read_float(
-                                    normal_buffer, gltf_index, (float *)&vertex.normal, sizeof(glm::vec3));
-                            if(uv_buffer != nullptr)
-                                cgltf_accessor_read_float(
-                                    uv_buffer, gltf_index, (float *)&vertex.uv, sizeof(glm::vec2));
-                            uint32_t const index = (uint32_t)mesh.vertices.size();
-                            if(index == 0)
-                            {
-                                mesh.bounds_min = vertex.position;
-                                mesh.bounds_max = vertex.position;
-                            }
-                            else
-                            {
-                                mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
-                                mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
-                            }
-                            mesh.vertices.push_back(vertex);
-                            mesh.indices.push_back(index);
-                            indices[gltf_index] = index;
+                            unpack_vertex(gltf_index);
+                            indices[gltf_index] = mesh.indices.back();
                         }
                     }
                 }
                 else
                 {
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Meshes require index buffers");
-                    continue;
+                    size_t const count = position_buffer->count / 3 * 3;
+                    for(size_t k = 0; k < count; ++k)
+                    {
+                        unpack_vertex(k);
+                    }
                 }
                 GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
                 mesh_metadata.asset_file = asset_file;  // set up metadata
@@ -1824,7 +1887,7 @@ private:
             }
             return children_animations;
         };
-        cgltf_scene const &gltf_scene = *gltf_model->scene;
+        cgltf_scene const &gltf_scene = gltf_model->scene != nullptr ? *gltf_model->scene : gltf_model->scenes[0];
         for(size_t i = 0; i < gltf_scene.nodes_count; ++i)
             VisitNode(gltf_scene.nodes[i], glm::mat4(1.0), {});
         for(std::set<uint64_t>::const_iterator it = unparented_nodes.begin(); it != unparented_nodes.end(); ++it)
