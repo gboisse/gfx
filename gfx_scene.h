@@ -722,9 +722,6 @@ public:
                     glm::dmat4 const rotate = glm::toMat4(animated_node->rotate_);
                     glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), animated_node->scale_);
                     transform = parent_transform * translate * rotate * scale;
-                    animated_node->translate_ = node.translate_;
-                    animated_node->rotate_ = node.rotate_;
-                    animated_node->scale_ = node.scale_;
                 }
                 for(size_t i = 0; i < node.children_.size(); ++i)
                     VisitNode(node.children_[i], transform);
@@ -1640,8 +1637,8 @@ private:
         }
         std::set<uint64_t> unparented_nodes;
         std::map<cgltf_node const *, std::set<GfxConstRef<GfxAnimation>>> node_animations;
-        std::map<cgltf_node const *, uint64_t> animated_nodes;
-        std::map<size_t, GfxConstRef<GfxAnimation>> animations;
+        std::map<cgltf_node const *, uint64_t /*gfx node handle*/>        animated_nodes;
+        std::map<size_t /*gltf ID*/, GfxConstRef<GfxAnimation>>           animations;
         for(size_t i = 0; i < gltf_model->animations_count; ++i)
         {
             GfxRef<GfxAnimation> animation_ref;
@@ -1695,11 +1692,6 @@ private:
                     GfxMetadata &animation_metadata = animation_metadata_[animation_ref];
                     animation_metadata.asset_file = asset_file; // set up metadata
                     animation_metadata.object_name = (gltf_animation.name != nullptr) ? gltf_animation.name : "Animation" + std::to_string(i);
-                    if(j > 0)
-                    {
-                        animation_metadata.object_name += ".";
-                        animation_metadata.object_name += std::to_string(j);
-                    }
                 }
                 node_animations[gltf_animation_channel.target_node].insert(animation_ref);
                 GFX_ASSERT(animation_object != nullptr);
@@ -1721,7 +1713,7 @@ private:
             if((*it).second.size() > 1)
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Some nodes are targeted by several animations...");
         std::map<cgltf_node const *, std::set<GfxConstRef<GfxAnimation>>> propagated_node_animations;
-        std::function<std::set<GfxConstRef<GfxAnimation>> (cgltf_node const * gltf_node, glm::mat4 const &parent_transform,
+        std::function<std::set<GfxConstRef<GfxAnimation>> (cgltf_node const *gltf_node, glm::mat4 const &parent_transform,
             std::set<GfxConstRef<GfxAnimation>> const &parent_animations)> VisitNode;
         VisitNode = [&](cgltf_node const *gltf_node, glm::mat4 const &parent_transform,
             const std::set<GfxConstRef<GfxAnimation>> &parent_animations) -> std::set<GfxConstRef<GfxAnimation>>
@@ -1734,7 +1726,7 @@ private:
             cgltf_node_transform_local(gltf_node, (float*)&local_transform);
             std::vector<GfxRef<GfxInstance>> instances;
             glm::mat4 const transform = parent_transform * local_transform;
-            if(gltf_node->mesh != nullptr && gltf_node->weights_count == 0)
+            if(gltf_node->mesh != nullptr)
             {
                 std::map<cgltf_mesh const *, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
@@ -1773,14 +1765,23 @@ private:
                 }
             }
             std::set<GfxConstRef<GfxAnimation>> children_animations;
+            std::set<GfxConstRef<GfxAnimation>> propogate_parent_animations = parent_animations;
+            if (node_animations.find(gltf_node) != node_animations.end())
+            {
+                propogate_parent_animations.insert(
+                    node_animations[gltf_node].begin(), node_animations[gltf_node].end());
+                children_animations.insert(
+                    node_animations[gltf_node].begin(), node_animations[gltf_node].end());
+            }
             for(size_t i = 0; i < gltf_node->children_count; ++i)
             {
-                auto child_animations = VisitNode(gltf_node->children[i], transform, node_animations[gltf_node]);
+                auto child_animations =
+                    VisitNode(gltf_node->children[i], transform, propogate_parent_animations);
                 children_animations.insert(child_animations.begin(), child_animations.end());
             }
-            children_animations.insert(node_animations[gltf_node].begin(), node_animations[gltf_node].end());
             propagated_node_animations[gltf_node].insert(children_animations.begin(), children_animations.end());
-            propagated_node_animations[gltf_node].insert(parent_animations.begin(), parent_animations.end());
+            propagated_node_animations[gltf_node].insert(
+                propogate_parent_animations.begin(), propogate_parent_animations.end());
             if(propagated_node_animations[gltf_node].size() > 0)
             {
                 std::map<cgltf_node const *, uint64_t>::const_iterator const it = animated_nodes.find(gltf_node);
@@ -1804,13 +1805,17 @@ private:
                 for(size_t i = 0; i < gltf_node->children_count; ++i)
                 {
                     std::map<cgltf_node const *, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node->children[i]);
-                    if(it2 != animated_nodes.end()) children.push_back((*it2).second);
+                    if (it2 != animated_nodes.end()) children.push_back((*it2).second);
                 }
                 if(animated_node != nullptr)
                 {
-                    animated_node->scale_ = S;
-                    animated_node->rotate_ = R;
-                    animated_node->translate_ = T;
+                    animated_node->translate_ = local_transform[3];
+                    for (int i = 0; i < 3; i++)
+                        animated_node->scale_[i] = glm::length(glm::dvec3(local_transform[i]));
+                    const glm::dmat3 rotMtx(glm::dvec3(local_transform[0]) / animated_node->scale_[0],
+                        glm::dvec3(local_transform[1]) / animated_node->scale_[1],
+                        glm::dvec3(local_transform[2]) / animated_node->scale_[2]);
+                    animated_node->rotate_ = glm::quat_cast(rotMtx);
                 }
                 GFX_ASSERT(node != nullptr);
                 node->scale_ = S;
