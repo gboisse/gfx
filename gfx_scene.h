@@ -446,9 +446,12 @@ template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene sc
 #include <map>
 #include <set>
 #include <functional>
+#pragma warning(push)
+#pragma warning(disable:4789)   // buffer will be overrun
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"              // glTF loader
 #include "tiny_obj_loader.cc"   // obj loader
+#pragma warning(pop)
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
 #include "ktx.h"
