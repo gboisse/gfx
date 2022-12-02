@@ -5957,6 +5957,7 @@ private:
             D3D12MA::Allocation *allocation = nullptr;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+            resource_desc.Alignment = 0;    // default alignment
             resource_desc.Flags |= usage_flag;  // add usage flag
             GFX_TRY(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, &allocation, IID_PPV_ARGS(&resource)));
             if(texture.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)

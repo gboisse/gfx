@@ -276,7 +276,8 @@ public:
                     ImDrawCmd const *cmd = &cmd_list->CmdBuffer[j];
                     if(cmd->UserCallback)
                         cmd->UserCallback(cmd_list, cmd);
-                    else
+                    else if(cmd->ClipRect.x != cmd->ClipRect.z &&
+                            cmd->ClipRect.y != cmd->ClipRect.w)
                     {
                         GfxTexture const *font_buffer = (GfxTexture const *)cmd->TextureId;
                         if(font_buffer != nullptr)
