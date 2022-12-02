@@ -1590,7 +1590,7 @@ public:
         return (dxr_device_ != nullptr ? true : false);
     }
 
-    GfxBuffer createBuffer(uint64_t size, void const *data, GfxCpuAccess cpu_access, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_COPY_DEST)
+    GfxBuffer createBuffer(uint64_t size, void const *data, GfxCpuAccess cpu_access, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_COMMON)
     {
         GfxBuffer buffer = {};
         if(cpu_access >= kGfxCpuAccess_Count)
