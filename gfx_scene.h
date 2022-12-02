@@ -295,7 +295,6 @@ struct GfxMaterial
     float     clearcoat           = 0.0f;
     float     clearcoat_roughness = 0.0f;
 
-
     GfxConstRef<GfxImage> albedo_map;
     GfxConstRef<GfxImage> roughness_map;
     GfxConstRef<GfxImage> metallicity_map;
