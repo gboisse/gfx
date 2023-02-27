@@ -1322,8 +1322,10 @@ private:
                 gltf_material_pbr.base_color_factor[2], gltf_material_pbr.base_color_factor[3]);
             material.roughness = gltf_material_pbr.roughness_factor;
             material.metallicity = gltf_material_pbr.metallic_factor;
+            float const emissiveFactor = gltf_material.emissive_strength.emissive_strength;
             material.emissivity = glm::vec3(gltf_material.emissive_factor[0], gltf_material.emissive_factor[1],
                 gltf_material.emissive_factor[2]);
+            material.emissivity *= emissiveFactor;
             if(gltf_material.has_ior)
                 material.ior = gltf_material.ior.ior;
             if(gltf_material.has_specular)
