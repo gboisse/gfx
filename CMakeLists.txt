@@ -17,8 +17,8 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 add_library(gfx STATIC gfx.cpp)
 
-set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc_2022_07_18)
-set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime-1.0.210209001)
+set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
+set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime)
 
 set(GFX_DXC_PATH ${GFX_DXC_PATH} PARENT_SCOPE)
 set(GFX_PIX_PATH ${GFX_PIX_PATH} PARENT_SCOPE)
