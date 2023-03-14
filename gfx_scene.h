@@ -1325,7 +1325,8 @@ private:
             float const emissiveFactor = gltf_material.emissive_strength.emissive_strength;
             material.emissivity = glm::vec3(gltf_material.emissive_factor[0], gltf_material.emissive_factor[1],
                 gltf_material.emissive_factor[2]);
-            material.emissivity *= emissiveFactor;
+            if (emissiveFactor > 0.0f)
+                material.emissivity *= emissiveFactor;
             if(gltf_material.has_ior)
                 material.ior = gltf_material.ior.ior;
             if(gltf_material.has_specular)
