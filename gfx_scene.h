@@ -1325,7 +1325,7 @@ private:
             float const emissiveFactor = gltf_material.emissive_strength.emissive_strength;
             material.emissivity = glm::vec3(gltf_material.emissive_factor[0], gltf_material.emissive_factor[1],
                 gltf_material.emissive_factor[2]);
-            if (emissiveFactor > 0.0f)
+            if(emissiveFactor > 0.0f)
                 material.emissivity *= emissiveFactor;
             if(gltf_material.has_ior)
                 material.ior = gltf_material.ior.ior;
@@ -1584,7 +1584,7 @@ private:
                     {
                         cgltf_size buffer_size = cgltf_num_components(buffer->type) * buffer->count;
                         sparse_buffer.resize(buffer_size);
-                        if (cgltf_accessor_unpack_floats(buffer, &sparse_buffer[0], buffer_size) < buffer_size)
+                        if(cgltf_accessor_unpack_floats(buffer, &sparse_buffer[0], buffer_size) < buffer_size)
                         {
                             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to unpack sparse accessor");
                             return false;
@@ -1834,7 +1834,7 @@ private:
             }
             std::set<GfxConstRef<GfxAnimation>> children_animations;
             std::set<GfxConstRef<GfxAnimation>> propogate_parent_animations = parent_animations;
-            if (node_animations.find(gltf_node) != node_animations.end())
+            if(node_animations.find(gltf_node) != node_animations.end())
             {
                 propogate_parent_animations.insert(
                     node_animations[gltf_node].begin(), node_animations[gltf_node].end());
@@ -1873,12 +1873,12 @@ private:
                 for(size_t i = 0; i < gltf_node->children_count; ++i)
                 {
                     std::map<cgltf_node const *, uint64_t>::const_iterator const it2 = animated_nodes.find(gltf_node->children[i]);
-                    if (it2 != animated_nodes.end()) children.push_back((*it2).second);
+                    if(it2 != animated_nodes.end()) children.push_back((*it2).second);
                 }
                 if(animated_node != nullptr)
                 {
                     animated_node->translate_ = local_transform[3];
-                    for (int i = 0; i < 3; i++)
+                    for(int32_t i = 0; i < 3; i++)
                         animated_node->scale_[i] = glm::length(glm::dvec3(local_transform[i]));
                     const glm::dmat3 rotMtx(glm::dvec3(local_transform[0]) / animated_node->scale_[0],
                         glm::dvec3(local_transform[1]) / animated_node->scale_[1],
@@ -1973,7 +1973,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    static inline KTX_error_code IterateKtxImage(int miplevel, int face, int width, int height, int depth,
+    static inline KTX_error_code IterateKtxImage(int32_t miplevel, int32_t face, int32_t width, int32_t height, int32_t depth,
         ktx_uint64_t faceLodSize, void* pixels, void* userdata)
     {
         GfxRef<GfxImage>* image_ref = (GfxRef<GfxImage>*)userdata;
@@ -2100,13 +2100,13 @@ private:
         }
         else
         {
-            if(stbi_is_16_bit_from_memory((stbi_uc *)memory, (int)size))
+            if(stbi_is_16_bit_from_memory((stbi_uc *)memory, (int32_t)size))
                 image_data = (stbi_uc *)stbi_load_16_from_memory(
-                    (stbi_uc *)memory, (int)size, &image_width, &image_height, &channel_count, 0);
+                    (stbi_uc *)memory, (int32_t)size, &image_width, &image_height, &channel_count, 0);
             if(image_data == nullptr)
             {
                 image_data = stbi_load_from_memory(
-                    (stbi_uc *)memory, (int)size, &image_width, &image_height, &channel_count, 0);
+                    (stbi_uc *)memory, (int32_t)size, &image_width, &image_height, &channel_count, 0);
                 bytes_per_channel = 1;
             }
         }
