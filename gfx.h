@@ -206,6 +206,7 @@ GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
+GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
@@ -256,6 +257,19 @@ GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char
 GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size);
 
+enum GfxShaderGroupType
+{
+    kGfxShaderGroupType_Raygen,
+    kGfxShaderGroupType_Miss,
+    kGfxShaderGroupType_Hit,
+    kGfxShaderGroupType_Callable,
+
+    kGfxShaderGroupType_Count
+};
+
+GfxResult gfxProgramSetShaderGroup(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name);
+GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size);
+
 //!
 //! Template helpers.
 //!
@@ -281,14 +295,23 @@ template<typename TYPE> inline GfxResult gfxProgramSetParameter(GfxContext conte
 //! Kernel compilation.
 //!
 
-class GfxKernel { GFX_INTERNAL_HANDLE(GfxKernel); char name[kGfxConstant_MaxNameLength + 1]; enum { kType_Compute, kType_Graphics } type; public:
+class GfxKernel { GFX_INTERNAL_HANDLE(GfxKernel); char name[kGfxConstant_MaxNameLength + 1]; enum { kType_Compute, kType_Graphics, kType_Raytracing } type; public:
                   inline bool isGraphics() const { return type == kType_Graphics; }
                   inline bool isCompute() const { return type == kType_Compute; }
+                  inline bool isRaytracing() const { return type == kType_Raytracing; }
                   inline char const *getName() const { return name; } };
+
+struct GfxLocalRootSignatureAssociation
+{
+    uint32_t local_root_signature_space;
+    GfxShaderGroupType shader_group_type;
+    char const *shader_group_name;
+};
 
 GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
 GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);    // draws to back buffer
 GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
+GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program, GfxLocalRootSignatureAssociation *local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0, char const **defines = nullptr, uint32_t define_count = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
@@ -325,6 +348,7 @@ GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_
 GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
 GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);                                // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);      // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
+GfxResult gfxCommandDispatchRays(GfxContext context, uint32_t width, uint32_t height, uint32_t depth);
 
 //!
 //! Debug/profile API.
@@ -483,6 +507,7 @@ class GfxInternal
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
+    GfxBuffer sbt_buffers_[kGfxShaderGroupType_Count] = {};
     uint64_t descriptor_heap_id_ = 0;
     GfxBuffer bound_index_buffer_ = {};
     GfxBuffer bound_vertex_buffer_ = {};
@@ -796,6 +821,7 @@ class GfxInternal
         float transform_[16] = {};
         uint32_t build_flags_ = 0;
         uint32_t instance_id_ = 0;
+        uint32_t instance_contribution_to_hit_group_index_ = 0;
         uint8_t instance_mask_ = 0xFFu;
         GfxBuffer bvh_buffer_ = {};
         uint32_t index_stride_ = 0;
@@ -969,6 +995,12 @@ class GfxInternal
 
         typedef std::map<uint64_t, Parameter> Parameters;
 
+        struct ShaderRecord
+        {
+            std::wstring shader_identifier_;
+            std::unique_ptr<Parameters> parameters_;
+        };
+
         Parameter &insertParameter(char const *parameter_name)
         {
             uint64_t const parameter_id = Hash(parameter_name);
@@ -984,14 +1016,50 @@ class GfxInternal
             return (*it).second;    // ^ assert on hashing conflicts
         }
 
+        ShaderRecord &insertSbtRecord(GfxShaderGroupType shader_group_type, uint32_t index)
+        {
+            auto const it = shader_records_[shader_group_type].find(index);
+            if(it == shader_records_[shader_group_type].end())
+            {
+                ShaderRecord &record = shader_records_[shader_group_type][index];
+                record.parameters_ = std::make_unique<Parameters>();
+                return record;
+            }
+            return (*it).second;
+        }
+
+        void insertSbtRecordShaderIdentifier(GfxShaderGroupType shader_group_type, uint32_t index, WCHAR *shader_identifier)
+        {
+            ShaderRecord &record = insertSbtRecord(shader_group_type, index);
+            record.shader_identifier_ = shader_identifier;
+        }
+
+        Parameter &insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
+        {
+            uint64_t const parameter_id = Hash(parameter_name);
+            ShaderRecord &record = insertSbtRecord(shader_group_type, index);
+            Parameters::iterator const it = record.parameters_->find(parameter_id);
+            GFX_ASSERT(parameter_name != nullptr && *parameter_name != '\0');
+            if(it ==  record.parameters_->end())
+            {
+                Parameter &parameter =  (*record.parameters_)[parameter_id];
+                parameter.name_ = parameter_name;
+                return parameter;
+            }
+            GFX_ASSERT(strcmp((*it).second.name_.c_str(), parameter_name) == 0);
+            return (*it).second;    // ^ assert on hashing conflicts
+        }
+
         String cs_;
         String vs_;
         String gs_;
         String ps_;
+        String lib_;
         String file_name_;
         String file_path_;
         String shader_model_;
         Parameters parameters_;
+        std::map<uint32_t, ShaderRecord> shader_records_[kGfxShaderGroupType_Count];
     };
     GfxArray<Program> programs_;
     GfxHandles program_handles_;
@@ -999,6 +1067,7 @@ class GfxInternal
     struct Kernel
     {
         inline bool isCompute() const { return (num_threads_ != nullptr && *num_threads_ > 0); }
+        inline bool isRaytracing() const { return (lib_bytecode_ != nullptr); }
 
         struct Parameter
         {
@@ -1050,23 +1119,45 @@ class GfxInternal
             uint32_t variable_size_ = 0;
         };
 
+        struct LocalParameter
+        {
+            ID3D12RootSignature *local_root_signature_;
+            std::vector<Parameter> parameters_;
+        };
+
+        struct LocalRootSignatureAssociation
+        {
+            uint32_t local_root_signature_space;
+            GfxShaderGroupType shader_group_type;
+        };
+
         String entry_point_;
         GfxProgram program_ = {};
         DrawState::Data draw_state_;
         std::vector<String> defines_;
+        std::map<std::wstring, LocalRootSignatureAssociation> local_root_signature_associations_;
         uint64_t descriptor_heap_id_ = 0;
         uint32_t *num_threads_ = nullptr;
         IDxcBlob *cs_bytecode_ = nullptr;
         IDxcBlob *vs_bytecode_ = nullptr;
         IDxcBlob *gs_bytecode_ = nullptr;
         IDxcBlob *ps_bytecode_ = nullptr;
+        IDxcBlob *lib_bytecode_ = nullptr;
         ID3D12ShaderReflection *cs_reflection_ = nullptr;
         ID3D12ShaderReflection *vs_reflection_ = nullptr;
         ID3D12ShaderReflection *gs_reflection_ = nullptr;
         ID3D12ShaderReflection *ps_reflection_ = nullptr;
+        ID3D12LibraryReflection *lib_reflection_ = nullptr;
         ID3D12RootSignature *root_signature_ = nullptr;
+        std::map<uint32_t, LocalParameter> local_parameters_;
+        size_t sbt_record_stride_[kGfxShaderGroupType_Count];
         ID3D12PipelineState *pipeline_state_ = nullptr;
+        ID3D12StateObject *state_object_ = nullptr;
         Parameter *parameters_ = nullptr;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE ray_generation_shader_record_;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE miss_shader_table_;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE hit_group_table_;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE callable_shader_table_;
         uint32_t parameter_count_ = 0;
         uint32_t vertex_stride_ = 0;
     };
@@ -1079,6 +1170,7 @@ class GfxInternal
         kShaderType_VS,
         kShaderType_GS,
         kShaderType_PS,
+        kShaderType_LIB,
 
         kShaderType_Count
     };
@@ -2051,6 +2143,7 @@ public:
                 instance_desc.Transform[j][3] = gfx_raytracing_primitive.transform_[4 * j + 3];
             instance_desc.InstanceID = gfx_raytracing_primitive.instance_id_;
             instance_desc.InstanceMask = gfx_raytracing_primitive.instance_mask_;
+            instance_desc.InstanceContributionToHitGroupIndex  = gfx_raytracing_primitive.instance_contribution_to_hit_group_index_;
             instance_desc.AccelerationStructure = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             instance_descs[instance_desc_count++] = instance_desc;
         }
@@ -2254,6 +2347,18 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult setRaytracingPrimitiveInstanceContributionToHitGroupIndex(GfxRaytracingPrimitive const &raytracing_primitive, uint32_t instance_contribution_to_hit_group_index)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instance contribution to hit group index on an invalid raytracing primitive object");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
+        gfx_raytracing_primitive.instance_contribution_to_hit_group_index_ = instance_contribution_to_hit_group_index;
+        return kGfxResult_NoError;
+    }
+
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
     {
         if(dxr_device_ == nullptr)
@@ -2396,6 +2501,32 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult gfxProgramSetShaderGroup(GfxProgram const &program, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+    {
+        if(!program_handles_.has_handle(program.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
+        if(!group_name || !*group_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
+        Program &gfx_program = programs_[program];  // get hold of program object
+        WCHAR wgroup_name[1024];
+        mbstowcs(wgroup_name, group_name, ARRAYSIZE(wgroup_name));
+        gfx_program.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult gfxProgramSetConstants(GfxProgram const &program, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+    {
+        if(!program_handles_.has_handle(program.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        if(!data && data_size > 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
+        Program &gfx_program = programs_[program];  // get hold of program object
+        gfx_program.insertSbtRecordParameter(shader_group_type, index, parameter_name).set(data, data_size);
+        return kGfxResult_NoError;
+    }
+
     GfxKernel createComputeKernel(GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
     {
         GfxKernel compute_kernel = {};
@@ -2469,6 +2600,44 @@ public:
             return graphics_kernel;
         }
         return graphics_kernel;
+    }
+
+    GfxKernel createRaytracingKernel(GfxProgram const &program, GfxLocalRootSignatureAssociation *local_root_signature_associations, uint32_t local_root_signature_association_count, char const **defines, uint32_t define_count)
+    {
+        GfxKernel raytracing_kernel = {};
+        if(!program_handles_.has_handle(program.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a compute kernel using an invalid program object");
+            return raytracing_kernel;
+        }
+        raytracing_kernel.type = GfxKernel::kType_Raytracing;
+        Program const &gfx_program = programs_[program];
+        GFX_SNPRINTF(raytracing_kernel.name, sizeof(raytracing_kernel.name), "%s", "");
+        raytracing_kernel.handle = kernel_handles_.allocate_handle();
+        Kernel &gfx_kernel = kernels_.insert(raytracing_kernel);
+        gfx_kernel.program_ = program;
+        gfx_kernel.entry_point_ = "";
+        GFX_ASSERT(define_count == 0 || defines != nullptr);
+        GFX_ASSERT(local_root_signature_association_count == 0 || local_root_signature_associations != nullptr);
+        for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        WCHAR wgroup_name[1024];
+        for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
+        {
+            mbstowcs(wgroup_name, local_root_signature_associations[i].shader_group_name, ARRAYSIZE(wgroup_name));
+            gfx_kernel.local_root_signature_associations_[wgroup_name] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
+        }
+        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
+        gfx_kernel.lib_bytecode_ = (IDxcBlob *)~0ull;
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i) gfx_kernel.sbt_record_stride_[i] = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+        createKernel(gfx_program, gfx_kernel);  // create raytracing kernel
+        if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
+        {
+            destroyKernel(raytracing_kernel);
+            raytracing_kernel = {};    // invalidate handle
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Failed to create raytracing kernel object using program `%s'", gfx_program.file_path_.c_str());
+            return raytracing_kernel;
+        }
+        return raytracing_kernel;
     }
 
     GfxResult destroyKernel(GfxKernel const &kernel)
@@ -2850,10 +3019,20 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot bind invalid kernel object");
         if(bound_kernel_.handle == kernel.handle) return kGfxResult_NoError;    // already bound
         Kernel const &gfx_kernel = kernels_[kernel];
-        if(gfx_kernel.root_signature_ != nullptr && gfx_kernel.pipeline_state_ != nullptr)
+        if(gfx_kernel.isRaytracing())
         {
-            command_list_->SetPipelineState(gfx_kernel.pipeline_state_);
-            if(gfx_kernel.isCompute())
+            if (gfx_kernel.state_object_)
+                dxr_command_list_->SetPipelineState1(gfx_kernel.state_object_);
+        }
+        else
+        {
+            if (gfx_kernel.pipeline_state_)
+                command_list_->SetPipelineState(gfx_kernel.pipeline_state_);
+        }
+
+        if(gfx_kernel.root_signature_ != nullptr)
+        {
+            if(gfx_kernel.isCompute() || gfx_kernel.isRaytracing())
                 command_list_->SetComputeRootSignature(gfx_kernel.root_signature_);
             else
                 command_list_->SetGraphicsRootSignature(gfx_kernel.root_signature_);
@@ -3102,6 +3281,33 @@ public:
                 command_list_->SetComputeRoot32BitConstant(root_parameter_index, dispatch_id, destination_offset);
             command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_ + dispatch_id * sizeof(D3D12_DISPATCH_ARGUMENTS), nullptr, 0);
         }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeDispatchRays(uint32_t width, uint32_t height, uint32_t depth)
+    {
+        if(command_list_ == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(!width || !height || !depth)
+            return kGfxResult_NoError;  // nothing to dispatch
+        if(!kernel_handles_.has_handle(bound_kernel_.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
+        Kernel &kernel = kernels_[bound_kernel_];
+        if(!kernel.isRaytracing())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-rt kernel object");
+        if(kernel.root_signature_ == nullptr || kernel.state_object_ == nullptr)
+            return kGfxResult_NoError;  // skip dispatch call
+        GFX_TRY(installShaderState(kernel));
+        submitPipelineBarriers();   // transition our resources if needed
+	    ::D3D12_DISPATCH_RAYS_DESC desc;
+	    desc.RayGenerationShaderRecord = kernel.ray_generation_shader_record_;
+	    desc.MissShaderTable = kernel.miss_shader_table_;
+	    desc.HitGroupTable = kernel.hit_group_table_;
+	    desc.CallableShaderTable = kernel.callable_shader_table_;
+	    desc.Width = width;
+	    desc.Height = height;
+	    desc.Depth = depth;
+        dxr_command_list_->DispatchRays(&desc);
         return kGfxResult_NoError;
     }
 
@@ -4611,10 +4817,19 @@ private:
     GfxResult createRootSignature(Kernel &kernel)
     {
         ID3DBlob *result = nullptr, *error = nullptr;
-        std::vector<Kernel::Parameter> kernel_parameters;
-        std::vector<D3D12_ROOT_PARAMETER> root_parameters;
-        std::vector<D3D12_DESCRIPTOR_RANGE> descriptor_ranges;
+        struct RootSignatureParameters
+        {
+            std::vector<Kernel::Parameter> kernel_parameters;
+            std::vector<D3D12_ROOT_PARAMETER> root_parameters;
+            std::vector<D3D12_DESCRIPTOR_RANGE> descriptor_ranges;            
+        };
+        RootSignatureParameters global_root_signature_parameters;
+        std::map<std::uint32_t, RootSignatureParameters> local_root_signatures_parameters;
+        std::map<std::uint32_t, GfxShaderGroupType> local_root_signature_spaces;
         GFX_ASSERT(kernel.root_signature_ == nullptr && kernel.parameters_ == nullptr);
+
+        for(auto &i : kernel.local_root_signature_associations_)
+            local_root_signature_spaces[i.second.local_root_signature_space] = i.second.shader_group_type;
 
         std::vector<void *> allocated_memory;
         struct MemoryReleaser
@@ -4630,6 +4845,7 @@ private:
         {
             D3D12_ROOT_PARAMETER root_parameter = {};
             ID3D12ShaderReflection *shader = nullptr;
+            ID3D12LibraryReflection *library = nullptr;
             switch(i)
             {
             case kShaderType_CS:
@@ -4647,37 +4863,35 @@ private:
                 shader = kernel.ps_reflection_;
                 root_parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
                 break;
+            case kShaderType_LIB:
+                library = kernel.lib_reflection_;
+                break;
             default:
                 GFX_ASSERTMSG(0, "Unsupported shader type `%u' was encountered", i);
                 break;
             }
 
-            if(!shader) continue;
-            D3D12_SHADER_DESC shader_desc = {};
-            shader->GetDesc(&shader_desc);
-
-            for(uint32_t j = 0; j < shader_desc.BoundResources; ++j)
+            auto process_resource_binding = [&](ID3D12FunctionReflection *function, D3D12_SHADER_INPUT_BIND_DESC &resource_desc)
             {
                 Kernel::Parameter kernel_parameter = {};
                 D3D12_DESCRIPTOR_RANGE descriptor_range = {};
-                D3D12_SHADER_INPUT_BIND_DESC resource_desc = {};
-                shader->GetResourceBindingDesc(j, &resource_desc);
                 kernel_parameter.parameter_id_ = Hash(resource_desc.Name);
+                const bool is_local_root_signature_paramter = local_root_signature_spaces.find(resource_desc.Space) != local_root_signature_spaces.end();
 
                 switch(resource_desc.Type)
                 {
                 case D3D_SIT_CBUFFER:
                     {
                         descriptor_range.RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-                        bool is_root_constant = (strcmp(resource_desc.Name, "$Globals") == 0);
+                        bool is_root_constant = (strcmp(resource_desc.Name, "$Globals") == 0) || is_local_root_signature_paramter;
                         if(is_root_constant)
                         {
-                            ID3D12ShaderReflectionConstantBuffer *constant_buffer = shader->GetConstantBufferByName(resource_desc.Name);
+                            ID3D12ShaderReflectionConstantBuffer *constant_buffer = function ? function->GetConstantBufferByName(resource_desc.Name) : shader->GetConstantBufferByName(resource_desc.Name);
                             GFX_ASSERT(constant_buffer != nullptr);
                             D3D12_SHADER_BUFFER_DESC buffer_desc = {};
                             constant_buffer->GetDesc(&buffer_desc);
-                            if(buffer_desc.Size > 256)  // https://microsoft.github.io/DirectX-Specs/d3d/ResourceBinding.html#root-argument-limits
-                                is_root_constant = false;   // if exceeding the root parameters size limit, go through the constant buffer pool
+                            if(buffer_desc.Size > 256 && !is_local_root_signature_paramter)  // https://microsoft.github.io/DirectX-Specs/d3d/ResourceBinding.html#root-argument-limits
+                                is_root_constant = false;   // if exceeding the global root parameters size limit, go through the constant buffer pool
                             kernel_parameter.variables_ = (Kernel::Parameter::Variable *)malloc(buffer_desc.Variables * sizeof(Kernel::Parameter::Variable));
                             allocated_memory.push_back(kernel_parameter.variables_);
                             GFX_ASSERT(kernel_parameter.variables_ != nullptr);
@@ -4766,7 +4980,7 @@ private:
                     break;
                 default:
                     GFX_ASSERTMSG(0, "Encountered unsupported shader resource type `%u'", (uint32_t)resource_desc.Type);
-                    continue;
+                    return;
                 }
 
                 descriptor_range.OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
@@ -4794,36 +5008,80 @@ private:
                     }
                 kernel_parameter.descriptor_count_ = descriptor_range.NumDescriptors;
 
-                root_parameters.push_back(root_parameter);
-                descriptor_ranges.push_back(descriptor_range);
-                kernel_parameters.push_back(kernel_parameter);
+                RootSignatureParameters &root_signature_parameters = is_local_root_signature_paramter ? 
+                    local_root_signatures_parameters[resource_desc.Space] : global_root_signature_parameters;
+                root_signature_parameters.root_parameters.push_back(root_parameter);
+                root_signature_parameters.descriptor_ranges.push_back(descriptor_range);
+                root_signature_parameters.kernel_parameters.push_back(kernel_parameter);
+            };
+
+            if (library)
+            {
+                D3D12_LIBRARY_DESC library_desc;
+                library->GetDesc(&library_desc);
+                for (UINT i = 0; i < library_desc.FunctionCount; i++)
+                {
+                    ID3D12FunctionReflection *function = library->GetFunctionByIndex(i);
+                    D3D12_FUNCTION_DESC function_desc = {};
+                    function->GetDesc(&function_desc);
+                    for(uint32_t j = 0; j < function_desc.BoundResources; ++j)
+                    {
+                        D3D12_SHADER_INPUT_BIND_DESC resource_desc = {};
+                        function->GetResourceBindingDesc(j, &resource_desc);
+                        process_resource_binding(function, resource_desc);
+                    }
+                }
             }
-            GFX_ASSERT(root_parameters.size() == kernel_parameters.size());
-            GFX_ASSERT(kernel_parameters.size() == descriptor_ranges.size());
+            else if (shader)
+            {
+                D3D12_SHADER_DESC shader_desc = {};
+                shader->GetDesc(&shader_desc);
+
+                for(uint32_t j = 0; j < shader_desc.BoundResources; ++j)
+                {
+                    D3D12_SHADER_INPUT_BIND_DESC resource_desc = {};
+                    shader->GetResourceBindingDesc(j, &resource_desc);
+                    process_resource_binding(nullptr, resource_desc);
+                }
+            }
+            else
+            {
+                continue;
+            }
+
+            GFX_ASSERT(global_root_signature_parameters.root_parameters.size() == global_root_signature_parameters.kernel_parameters.size());
+            GFX_ASSERT(global_root_signature_parameters.kernel_parameters.size() == global_root_signature_parameters.descriptor_ranges.size());
         }
 
-        for(size_t i = 0; i < root_parameters.size(); ++i)
+        auto finalize_root_parameters = [](RootSignatureParameters &root_signature_parameters)
         {
-            Kernel::Parameter const &kernel_parameter = kernel_parameters[i];
-            switch(kernel_parameter.type_)
+            for(size_t i = 0; i < root_signature_parameters.root_parameters.size(); ++i)
             {
-            case Kernel::Parameter::kType_Constants:
-                root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-                root_parameters[i].Constants.Num32BitValues = kernel_parameter.variable_size_ / sizeof(uint32_t);
-                root_parameters[i].Constants.ShaderRegister = descriptor_ranges[i].BaseShaderRegister;
-                root_parameters[i].Constants.RegisterSpace = descriptor_ranges[i].RegisterSpace;
-                break;
-            default:
-                root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-                root_parameters[i].DescriptorTable.pDescriptorRanges = &descriptor_ranges[i];
-                root_parameters[i].DescriptorTable.NumDescriptorRanges = 1;
-                break;
+                Kernel::Parameter const &kernel_parameter = root_signature_parameters.kernel_parameters[i];
+                switch(kernel_parameter.type_)
+                {
+                case Kernel::Parameter::kType_Constants:
+                    root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+                    root_signature_parameters.root_parameters[i].Constants.Num32BitValues = kernel_parameter.variable_size_ / sizeof(uint32_t);
+                    root_signature_parameters.root_parameters[i].Constants.ShaderRegister = root_signature_parameters.descriptor_ranges[i].BaseShaderRegister;
+                    root_signature_parameters.root_parameters[i].Constants.RegisterSpace = root_signature_parameters.descriptor_ranges[i].RegisterSpace;
+                    break;
+                default:
+                    root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+                    root_signature_parameters.root_parameters[i].DescriptorTable.pDescriptorRanges = &root_signature_parameters.descriptor_ranges[i];
+                    root_signature_parameters.root_parameters[i].DescriptorTable.NumDescriptorRanges = 1;
+                    break;
+                }
             }
-        }
+        };
+
+        finalize_root_parameters(global_root_signature_parameters);
+        for(auto &root_signature_parameters : local_root_signatures_parameters)
+            finalize_root_parameters(root_signature_parameters.second);
 
         D3D12_ROOT_SIGNATURE_DESC root_signature_desc = {};
-        root_signature_desc.pParameters = root_parameters.data();
-        root_signature_desc.NumParameters = (uint32_t) root_parameters.size();
+        root_signature_desc.pParameters = global_root_signature_parameters.root_parameters.data();
+        root_signature_desc.NumParameters = (uint32_t) global_root_signature_parameters.root_parameters.size();
         root_signature_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
                                   /*D3D12_ROOT_SIGNATURE_FLAG_DENY_HULL_SHADER_ROOT_ACCESS   |
                                     D3D12_ROOT_SIGNATURE_FLAG_DENY_MESH_SHADER_ROOT_ACCESS   |
@@ -4846,16 +5104,60 @@ private:
         device_->CreateRootSignature(0, result->GetBufferPointer(), result->GetBufferSize(), IID_PPV_ARGS(&kernel.root_signature_));
         if(kernel.root_signature_)
         {
-            allocated_memory.clear();
-            kernel.parameter_count_ = (uint32_t)root_parameters.size();
-            kernel.parameters_ = (!root_parameters.empty() ? (Kernel::Parameter *)malloc(kernel.parameter_count_ * sizeof(Kernel::Parameter)) : nullptr);
+            kernel.parameter_count_ = (uint32_t)global_root_signature_parameters.root_parameters.size();
+            kernel.parameters_ = (!global_root_signature_parameters.root_parameters.empty() ? (Kernel::Parameter *)malloc(kernel.parameter_count_ * sizeof(Kernel::Parameter)) : nullptr);
             GFX_ASSERT(kernel.parameters_ != nullptr || kernel.parameter_count_ == 0);
-            GFX_ASSERT(root_parameters.size() == kernel_parameters.size());
+            GFX_ASSERT(global_root_signature_parameters.root_parameters.size() == global_root_signature_parameters.kernel_parameters.size());
             for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
-                new(&kernel.parameters_[i]) Kernel::Parameter(kernel_parameters[i]);
+                new(&kernel.parameters_[i]) Kernel::Parameter(global_root_signature_parameters.kernel_parameters[i]);
         }
         if(error) error->Release();
         result->Release();
+        for(auto &root_signature_parameters : local_root_signatures_parameters)
+        {
+            uint32_t const space = root_signature_parameters.first;
+            auto &local_root_signature_parameters = root_signature_parameters.second;
+
+            D3D12_ROOT_SIGNATURE_DESC root_signature_desc = {};
+            root_signature_desc.pParameters = local_root_signature_parameters.root_parameters.data();
+            root_signature_desc.NumParameters = (uint32_t) local_root_signature_parameters.root_parameters.size();
+            root_signature_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+
+            D3D12SerializeRootSignature(&root_signature_desc, D3D_ROOT_SIGNATURE_VERSION_1, &result, &error);
+            if(!result)
+            {
+                GFX_PRINTLN("Error: Failed to serialize local root signature%s%s", error ? ":\r\n" : "", error ? (char const *)error->GetBufferPointer() : "");
+                if(error) error->Release();
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Failed to serizalize root signature");
+            }
+
+            auto &local_parameters = kernel.local_parameters_[space];
+            device_->CreateRootSignature(0, result->GetBufferPointer(), result->GetBufferSize(), IID_PPV_ARGS(&local_parameters.local_root_signature_));
+            if(local_parameters.local_root_signature_)
+            {
+                local_parameters.parameters_ = std::move(local_root_signature_parameters.kernel_parameters);
+            }
+            if(error) error->Release();
+            result->Release();
+
+            size_t local_root_signature_parameters_size = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+            for(size_t i = 0; i < local_parameters.parameters_.size(); ++i)
+            {
+                Kernel::Parameter const &kernel_parameter = local_parameters.parameters_[i];
+                switch(kernel_parameter.type_)
+                {
+                case Kernel::Parameter::kType_Constants:
+                    local_root_signature_parameters_size += GFX_ALIGN(kernel_parameter.variable_size_, sizeof(D3D12_GPU_VIRTUAL_ADDRESS));
+                    local_root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+                    break;
+                default:
+                    local_root_signature_parameters_size += sizeof(D3D12_GPU_VIRTUAL_ADDRESS);
+                    break;
+                }
+            }
+            GfxShaderGroupType const shader_group_type = local_root_signature_spaces[space];
+            kernel.sbt_record_stride_[shader_group_type] = GFX_MAX(kernel.sbt_record_stride_[shader_group_type], GFX_ALIGN(local_root_signature_parameters_size, D3D12_RAYTRACING_SHADER_RECORD_BYTE_ALIGNMENT ));
+        }
 
         return kGfxResult_NoError;
     }
@@ -4982,10 +5284,44 @@ private:
         return kGfxResult_NoError;
     }
 
+    GfxResult createRaytracingPipelineState(Kernel &kernel)
+    {
+        GFX_ASSERT(kernel.state_object_ == nullptr);
+        D3D12_GLOBAL_ROOT_SIGNATURE
+        global_root_signature = { kernel.root_signature_ };
+        D3D12_DXIL_LIBRARY_DESC
+        lib_desc = { GetShaderBytecode(kernel.lib_bytecode_), 0, nullptr };
+        std::vector<D3D12_STATE_SUBOBJECT> subobjects;
+        subobjects.reserve(kernel.local_root_signature_associations_.size() + 2);
+        subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &global_root_signature});
+        subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_desc });
+        std::vector<D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION> local_root_signature_associations;
+        std::vector<D3D12_LOCAL_ROOT_SIGNATURE> local_root_signatures;
+        std::vector<LPCWSTR> exports;
+        local_root_signature_associations.reserve(kernel.local_root_signature_associations_.size());
+        local_root_signatures.reserve(kernel.local_root_signature_associations_.size());
+        exports.reserve(kernel.local_root_signature_associations_.size());
+        for(auto &i : kernel.local_root_signature_associations_)
+        {
+            auto &local_parameters = kernel.local_parameters_[i.second.local_root_signature_space];
+            local_root_signatures.push_back({local_parameters.local_root_signature_});
+            subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &local_root_signatures.back()});
+            exports.push_back({i.first.c_str()});
+            local_root_signature_associations.push_back({&subobjects.back(), 1, &exports.back()});
+        }
+        D3D12_STATE_OBJECT_DESC
+        so_desc               = {};
+        so_desc.Type          = D3D12_STATE_OBJECT_TYPE_RAYTRACING_PIPELINE;
+        so_desc.NumSubobjects = (UINT)subobjects.size();
+        so_desc.pSubobjects   = subobjects.data();
+        dxr_device_->CreateStateObject(&so_desc, IID_PPV_ARGS(&kernel.state_object_));
+        return kGfxResult_NoError;
+    }
+
     GfxResult installShaderState(Kernel &kernel, bool indexed = false)
     {
         uint32_t root_constants[64];
-        bool const is_compute = kernel.isCompute();
+        bool const is_compute = kernel.isCompute() || kernel.isRaytracing();
         if(!program_handles_.has_handle(kernel.program_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot %s with a %s kernel pointing to an invalid program object",
                 is_compute ? "dispatch" : "draw", is_compute ? "compute" : "graphics");
@@ -5071,7 +5407,7 @@ private:
             switch(parameter.type_)
             {
             case Kernel::Parameter::kType_Constants:
-                populateRootConstants(program, parameter, root_constants);
+                populateRootConstants(program, program.parameters_, parameter, root_constants);
                 if(is_compute)
                     command_list_->SetComputeRoot32BitConstants(i, parameter.variable_size_ / sizeof(uint32_t), root_constants, 0);
                 else
@@ -5191,703 +5527,7 @@ private:
             uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu ? parameter.descriptor_slot_ :
                                                                                     dummy_descriptors_[parameter.type_]);
             if(parameter.descriptor_slot_ != 0xFFFFFFFFu)
-            {
-                bool const invalidate_descriptor = parameter.parameter_ != nullptr && (invalidate_descriptors || parameter.id_ != parameter.parameter_->id_);
-                if(parameter.parameter_ != nullptr) parameter.id_ = parameter.parameter_->id_;
-                GFX_ASSERT(parameter.parameter_ != nullptr || parameter.variable_size_ > 0);
-                switch(parameter.type_)
-                {
-                case Kernel::Parameter::kType_Buffer:
-                    {
-                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
-                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
-                            {
-                                if(!invalidate_descriptor) continue;
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
-                                if(!buffer_handles_.has_handle(buffer.handle))
-                                {
-                                    if(buffer.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // user set an invalid buffer object
-                                }
-                                if(buffer.cpu_access == kGfxCpuAccess_Read)
-                                {
-                                    if(!invalidate_descriptor) continue;
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read CPU access as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // invalid buffer object for shader SRV
-                                }
-                                if(buffer.stride == 0)
-                                {
-                                    if(!invalidate_descriptor) continue;
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // invalid buffer stride
-                                }
-                                if(buffer.size < buffer.stride)
-                                {
-                                    if(!invalidate_descriptor) continue;
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // invalid buffer size
-                                }
-                                Buffer &gfx_buffer = buffers_[buffer];
-                                SetObjectName(gfx_buffer, buffer.name);
-                                if(buffer.cpu_access == kGfxCpuAccess_None)
-                                    transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
-                                    GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
-                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
-                                srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
-                                srv_desc.Buffer.StructureByteStride = buffer.stride;
-                                device_->CreateShaderResourceView(gfx_buffer.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_RWBuffer:
-                    {
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
-                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
-                            {
-                                if(!invalidate_descriptor) continue;
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
-                                if(!buffer_handles_.has_handle(buffer.handle))
-                                {
-                                    if(buffer.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // user set an invalid buffer object
-                                }
-                                if(buffer.cpu_access != kGfxCpuAccess_None)
-                                {
-                                    if(!invalidate_descriptor) continue;
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read/write CPU access as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // invalid buffer object for shader UAV
-                                }
-                                if(buffer.stride == 0)
-                                {
-                                    if(!invalidate_descriptor) continue;
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // invalid buffer stride
-                                }
-                                if(buffer.size < buffer.stride)
-                                {
-                                    if(!invalidate_descriptor) continue;
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;  // invalid buffer size
-                                }
-                                Buffer &gfx_buffer = buffers_[buffer];
-                                SetObjectName(gfx_buffer, buffer.name);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
-                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
-                                {
-                                    if(!invalidate_descriptor) continue;    // invalid resource use
-                                    GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot re-create interop buffer objects with different usage flag(s)");
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid operation
-                                }
-                                transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
-                                    GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-                                uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
-                                uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
-                                uav_desc.Buffer.StructureByteStride = buffer.stride;
-                                device_->CreateUnorderedAccessView(gfx_buffer.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_Texture2D:
-                    {
-                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
-                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.is2D())
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader SRV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2D.MostDetailedMip = mip_level;
-                                srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
-                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_RWTexture2D:
-                    {
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
-                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.is2D())
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader UAV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
-                                {
-                                    if(!invalidate_descriptor) continue;    // invalid resource use
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid operation
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetUAVFormat(resource_desc.Format);
-                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                                uav_desc.Texture2D.MipSlice = mip_level;
-                                device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_Texture2DArray:
-                    {
-                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
-                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.is2DArray())
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D sampler array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader SRV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
-                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture2DArray.MostDetailedMip = mip_level;
-                                srv_desc.Texture2DArray.MipLevels = 0xFFFFFFFFu;    // select all mipmaps from MostDetailedMip on down to least detailed
-                                srv_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
-                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_RWTexture2DArray:
-                    {
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
-                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.is2DArray() && !texture.isCube())
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader UAV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
-                                {
-                                    if(!invalidate_descriptor) continue;    // invalid resource use
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid operation
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetUAVFormat(resource_desc.Format);
-                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                                uav_desc.Texture2DArray.MipSlice = mip_level;
-                                uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
-                                device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_Texture3D:
-                    {
-                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
-                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
-                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.is3D())
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader SRV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
-                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.Texture3D.MostDetailedMip = mip_level;
-                                srv_desc.Texture3D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
-                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_RWTexture3D:
-                    {
-                        D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
-                        dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.is3D())
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader UAV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
-                                {
-                                    if(!invalidate_descriptor) continue;    // invalid resource use
-                                    device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid operation
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
-                                uav_desc.Format = GetUAVFormat(resource_desc.Format);
-                                uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                                uav_desc.Texture3D.MipSlice = mip_level;
-                                uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
-                                device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_TextureCube:
-                    {
-                        D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
-                        dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-                        dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                        dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        parameter.bound_textures_.resize(parameter.descriptor_count_);
-                        for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
-                            if(j >= parameter.parameter_->data_.image_.texture_count ||
-                               parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                            {
-                                if(!invalidate_descriptor) continue;    // already up to date
-                                if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                            }
-                            else
-                            {
-                                GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
-                                if(!texture_handles_.has_handle(texture.handle))
-                                {
-                                    if(texture.handle != 0)
-                                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
-                                    continue;   // user set an invalid texture object
-                                }
-                                if(!texture.isCube() && (!texture.is2DArray() || texture.getWidth() != texture.getHeight() || texture.getDepth() != 6))
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-cube texture object as a cubemap sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // invalid texture object for shader SRV
-                                }
-                                Texture &gfx_texture = textures_[texture];
-                                SetObjectName(gfx_texture, texture.name);
-                                uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
-                                D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
-                                if(mip_level >= (uint32_t)resource_desc.MipLevels)
-                                {
-                                    if(!invalidate_descriptor) continue;    // already up to date
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of cube texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                    device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                    continue;   // out of bounds mip level
-                                }
-                                transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-                                if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
-                                    continue;    // already up to date
-                                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                                srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
-                                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
-                                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                                srv_desc.TextureCube.MostDetailedMip = mip_level;
-                                srv_desc.TextureCube.MipLevels = 0xFFFFFFFFu;   // select all mipmaps from MostDetailedMip on down to least detailed
-                                device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
-                                parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
-                            }
-                    }
-                    break;
-                case Kernel::Parameter::kType_AccelerationStructure:
-                    {
-                        if(parameter.parameter_->type_ != Program::Parameter::kType_AccelerationStructure)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected an acceleration structure object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        GfxAccelerationStructure const &acceleration_structure = parameter.parameter_->data_.acceleration_structure_.bvh_;
-                        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-                        {
-                            if(acceleration_structure.handle != 0)
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid acceleration structure object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an invalid buffer object
-                        }
-                        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
-                        const_cast<Program::Parameter *>(parameter.parameter_)->data_.acceleration_structure_.bvh_buffer_ = gfx_acceleration_structure.bvh_buffer_;
-                        if(!gfx_acceleration_structure.bvh_buffer_)
-                        {
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // acceleration structure hasn't been built yet
-                        }
-                        GFX_ASSERT(buffer_handles_.has_handle(gfx_acceleration_structure.bvh_buffer_.handle));
-                        Buffer &buffer = buffers_[gfx_acceleration_structure.bvh_buffer_];
-                        SetObjectName(buffer, acceleration_structure.name);
-                        if(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle))
-                            transitionResource(buffers_[raytracing_scratch_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-                        GFX_ASSERT(*buffer.resource_state_ == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
-                        if(!invalidate_descriptor) break;   // already up to date
-                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
-                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
-                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        srv_desc.RaytracingAccelerationStructure.Location = buffer.resource_->GetGPUVirtualAddress() + buffer.data_offset_;
-                        device_->CreateShaderResourceView(nullptr, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
-                    }
-                    break;
-                case Kernel::Parameter::kType_ConstantBuffer:
-                    {
-                        void *data = nullptr;
-                        D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {};
-                        if(parameter.variable_size_ > 0)
-                        {
-                            cbv_desc.BufferLocation = allocateConstantMemory(parameter.variable_size_, data);
-                            if(data != nullptr) populateRootConstants(program, parameter, (uint32_t *)data);
-                            cbv_desc.SizeInBytes = GFX_ALIGN(parameter.variable_size_, 256);
-                        }
-                        else if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
-                        {
-                            cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
-                            if(data != nullptr) memcpy(data, parameter.parameter_->data_.constants_, parameter.parameter_->data_size_);
-                            cbv_desc.SizeInBytes = GFX_ALIGN(parameter.parameter_->data_size_, 256);
-                        }
-                        else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
-                        {
-                            if(parameter.parameter_->data_.buffer_.buffer_count > 1)
-                            {
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                break;  // user set an invalid buffer object
-                            }
-                            if(parameter.parameter_->data_.buffer_.buffer_count < 1)
-                            {
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                break;  // user set an invalid buffer object
-                            }
-                            GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
-                            if(!buffer_handles_.has_handle(buffer.handle))
-                            {
-                                if(buffer.handle != 0)
-                                    GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                descriptor_slot = dummy_descriptors_[parameter.type_];
-                                freeDescriptor(parameter.descriptor_slot_);
-                                parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                                break;  // user set an invalid buffer object
-                            }
-                            if(buffer.cpu_access != kGfxCpuAccess_Write)
-                            {
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that does not have write CPU access as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                descriptor_slot = dummy_descriptors_[parameter.type_];
-                                freeDescriptor(parameter.descriptor_slot_);
-                                parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                                break;  // user set an invalid buffer object
-                            }
-                            if(buffer.size > 0xFFFFFFFFull)
-                            {
-                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that's larger than 4GiB as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                                descriptor_slot = dummy_descriptors_[parameter.type_];
-                                freeDescriptor(parameter.descriptor_slot_);
-                                parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                                break;  // constant buffer is too large
-                            }
-                            Buffer &gfx_buffer = buffers_[buffer];
-                            SetObjectName(gfx_buffer, buffer.name);
-                            GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
-                            GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
-                            cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
-                            cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
-                        }
-                        else
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected constant or buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // user set an unrelated parameter type
-                        }
-                        if(cbv_desc.BufferLocation == 0)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate constant memory for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                            descriptor_slot = dummy_descriptors_[parameter.type_];
-                            freeDescriptor(parameter.descriptor_slot_);
-                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                            break;  // failed to allocate constant memory
-                        }
-                        device_->CreateConstantBufferView(&cbv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
-                    }
-                    break;
-                default:
-                    GFX_ASSERT(0);  // missing implementation
-                    break;
-                }
-            }
+                initDescriptorParameter(program, invalidate_descriptors, parameter, descriptor_slot);
             GFX_ASSERT(descriptor_slot < (descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0));
             if(is_compute)
                 command_list_->SetComputeRootDescriptorTable(i, descriptors_.getGPUHandle(descriptor_slot));
@@ -5942,6 +5582,95 @@ private:
                 installed_vertex_buffer_ = bound_vertex_buffer_;
                 force_install_vertex_buffer_ = false;
             }
+        }
+        // sbt initialization
+        if(kernel.state_object_)
+        {
+            size_t sbt_record_count[kGfxShaderGroupType_Count]{};
+            ID3D12StateObjectProperties *state_object_properties;
+            kernel.state_object_->QueryInterface(IID_PPV_ARGS(&state_object_properties));
+            for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+            {
+                auto last_record_it = program.shader_records_[i].rbegin();
+                if (last_record_it == program.shader_records_[i].rend()) continue;
+                uint32_t record_count = last_record_it->first + 1;
+                sbt_record_count[i] = record_count;
+                size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + kernel.sbt_record_stride_[i] * record_count;
+                if(sbt_buffers_[i].size < sbt_buffer_size)
+                {
+                    auto old_sbt_buffer = sbt_buffers_[i];
+                    sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
+                    if(!sbt_buffers_[i])
+                        return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
+                    sbt_buffers_[i].setName("gfx_SbtBuffer");
+                    if(old_sbt_buffer)
+                    {
+                        encodeCopyBuffer(sbt_buffers_[i], 0, old_sbt_buffer, 0, old_sbt_buffer.getSize());
+                        destroyBuffer(old_sbt_buffer);
+                    }
+                }
+                GfxBuffer const upload_gfx_buffer = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_Write);
+                Buffer &upload_buffer = buffers_[upload_gfx_buffer];
+                Buffer &sbt_buffer = buffers_[sbt_buffers_[i]];
+                UINT64 upload_buffer_offset = upload_buffer.data_offset_;
+                for(auto &shader_record : program.shader_records_[i])
+                {
+                    uint32_t sbt_index = shader_record.first;
+                    Program::ShaderRecord const &sbt_record = shader_record.second;
+                    void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
+                    UINT64 dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
+                        sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * kernel.sbt_record_stride_[i];
+                    UINT64 const src_offset = upload_buffer_offset;
+                    memcpy((byte*)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+                    upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+                    auto local_root_signature_association = kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
+                    if(local_root_signature_association != kernel.local_root_signature_associations_.end())
+                    {
+                        for(auto &parameter : kernel.local_parameters_[local_root_signature_association->second.local_root_signature_space].parameters_)
+                        {
+                            if(parameter.type_ >= Kernel::Parameter::kType_Count) continue;
+                            switch(parameter.type_)
+                            {
+                            case Kernel::Parameter::kType_Constants:
+                            case Kernel::Parameter::kType_ConstantBuffer:
+                                populateRootConstants(program, *sbt_record.parameters_, parameter, (uint32_t*)((byte*)upload_buffer.data_ + upload_buffer_offset), true);
+                                upload_buffer_offset += parameter.variable_size_;
+                                break;
+                            }
+                        }
+                    }
+                    command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset,
+                        upload_buffer.resource_, src_offset, upload_buffer_offset - src_offset);
+                }
+                destroyBuffer(upload_gfx_buffer);
+            }
+            kernel.ray_generation_shader_record_ = sbt_buffers_[kGfxShaderGroupType_Raygen] ?
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
+                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
+                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+                    kernel.sbt_record_stride_[kGfxShaderGroupType_Raygen]} :
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
+            kernel.miss_shader_table_ = sbt_buffers_[kGfxShaderGroupType_Miss] ?
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
+                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+                    sbt_record_count[kGfxShaderGroupType_Miss] * kernel.sbt_record_stride_[kGfxShaderGroupType_Miss],
+                    kernel.sbt_record_stride_[kGfxShaderGroupType_Miss]} :
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+            kernel.hit_group_table_ = sbt_buffers_[kGfxShaderGroupType_Hit] ?
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
+                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+                    sbt_record_count[kGfxShaderGroupType_Hit] * kernel.sbt_record_stride_[kGfxShaderGroupType_Hit],
+                    kernel.sbt_record_stride_[kGfxShaderGroupType_Hit]} :
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+            kernel.callable_shader_table_ = sbt_buffers_[kGfxShaderGroupType_Callable] ?
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
+                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+                    sbt_record_count[kGfxShaderGroupType_Callable] * kernel.sbt_record_stride_[kGfxShaderGroupType_Callable],
+                    kernel.sbt_record_stride_[kGfxShaderGroupType_Callable]} :
+                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
         }
         return kGfxResult_NoError;
     }
@@ -6834,17 +6563,17 @@ private:
         return sort_kernels;
     }
 
-    void populateRootConstants(Program const &program, Kernel::Parameter &parameter, uint32_t *root_constants)
+    void populateRootConstants(Program const &program, Program::Parameters const &parameters, Kernel::Parameter &parameter, uint32_t *root_constants, bool force_update_parameter = false)
     {
         memset(root_constants, 0, parameter.variable_size_);
         static uint64_t const dispatch_id_parameter = Hash("gfx_DispatchID");
         for(uint32_t i = 0; i < parameter.variable_count_; ++i)
         {
             Kernel::Parameter::Variable &variable = parameter.variables_[i];
-            if(variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter)
+            if(force_update_parameter || variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter)
             {
-                Program::Parameters::const_iterator const it = program.parameters_.find(variable.parameter_id_);
-                if(it != program.parameters_.end()) variable.parameter_ = &(*it).second;
+                Program::Parameters::const_iterator const it = parameters.find(variable.parameter_id_);
+                if(it != parameters.end()) variable.parameter_ = &(*it).second;
             }
             if(variable.parameter_ == nullptr) continue;
             if(variable.parameter_->type_ != Program::Parameter::kType_Constants)
@@ -6856,6 +6585,705 @@ private:
             }
             memcpy(&root_constants[variable.data_start_ / sizeof(uint32_t)], variable.parameter_->data_.constants_, GFX_MIN(variable.data_size_, variable.parameter_->data_size_));
             variable.id_ = variable.parameter_->id_;
+        }
+    }
+
+    void initDescriptorParameter(Program const &program, bool const invalidate_descriptors, Kernel::Parameter &parameter, uint32_t &descriptor_slot)
+    {
+        bool const invalidate_descriptor = parameter.parameter_ != nullptr && (invalidate_descriptors || parameter.id_ != parameter.parameter_->id_);
+        if(parameter.parameter_ != nullptr) parameter.id_ = parameter.parameter_->id_;
+        GFX_ASSERT(parameter.parameter_ != nullptr || parameter.variable_size_ > 0);
+        switch(parameter.type_)
+        {
+        case Kernel::Parameter::kType_Buffer:
+            {
+                D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+                dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                    {
+                        if(!invalidate_descriptor) continue;
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                        if(!buffer_handles_.has_handle(buffer.handle))
+                        {
+                            if(buffer.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // user set an invalid buffer object
+                        }
+                        if(buffer.cpu_access == kGfxCpuAccess_Read)
+                        {
+                            if(!invalidate_descriptor) continue;
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read CPU access as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // invalid buffer object for shader SRV
+                        }
+                        if(buffer.stride == 0)
+                        {
+                            if(!invalidate_descriptor) continue;
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // invalid buffer stride
+                        }
+                        if(buffer.size < buffer.stride)
+                        {
+                            if(!invalidate_descriptor) continue;
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // invalid buffer size
+                        }
+                        Buffer &gfx_buffer = buffers_[buffer];
+                        SetObjectName(gfx_buffer, buffer.name);
+                        if(buffer.cpu_access == kGfxCpuAccess_None)
+                            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
+                            GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
+                        srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
+                        srv_desc.Buffer.StructureByteStride = buffer.stride;
+                        device_->CreateShaderResourceView(gfx_buffer.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_RWBuffer:
+            {
+                D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                    {
+                        if(!invalidate_descriptor) continue;
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                        if(!buffer_handles_.has_handle(buffer.handle))
+                        {
+                            if(buffer.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // user set an invalid buffer object
+                        }
+                        if(buffer.cpu_access != kGfxCpuAccess_None)
+                        {
+                            if(!invalidate_descriptor) continue;
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with read/write CPU access as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // invalid buffer object for shader UAV
+                        }
+                        if(buffer.stride == 0)
+                        {
+                            if(!invalidate_descriptor) continue;
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object with a stride of 0 as a RW shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // invalid buffer stride
+                        }
+                        if(buffer.size < buffer.stride)
+                        {
+                            if(!invalidate_descriptor) continue;
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;  // invalid buffer size
+                        }
+                        Buffer &gfx_buffer = buffers_[buffer];
+                        SetObjectName(gfx_buffer, buffer.name);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
+                        if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                        {
+                            if(!invalidate_descriptor) continue;    // invalid resource use
+                            GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot re-create interop buffer objects with different usage flag(s)");
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid operation
+                        }
+                        transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
+                            GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
+                        uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
+                        uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
+                        uav_desc.Buffer.StructureByteStride = buffer.stride;
+                        device_->CreateUnorderedAccessView(gfx_buffer.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_Texture2D:
+            {
+                D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.is2D())
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader SRV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                        srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
+                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        srv_desc.Texture2D.MostDetailedMip = mip_level;
+                        srv_desc.Texture2D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
+                        device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_RWTexture2D:
+            {
+                D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.is2D())
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D texture object as a 2D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader UAV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                        {
+                            if(!invalidate_descriptor) continue;    // invalid resource use
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid operation
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                        uav_desc.Format = GetUAVFormat(resource_desc.Format);
+                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+                        uav_desc.Texture2D.MipSlice = mip_level;
+                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_Texture2DArray:
+            {
+                D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.is2DArray())
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D sampler array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader SRV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                        srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
+                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        srv_desc.Texture2DArray.MostDetailedMip = mip_level;
+                        srv_desc.Texture2DArray.MipLevels = 0xFFFFFFFFu;    // select all mipmaps from MostDetailedMip on down to least detailed
+                        srv_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
+                        device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_RWTexture2DArray:
+            {
+                D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.is2DArray() && !texture.isCube())
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-2D array texture object as a 2D image array resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader UAV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 2D array texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                        {
+                            if(!invalidate_descriptor) continue;    // invalid resource use
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid operation
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                        uav_desc.Format = GetUAVFormat(resource_desc.Format);
+                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
+                        uav_desc.Texture2DArray.MipSlice = mip_level;
+                        uav_desc.Texture2DArray.ArraySize = resource_desc.DepthOrArraySize;
+                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_Texture3D:
+            {
+                D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+                dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.is3D())
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader SRV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                        srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
+                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        srv_desc.Texture3D.MostDetailedMip = mip_level;
+                        srv_desc.Texture3D.MipLevels = 0xFFFFFFFFu; // select all mipmaps from MostDetailedMip on down to least detailed
+                        device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_RWTexture3D:
+            {
+                D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
+                dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.is3D())
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-3D texture object as a 3D image resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader UAV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of 3D texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        if(!((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0))
+                        {
+                            if(!invalidate_descriptor) continue;    // invalid resource use
+                            device_->CreateUnorderedAccessView(nullptr, nullptr, &dummy_uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid operation
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
+                        uav_desc.Format = GetUAVFormat(resource_desc.Format);
+                        uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
+                        uav_desc.Texture3D.MipSlice = mip_level;
+                        uav_desc.Texture3D.WSize = resource_desc.DepthOrArraySize;
+                        device_->CreateUnorderedAccessView(gfx_texture.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_TextureCube:
+            {
+                D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
+                dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                parameter.bound_textures_.resize(parameter.descriptor_count_);
+                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                    if(j >= parameter.parameter_->data_.image_.texture_count ||
+                        parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                    {
+                        if(!invalidate_descriptor) continue;    // already up to date
+                        if(j == 0 && parameter.parameter_->type_ != Program::Parameter::kType_Image)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected a texture object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                    }
+                    else
+                    {
+                        GfxTexture const &texture = parameter.parameter_->data_.image_.textures_[j];
+                        if(!texture_handles_.has_handle(texture.handle))
+                        {
+                            if(texture.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid texture object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            if(!invalidate_descriptor && parameter.bound_textures_[j] == nullptr) continue;    // already up to date
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            parameter.bound_textures_[j] = nullptr; // invalidate cached pointer
+                            continue;   // user set an invalid texture object
+                        }
+                        if(!texture.isCube() && (!texture.is2DArray() || texture.getWidth() != texture.getHeight() || texture.getDepth() != 6))
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind non-cube texture object as a cubemap sampler resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // invalid texture object for shader SRV
+                        }
+                        Texture &gfx_texture = textures_[texture];
+                        SetObjectName(gfx_texture, texture.name);
+                        uint32_t const mip_level = GetMipLevel(*parameter.parameter_, j);
+                        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+                        if(mip_level >= (uint32_t)resource_desc.MipLevels)
+                        {
+                            if(!invalidate_descriptor) continue;    // already up to date
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind out of bounds mip level of cube texture object for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                            continue;   // out of bounds mip level
+                        }
+                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
+                            continue;    // already up to date
+                        D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                        srv_desc.Format = GetCBVSRVUAVFormat(resource_desc.Format);
+                        srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
+                        srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                        srv_desc.TextureCube.MostDetailedMip = mip_level;
+                        srv_desc.TextureCube.MipLevels = 0xFFFFFFFFu;   // select all mipmaps from MostDetailedMip on down to least detailed
+                        device_->CreateShaderResourceView(gfx_texture.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
+                        parameter.bound_textures_[j] = gfx_texture.resource_;   // cache resource pointer
+                    }
+            }
+            break;
+        case Kernel::Parameter::kType_AccelerationStructure:
+            {
+                if(parameter.parameter_->type_ != Program::Parameter::kType_AccelerationStructure)
+                {
+                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected an acceleration structure object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    descriptor_slot = dummy_descriptors_[parameter.type_];
+                    freeDescriptor(parameter.descriptor_slot_);
+                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                    break;  // user set an unrelated parameter type
+                }
+                GfxAccelerationStructure const &acceleration_structure = parameter.parameter_->data_.acceleration_structure_.bvh_;
+                if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+                {
+                    if(acceleration_structure.handle != 0)
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid acceleration structure object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    descriptor_slot = dummy_descriptors_[parameter.type_];
+                    freeDescriptor(parameter.descriptor_slot_);
+                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                    break;  // user set an invalid buffer object
+                }
+                AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+                const_cast<Program::Parameter *>(parameter.parameter_)->data_.acceleration_structure_.bvh_buffer_ = gfx_acceleration_structure.bvh_buffer_;
+                if(!gfx_acceleration_structure.bvh_buffer_)
+                {
+                    descriptor_slot = dummy_descriptors_[parameter.type_];
+                    freeDescriptor(parameter.descriptor_slot_);
+                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                    break;  // acceleration structure hasn't been built yet
+                }
+                GFX_ASSERT(buffer_handles_.has_handle(gfx_acceleration_structure.bvh_buffer_.handle));
+                Buffer &buffer = buffers_[gfx_acceleration_structure.bvh_buffer_];
+                SetObjectName(buffer, acceleration_structure.name);
+                if(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle))
+                    transitionResource(buffers_[raytracing_scratch_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                GFX_ASSERT(*buffer.resource_state_ == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+                if(!invalidate_descriptor) break;   // already up to date
+                D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
+                srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
+                srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+                srv_desc.RaytracingAccelerationStructure.Location = buffer.resource_->GetGPUVirtualAddress() + buffer.data_offset_;
+                device_->CreateShaderResourceView(nullptr, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+            }
+            break;
+        case Kernel::Parameter::kType_ConstantBuffer:
+            {
+                void *data = nullptr;
+                D3D12_CONSTANT_BUFFER_VIEW_DESC cbv_desc = {};
+                if(parameter.variable_size_ > 0)
+                {
+                    cbv_desc.BufferLocation = allocateConstantMemory(parameter.variable_size_, data);
+                    if(data != nullptr) populateRootConstants(program, program.parameters_, parameter, (uint32_t *)data);
+                    cbv_desc.SizeInBytes = GFX_ALIGN(parameter.variable_size_, 256);
+                }
+                else if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
+                {
+                    cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
+                    if(data != nullptr) memcpy(data, parameter.parameter_->data_.constants_, parameter.parameter_->data_size_);
+                    cbv_desc.SizeInBytes = GFX_ALIGN(parameter.parameter_->data_size_, 256);
+                }
+                else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
+                {
+                    if(parameter.parameter_->data_.buffer_.buffer_count > 1)
+                    {
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        break;  // user set an invalid buffer object
+                    }
+                    if(parameter.parameter_->data_.buffer_.buffer_count < 1)
+                    {
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        break;  // user set an invalid buffer object
+                    }
+                    GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
+                    if(!buffer_handles_.has_handle(buffer.handle))
+                    {
+                        if(buffer.handle != 0)
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        descriptor_slot = dummy_descriptors_[parameter.type_];
+                        freeDescriptor(parameter.descriptor_slot_);
+                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                        break;  // user set an invalid buffer object
+                    }
+                    if(buffer.cpu_access != kGfxCpuAccess_Write)
+                    {
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that does not have write CPU access as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        descriptor_slot = dummy_descriptors_[parameter.type_];
+                        freeDescriptor(parameter.descriptor_slot_);
+                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                        break;  // user set an invalid buffer object
+                    }
+                    if(buffer.size > 0xFFFFFFFFull)
+                    {
+                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that's larger than 4GiB as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        descriptor_slot = dummy_descriptors_[parameter.type_];
+                        freeDescriptor(parameter.descriptor_slot_);
+                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                        break;  // constant buffer is too large
+                    }
+                    Buffer &gfx_buffer = buffers_[buffer];
+                    SetObjectName(gfx_buffer, buffer.name);
+                    GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
+                    GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
+                    cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+                    cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
+                }
+                else
+                {
+                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected constant or buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    descriptor_slot = dummy_descriptors_[parameter.type_];
+                    freeDescriptor(parameter.descriptor_slot_);
+                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                    break;  // user set an unrelated parameter type
+                }
+                if(cbv_desc.BufferLocation == 0)
+                {
+                    GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate constant memory for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    descriptor_slot = dummy_descriptors_[parameter.type_];
+                    freeDescriptor(parameter.descriptor_slot_);
+                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                    break;  // failed to allocate constant memory
+                }
+                device_->CreateConstantBufferView(&cbv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_));
+            }
+            break;
+        default:
+            GFX_ASSERT(0);  // missing implementation
+            break;
         }
     }
 
@@ -7034,6 +7462,13 @@ private:
             else
                 kernel.cs_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
         }
+        else if(kernel.isRaytracing())
+        {
+            kernel_type = "Raytracing";
+            compileShader(program, kernel, kShaderType_LIB, kernel.lib_bytecode_, kernel.lib_reflection_);
+            createRootSignature(kernel);
+            result = createRaytracingPipelineState(kernel);
+        }
         else
         {
             kernel_type = "Graphics";
@@ -7086,7 +7521,8 @@ private:
         createKernel(program, kernel);
     }
 
-    void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, ID3D12ShaderReflection *&shader_reflection)
+    template<typename REFLECTION_TYPE>
+    void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, REFLECTION_TYPE *&reflection)
     {
         char shader_file[4096];
         DxcBuffer shader_source = {};
@@ -7123,6 +7559,9 @@ private:
             case kShaderType_PS:
                 shader_source.Ptr = program.ps_.c_str();
                 break;
+            case kShaderType_LIB:
+                shader_source.Ptr = program.lib_.c_str();
+                break;
             default:
                 GFX_ASSERTMSG(0, "An unsupported shader type `%u' was supplied", (uint32_t)shader_type);
                 return;
@@ -7136,7 +7575,8 @@ private:
             "cs_",
             "vs_",
             "gs_",
-            "ps_"
+            "ps_",
+            "lib_"
         };
         static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < ARRAYSIZE(shader_profiles); ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
@@ -7247,9 +7687,9 @@ private:
         DxcBuffer reflection_data = {};
         reflection_data.Size = dxc_reflection->GetBufferSize();
         reflection_data.Ptr = dxc_reflection->GetBufferPointer();
-        dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&shader_reflection));
-        if(shader_reflection) shader_bytecode = dxc_bytecode;
-        if(!shader_reflection) dxc_bytecode->Release();
+        dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
+        if(reflection) shader_bytecode = dxc_bytecode;
+        if(!reflection) dxc_bytecode->Release();
         if(dxc_pdb_name) dxc_pdb_name->Release();
         if(dxc_pdb) dxc_pdb->Release();
         dxc_reflection->Release();
@@ -7478,7 +7918,8 @@ char const *GfxInternal::shader_extensions_[] =
     ".comp",
     ".vert",
     ".geom",
-    ".frag"
+    ".frag",
+    ".rt"
 };
 
 GfxArray<GfxInternal::DrawState> GfxInternal::draw_states_;
@@ -7737,6 +8178,13 @@ GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracin
     return gfx->setRaytracingPrimitiveInstanceMask(raytracing_primitive, instance_mask);
 }
 
+GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setRaytracingPrimitiveInstanceContributionToHitGroupIndex(raytracing_primitive, instance_contribution_to_hit_group_index);
+}
+
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -7872,6 +8320,20 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
     return gfx->setProgramConstants(program, parameter_name, data, data_size);
 }
 
+GfxResult gfxProgramSetShaderGroup(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->gfxProgramSetShaderGroup(program, shader_group_type, index, group_name);
+}
+
+GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->gfxProgramSetConstants(program, shader_group_type, index, parameter_name, data, data_size);
+}
+
 GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const compute_kernel = {};
@@ -7892,6 +8354,14 @@ GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDra
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return graphics_kernel;    // invalid context
     return gfx->createGraphicsKernel(program, draw_state, entry_point, defines, define_count);
+}
+
+GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program, GfxLocalRootSignatureAssociation *local_root_signature_associations, uint32_t local_root_signature_association_count, char const **defines, uint32_t define_count)
+{
+    GfxKernel const raytracing_kernel = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return raytracing_kernel;    // invalid context
+    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, defines, define_count);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
@@ -8067,6 +8537,13 @@ GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buf
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeMultiDispatchIndirect(args_buffer, args_count);
+}
+
+GfxResult gfxCommandDispatchRays(GfxContext context, uint32_t width, uint32_t height, uint32_t depth)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeDispatchRays(width, height, depth);
 }
 
 GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
