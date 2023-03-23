@@ -1040,9 +1040,9 @@ class GfxInternal
             ShaderRecord &record = insertSbtRecord(shader_group_type, index);
             Parameters::iterator const it = record.parameters_->find(parameter_id);
             GFX_ASSERT(parameter_name != nullptr && *parameter_name != '\0');
-            if(it ==  record.parameters_->end())
+            if(it == record.parameters_->end())
             {
-                Parameter &parameter =  (*record.parameters_)[parameter_id];
+                Parameter &parameter = (*record.parameters_)[parameter_id];
                 parameter.name_ = parameter_name;
                 return parameter;
             }
@@ -3299,14 +3299,14 @@ public:
             return kGfxResult_NoError;  // skip dispatch call
         GFX_TRY(installShaderState(kernel));
         submitPipelineBarriers();   // transition our resources if needed
-	    ::D3D12_DISPATCH_RAYS_DESC desc;
-	    desc.RayGenerationShaderRecord = kernel.ray_generation_shader_record_;
-	    desc.MissShaderTable = kernel.miss_shader_table_;
-	    desc.HitGroupTable = kernel.hit_group_table_;
-	    desc.CallableShaderTable = kernel.callable_shader_table_;
-	    desc.Width = width;
-	    desc.Height = height;
-	    desc.Depth = depth;
+        ::D3D12_DISPATCH_RAYS_DESC desc;
+        desc.RayGenerationShaderRecord = kernel.ray_generation_shader_record_;
+        desc.MissShaderTable = kernel.miss_shader_table_;
+        desc.HitGroupTable = kernel.hit_group_table_;
+        desc.CallableShaderTable = kernel.callable_shader_table_;
+        desc.Width = width;
+        desc.Height = height;
+        desc.Depth = depth;
         dxr_command_list_->DispatchRays(&desc);
         return kGfxResult_NoError;
     }
