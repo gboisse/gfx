@@ -4821,11 +4821,12 @@ private:
         {
             std::vector<Kernel::Parameter> kernel_parameters;
             std::vector<D3D12_ROOT_PARAMETER> root_parameters;
-            std::vector<D3D12_DESCRIPTOR_RANGE> descriptor_ranges;            
+            std::vector<D3D12_DESCRIPTOR_RANGE> descriptor_ranges;
         };
         RootSignatureParameters global_root_signature_parameters;
-        std::map<std::uint32_t, RootSignatureParameters> local_root_signatures_parameters;
-        std::map<std::uint32_t, GfxShaderGroupType> local_root_signature_spaces;
+        std::map<uint64_t, size_t> parameter_id_to_index;
+        std::map<uint32_t, RootSignatureParameters> local_root_signatures_parameters;
+        std::map<uint32_t, GfxShaderGroupType> local_root_signature_spaces;
         GFX_ASSERT(kernel.root_signature_ == nullptr && kernel.parameters_ == nullptr);
 
         for(auto &i : kernel.local_root_signature_associations_)
@@ -4865,6 +4866,7 @@ private:
                 break;
             case kShaderType_LIB:
                 library = kernel.lib_reflection_;
+                root_parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
                 break;
             default:
                 GFX_ASSERTMSG(0, "Unsupported shader type `%u' was encountered", i);
@@ -4876,7 +4878,19 @@ private:
                 Kernel::Parameter kernel_parameter = {};
                 D3D12_DESCRIPTOR_RANGE descriptor_range = {};
                 kernel_parameter.parameter_id_ = Hash(resource_desc.Name);
+
                 const bool is_local_root_signature_paramter = local_root_signature_spaces.find(resource_desc.Space) != local_root_signature_spaces.end();
+                RootSignatureParameters &root_signature_parameters = is_local_root_signature_paramter ?
+                    local_root_signatures_parameters[resource_desc.Space] : global_root_signature_parameters;
+
+                auto it = parameter_id_to_index.find(kernel_parameter.parameter_id_);
+                if(it != parameter_id_to_index.end())
+                {
+                    if(root_signature_parameters.root_parameters[it->second].ShaderVisibility == root_parameter.ShaderVisibility)
+                    {
+                        return; // The parameter already registered by other function, skip
+                    }
+                }
 
                 switch(resource_desc.Type)
                 {
@@ -5008,8 +5022,7 @@ private:
                     }
                 kernel_parameter.descriptor_count_ = descriptor_range.NumDescriptors;
 
-                RootSignatureParameters &root_signature_parameters = is_local_root_signature_paramter ? 
-                    local_root_signatures_parameters[resource_desc.Space] : global_root_signature_parameters;
+                parameter_id_to_index.insert({kernel_parameter.parameter_id_, root_signature_parameters.kernel_parameters.size()});
                 root_signature_parameters.root_parameters.push_back(root_parameter);
                 root_signature_parameters.descriptor_ranges.push_back(descriptor_range);
                 root_signature_parameters.kernel_parameters.push_back(kernel_parameter);
