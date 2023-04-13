@@ -310,10 +310,10 @@ GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char co
 GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);    // draws to back buffer
 GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
 GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
-    GfxLocalRootSignatureAssociation * local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0,
-    char const ** exports = nullptr, uint32_t export_count = 0,
-    char const ** subobjects = nullptr, uint32_t subobject_count = 0,
-    char const ** defines = nullptr, uint32_t define_count = 0);
+    GfxLocalRootSignatureAssociation const *local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0,
+    char const **exports = nullptr, uint32_t export_count = 0,
+    char const **subobjects = nullptr, uint32_t subobject_count = 0,
+    char const **defines = nullptr, uint32_t define_count = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
@@ -2425,7 +2425,7 @@ public:
         GfxSbt sbt = {};
         sbt.handle = sbt_handles_.allocate_handle();
         Sbt &gfx_sbt = sbts_.insert(sbt);
-        for (uint32_t i = 0; i < kernel_count; ++i)
+        for(uint32_t i = 0; i < kernel_count; ++i)
         {
             Kernel const &gfx_kernel = kernels_[kernels[i]];
             for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
@@ -2656,21 +2656,21 @@ public:
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
         {
             auto last_record_it = gfx_sbt.shader_records_[i].rbegin();
-            if (last_record_it == gfx_sbt.shader_records_[i].rend()) continue;
+            if(last_record_it == gfx_sbt.shader_records_[i].rend()) continue;
             uint32_t record_count = last_record_it->first + 1;
             size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_kernel.sbt_record_stride_[i] * record_count;
             GfxBuffer const upload_gfx_buffer = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_Write);
             Buffer &upload_buffer = buffers_[upload_gfx_buffer];
             Buffer &sbt_buffer = buffers_[gfx_sbt.sbt_buffers_[i]];
-            UINT64 upload_buffer_offset = upload_buffer.data_offset_;
+            uint64_t upload_buffer_offset = upload_buffer.data_offset_;
             for(auto &shader_record : gfx_sbt.shader_records_[i])
             {
                 uint32_t sbt_index = shader_record.first;
                 Sbt::ShaderRecord const &sbt_record = shader_record.second;
                 void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
-                UINT64 dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
+                uint64_t dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
                     sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * gfx_kernel.sbt_record_stride_[i];
-                UINT64 const src_offset = upload_buffer_offset;
+                uint64_t const src_offset = upload_buffer_offset;
                 memcpy((byte*)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
                 upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
                 auto local_root_signature_association = gfx_kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
@@ -2787,10 +2787,10 @@ public:
     }
 
     GfxKernel createRaytracingKernel(GfxProgram const &program,
-        GfxLocalRootSignatureAssociation * local_root_signature_associations, uint32_t local_root_signature_association_count,
-        char const ** exports, uint32_t export_count,
-        char const ** subobjects, uint32_t subobject_count,
-        char const ** defines, uint32_t define_count)
+        GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
+        char const **exports, uint32_t export_count,
+        char const **subobjects, uint32_t subobject_count,
+        char const **defines, uint32_t define_count)
     {
         GfxKernel raytracing_kernel = {};
         if(!program_handles_.has_handle(program.handle))
@@ -3211,12 +3211,12 @@ public:
         Kernel const &gfx_kernel = kernels_[kernel];
         if(gfx_kernel.isRaytracing())
         {
-            if (gfx_kernel.state_object_)
+            if(gfx_kernel.state_object_)
                 dxr_command_list_->SetPipelineState1(gfx_kernel.state_object_);
         }
         else
         {
-            if (gfx_kernel.pipeline_state_)
+            if(gfx_kernel.pipeline_state_)
                 command_list_->SetPipelineState(gfx_kernel.pipeline_state_);
         }
 
@@ -5253,11 +5253,11 @@ private:
                 root_signature_parameters.kernel_parameters.push_back(kernel_parameter);
             };
 
-            if (library)
+            if(library != nullptr)
             {
                 D3D12_LIBRARY_DESC library_desc;
                 library->GetDesc(&library_desc);
-                for (UINT i = 0; i < library_desc.FunctionCount; i++)
+                for(uint32_t i = 0; i < library_desc.FunctionCount; i++)
                 {
                     ID3D12FunctionReflection *function = library->GetFunctionByIndex(i);
                     D3D12_FUNCTION_DESC function_desc = {};
@@ -5270,7 +5270,7 @@ private:
                     }
                 }
             }
-            else if (shader)
+            else if(shader != nullptr)
             {
                 D3D12_SHADER_DESC shader_desc = {};
                 shader->GetDesc(&shader_desc);
@@ -5532,7 +5532,7 @@ private:
         size_t max_export_length = 0;
         for(size_t i = 0; i < kernel.exports_.size(); ++i)
             max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
-        for (size_t i = 0; i < kernel.subobjects_.size(); ++i)
+        for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
             max_export_length = GFX_MAX(max_export_length, strlen(kernel.subobjects_[i].c_str()));
         max_export_length += 1;
         WCHAR * wexport = (WCHAR *)alloca(max_export_length << 1);
@@ -7770,7 +7770,7 @@ private:
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
         {
-            if (!kernel.exports_.empty())
+            if(!kernel.exports_.empty())
             {
                 size_t max_export_length = 0;
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
@@ -7784,7 +7784,7 @@ private:
                     mbstowcs(wexport, lib_export, max_export_length);
                     exports.push_back(wexport);
                 }
-                for (size_t i = 0; i < exports.size(); ++i)
+                for(size_t i = 0; i < exports.size(); ++i)
                 {
                     shader_args.push_back(L"-exports");
                     shader_args.push_back(exports[i].c_str());
@@ -8601,10 +8601,10 @@ GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDra
 }
 
 GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
-    GfxLocalRootSignatureAssociation * local_root_signature_associations, uint32_t local_root_signature_association_count,
-    char const ** exports, uint32_t export_count,
-    char const ** subobjects, uint32_t subobject_count,
-    char const ** defines, uint32_t define_count)
+    GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
+    char const **exports, uint32_t export_count,
+    char const **subobjects, uint32_t subobject_count,
+    char const **defines, uint32_t define_count)
 {
     GfxKernel const raytracing_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
