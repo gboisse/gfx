@@ -3474,7 +3474,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDispatchRays(GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth)
+    GfxResult encodeDispatchRays(GfxSbt const &sbt, uint32_t width, uint32_t height, uint32_t depth)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3503,7 +3503,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDispatchRaysIndirect(GfxSbt sbt, GfxBuffer args_buffer)
+    GfxResult encodeDispatchRaysIndirect(GfxSbt const &sbt, GfxBuffer args_buffer)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
