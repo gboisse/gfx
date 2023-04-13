@@ -208,6 +208,7 @@ GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingP
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
 GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
+GfxBuildRaytracingPrimitiveFlags gfxRaytracingPrimitiveGetFlags(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
 //! Draw state manipulation.
@@ -257,19 +258,6 @@ GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char
 GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size);
 
-enum GfxShaderGroupType
-{
-    kGfxShaderGroupType_Raygen,
-    kGfxShaderGroupType_Miss,
-    kGfxShaderGroupType_Hit,
-    kGfxShaderGroupType_Callable,
-
-    kGfxShaderGroupType_Count
-};
-
-GfxResult gfxProgramSetShaderGroup(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name);
-GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size);
-
 //!
 //! Template helpers.
 //!
@@ -301,6 +289,16 @@ class GfxKernel { GFX_INTERNAL_HANDLE(GfxKernel); char name[kGfxConstant_MaxName
                   inline bool isRaytracing() const { return type == kType_Raytracing; }
                   inline char const *getName() const { return name; } };
 
+enum GfxShaderGroupType
+{
+    kGfxShaderGroupType_Raygen,
+    kGfxShaderGroupType_Miss,
+    kGfxShaderGroupType_Hit,
+    kGfxShaderGroupType_Callable,
+
+    kGfxShaderGroupType_Count
+};
+
 struct GfxLocalRootSignatureAssociation
 {
     uint32_t local_root_signature_space;
@@ -311,11 +309,29 @@ struct GfxLocalRootSignatureAssociation
 GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
 GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);    // draws to back buffer
 GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
-GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program, GfxLocalRootSignatureAssociation *local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0, char const **defines = nullptr, uint32_t define_count = 0);
+GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
+    GfxLocalRootSignatureAssociation * local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0,
+    char const ** exports = nullptr, uint32_t export_count = 0,
+    char const ** subobjects = nullptr, uint32_t subobject_count = 0,
+    char const ** defines = nullptr, uint32_t define_count = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
 GfxResult gfxKernelReloadAll(GfxContext context);   // hot-reloads all kernel objects
+
+class GfxSbt { GFX_INTERNAL_HANDLE(GfxSbt); public: };
+
+GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count]);
+GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt);
+
+GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name);
+GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size);
+GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
+    GfxSbt sbt,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table);
 
 //!
 //! Command encoding.
@@ -348,7 +364,8 @@ GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_
 GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
 GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);                                // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);      // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
-GfxResult gfxCommandDispatchRays(GfxContext context, uint32_t width, uint32_t height, uint32_t depth);
+GfxResult gfxCommandDispatchRays(GfxContext context, GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth);
+GfxResult gfxCommandDispatchRaysIndirect(GfxContext context, GfxSbt sbt, GfxBuffer args_buffer);
 
 //!
 //! Debug/profile API.
@@ -501,13 +518,13 @@ class GfxInternal
     ID3D12CommandSignature *dispatch_signature_ = nullptr;
     ID3D12CommandSignature *multi_draw_signature_ = nullptr;
     ID3D12CommandSignature *multi_draw_indexed_signature_ = nullptr;
+    ID3D12CommandSignature *dispatch_rays_signature_ = nullptr;
     std::vector<D3D12_RESOURCE_BARRIER> resource_barriers_;
     ID3D12Resource **back_buffers_ = nullptr;
     uint32_t *back_buffer_rtvs_ = nullptr;
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
-    GfxBuffer sbt_buffers_[kGfxShaderGroupType_Count] = {};
     uint64_t descriptor_heap_id_ = 0;
     GfxBuffer bound_index_buffer_ = {};
     GfxBuffer bound_vertex_buffer_ = {};
@@ -995,12 +1012,6 @@ class GfxInternal
 
         typedef std::map<uint64_t, Parameter> Parameters;
 
-        struct ShaderRecord
-        {
-            std::wstring shader_identifier_;
-            std::unique_ptr<Parameters> parameters_;
-        };
-
         Parameter &insertParameter(char const *parameter_name)
         {
             uint64_t const parameter_id = Hash(parameter_name);
@@ -1009,40 +1020,6 @@ class GfxInternal
             if(it == parameters_.end())
             {
                 Parameter &parameter = parameters_[parameter_id];
-                parameter.name_ = parameter_name;
-                return parameter;
-            }
-            GFX_ASSERT(strcmp((*it).second.name_.c_str(), parameter_name) == 0);
-            return (*it).second;    // ^ assert on hashing conflicts
-        }
-
-        ShaderRecord &insertSbtRecord(GfxShaderGroupType shader_group_type, uint32_t index)
-        {
-            auto const it = shader_records_[shader_group_type].find(index);
-            if(it == shader_records_[shader_group_type].end())
-            {
-                ShaderRecord &record = shader_records_[shader_group_type][index];
-                record.parameters_ = std::make_unique<Parameters>();
-                return record;
-            }
-            return (*it).second;
-        }
-
-        void insertSbtRecordShaderIdentifier(GfxShaderGroupType shader_group_type, uint32_t index, WCHAR *shader_identifier)
-        {
-            ShaderRecord &record = insertSbtRecord(shader_group_type, index);
-            record.shader_identifier_ = shader_identifier;
-        }
-
-        Parameter &insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
-        {
-            uint64_t const parameter_id = Hash(parameter_name);
-            ShaderRecord &record = insertSbtRecord(shader_group_type, index);
-            Parameters::iterator const it = record.parameters_->find(parameter_id);
-            GFX_ASSERT(parameter_name != nullptr && *parameter_name != '\0');
-            if(it == record.parameters_->end())
-            {
-                Parameter &parameter = (*record.parameters_)[parameter_id];
                 parameter.name_ = parameter_name;
                 return parameter;
             }
@@ -1059,7 +1036,6 @@ class GfxInternal
         String file_path_;
         String shader_model_;
         Parameters parameters_;
-        std::map<uint32_t, ShaderRecord> shader_records_[kGfxShaderGroupType_Count];
     };
     GfxArray<Program> programs_;
     GfxHandles program_handles_;
@@ -1135,6 +1111,8 @@ class GfxInternal
         GfxProgram program_ = {};
         DrawState::Data draw_state_;
         std::vector<String> defines_;
+        std::vector<String> exports_;
+        std::vector<String> subobjects_;
         std::map<std::wstring, LocalRootSignatureAssociation> local_root_signature_associations_;
         uint64_t descriptor_heap_id_ = 0;
         uint32_t *num_threads_ = nullptr;
@@ -1154,10 +1132,6 @@ class GfxInternal
         ID3D12PipelineState *pipeline_state_ = nullptr;
         ID3D12StateObject *state_object_ = nullptr;
         Parameter *parameters_ = nullptr;
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE ray_generation_shader_record_;
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE miss_shader_table_;
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE hit_group_table_;
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE callable_shader_table_;
         uint32_t parameter_count_ = 0;
         uint32_t vertex_stride_ = 0;
     };
@@ -1194,6 +1168,60 @@ class GfxInternal
     };
     uint64_t timestamp_query_ticks_per_second_ = 0;
     TimestampQueryHeap *timestamp_query_heaps_ = nullptr;
+
+    struct Sbt
+    {
+        struct ShaderRecord
+        {
+            std::wstring shader_identifier_;
+            std::unique_ptr<Program::Parameters> parameters_;
+        };
+
+        ShaderRecord &insertSbtRecord(GfxShaderGroupType shader_group_type, uint32_t index)
+        {
+            auto const it = shader_records_[shader_group_type].find(index);
+            if(it == shader_records_[shader_group_type].end())
+            {
+                ShaderRecord &record = shader_records_[shader_group_type][index];
+                record.parameters_ = std::make_unique<Program::Parameters>();
+                return record;
+            }
+            return (*it).second;
+        }
+
+        void insertSbtRecordShaderIdentifier(GfxShaderGroupType shader_group_type, uint32_t index, WCHAR *shader_identifier)
+        {
+            ShaderRecord &record = insertSbtRecord(shader_group_type, index);
+            record.shader_identifier_ = shader_identifier;
+        }
+
+        Program::Parameter &insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
+        {
+            uint64_t const parameter_id = Hash(parameter_name);
+            ShaderRecord &record = insertSbtRecord(shader_group_type, index);
+            Program::Parameters::iterator const it = record.parameters_->find(parameter_id);
+            GFX_ASSERT(parameter_name != nullptr && *parameter_name != '\0');
+            if(it == record.parameters_->end())
+            {
+                Program::Parameter &parameter = (*record.parameters_)[parameter_id];
+                parameter.name_ = parameter_name;
+                return parameter;
+            }
+            GFX_ASSERT(strcmp((*it).second.name_.c_str(), parameter_name) == 0);
+            return (*it).second;    // ^ assert on hashing conflicts
+        }
+
+        std::map<uint32_t, ShaderRecord> shader_records_[kGfxShaderGroupType_Count];
+        GfxBuffer sbt_buffers_[kGfxShaderGroupType_Count] = {};
+        size_t sbt_max_record_stride_[kGfxShaderGroupType_Count];
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE ray_generation_shader_record_;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE miss_shader_table_;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE hit_group_table_;
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE callable_shader_table_;
+        GfxKernel kernel_ = {};
+    };
+    GfxArray<Sbt> sbts_;
+    GfxHandles sbt_handles_;
 
 public:
     GfxInternal(GfxContext &gfx) : buffer_handles_("buffer"), texture_handles_("texture"), sampler_state_handles_("sampler state")
@@ -1499,6 +1527,15 @@ public:
         if(!SUCCEEDED(device_->CreateCommandSignature(&multi_draw_indexed_signature_desc, nullptr, IID_PPV_ARGS(&multi_draw_indexed_signature_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create indexed multi-draw command signature");
 
+        D3D12_INDIRECT_ARGUMENT_DESC dispatch_rays_argument_desc = {};
+        dispatch_rays_argument_desc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_RAYS;
+        D3D12_COMMAND_SIGNATURE_DESC dispatch_rays_signature_desc = {};
+        dispatch_rays_signature_desc.ByteStride = sizeof(D3D12_DISPATCH_RAYS_DESC);
+        dispatch_rays_signature_desc.NumArgumentDescs = 1;
+        dispatch_rays_signature_desc.pArgumentDescs = &dispatch_rays_argument_desc;
+        if(!SUCCEEDED(device_->CreateCommandSignature(&dispatch_rays_signature_desc, nullptr, IID_PPV_ARGS(&dispatch_rays_signature_))))
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the dispatch rays command signature");
+
         GfxProgramDesc clear_buffer_program_desc = {};
         clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr);
@@ -1586,6 +1623,8 @@ public:
             collect(acceleration_structures_.data()[i]);
         for(uint32_t i = 0; i < raytracing_primitives_.size(); ++i)
             collect(raytracing_primitives_.data()[i]);
+        for(uint32_t i = 0; i < sbts_.size(); ++i)
+            collect(sbts_.data()[i]);
         for(uint32_t i = 0; i < kernels_.size(); ++i)
             collect(kernels_.data()[i]);
         for(uint32_t i = 0; i < programs_.size(); ++i)
@@ -1647,6 +1686,8 @@ public:
             multi_draw_signature_->Release();
         if(multi_draw_indexed_signature_ != nullptr)
             multi_draw_indexed_signature_->Release();
+        if(dispatch_rays_signature_ != nullptr)
+            dispatch_rays_signature_->Release();
         if(back_buffers_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
@@ -2368,6 +2409,83 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
+    
+    GfxBuildRaytracingPrimitiveFlags getRaytracingPrimitiveFlags(GfxRaytracingPrimitive const &raytracing_primitive)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid raytracing primitive object");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        return gfx_raytracing_primitive.build_flags_;
+    }
+
+    GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+    {
+        GfxSbt sbt = {};
+        sbt.handle = sbt_handles_.allocate_handle();
+        Sbt &gfx_sbt = sbts_.insert(sbt);
+        for (uint32_t i = 0; i < kernel_count; ++i)
+        {
+            Kernel const &gfx_kernel = kernels_[kernels[i]];
+            for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
+            {
+                gfx_sbt.sbt_max_record_stride_[j] = GFX_MAX(gfx_sbt.sbt_max_record_stride_[j], gfx_kernel.sbt_record_stride_[j]);
+            }
+        }
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+        {
+            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_sbt.sbt_max_record_stride_[i] * entry_count[i];
+            gfx_sbt.sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!gfx_sbt.sbt_buffers_[i])
+            {
+                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
+                return sbt;
+            }
+            gfx_sbt.sbt_buffers_[i].setName("gfx_SbtBuffer");
+        }
+        gfx_sbt.ray_generation_shader_record_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Raygen]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
+        gfx_sbt.miss_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Miss] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        gfx_sbt.hit_group_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Hit] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        gfx_sbt.callable_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Callable] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        return sbt;
+    }
+
+    GfxResult destroySbt(GfxSbt const &sbt)
+    {
+        if(!sbt)
+            return kGfxResult_NoError;
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid sbt object");
+        Sbt const &gfx_sbt = sbts_[sbt];
+        collect(gfx_sbt);  // release resources
+        sbts_.erase(sbt); // destroy sbt
+        sbt_handles_.free_handle(sbt.handle);
+        return kGfxResult_NoError;
+    }
 
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model)
     {
@@ -2501,29 +2619,95 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult gfxProgramSetShaderGroup(GfxProgram const &program, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+    GfxResult sbtSetShaderGroup(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
     {
-        if(!program_handles_.has_handle(program.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
         if(!group_name || !*group_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
-        Program &gfx_program = programs_[program];  // get hold of program object
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
         WCHAR wgroup_name[1024];
         mbstowcs(wgroup_name, group_name, ARRAYSIZE(wgroup_name));
-        gfx_program.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name);
+        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name);
         return kGfxResult_NoError;
     }
 
-    GfxResult gfxProgramSetConstants(GfxProgram const &program, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+    GfxResult sbtSetConstants(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
     {
-        if(!program_handles_.has_handle(program.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid program object");
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
         if(!parameter_name || !*parameter_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
         if(!data && data_size > 0)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
-        Program &gfx_program = programs_[program];  // get hold of program object
-        gfx_program.insertSbtRecordParameter(shader_group_type, index, parameter_name).set(data, data_size);
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name).set(data, data_size);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtCommit(GfxSbt const &sbt)
+    {
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        Kernel &gfx_kernel = kernels_[bound_kernel_];  // get hold of sbt object
+        Program const &program = programs_[gfx_kernel.program_];
+        size_t sbt_record_count[kGfxShaderGroupType_Count]{};
+        ID3D12StateObjectProperties *state_object_properties;
+        gfx_kernel.state_object_->QueryInterface(IID_PPV_ARGS(&state_object_properties));
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+        {
+            auto last_record_it = gfx_sbt.shader_records_[i].rbegin();
+            if (last_record_it == gfx_sbt.shader_records_[i].rend()) continue;
+            uint32_t record_count = last_record_it->first + 1;
+            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_kernel.sbt_record_stride_[i] * record_count;
+            GfxBuffer const upload_gfx_buffer = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_Write);
+            Buffer &upload_buffer = buffers_[upload_gfx_buffer];
+            Buffer &sbt_buffer = buffers_[gfx_sbt.sbt_buffers_[i]];
+            UINT64 upload_buffer_offset = upload_buffer.data_offset_;
+            for(auto &shader_record : gfx_sbt.shader_records_[i])
+            {
+                uint32_t sbt_index = shader_record.first;
+                Sbt::ShaderRecord const &sbt_record = shader_record.second;
+                void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
+                UINT64 dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
+                    sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * gfx_kernel.sbt_record_stride_[i];
+                UINT64 const src_offset = upload_buffer_offset;
+                memcpy((byte*)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+                upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
+                auto local_root_signature_association = gfx_kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
+                if(local_root_signature_association != gfx_kernel.local_root_signature_associations_.end())
+                {
+                    for(auto &parameter : gfx_kernel.local_parameters_[local_root_signature_association->second.local_root_signature_space].parameters_)
+                    {
+                        if(parameter.type_ >= Kernel::Parameter::kType_Count) continue;
+                        switch(parameter.type_)
+                        {
+                        case Kernel::Parameter::kType_Constants:
+                        case Kernel::Parameter::kType_ConstantBuffer:
+                            populateRootConstants(program, *sbt_record.parameters_, parameter, (uint32_t*)((byte*)upload_buffer.data_ + upload_buffer_offset), true);
+                            upload_buffer_offset += parameter.variable_size_;
+                            break;
+                        }
+                    }
+                }
+                command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset,
+                    upload_buffer.resource_, src_offset, upload_buffer_offset - src_offset);
+            }
+            destroyBuffer(upload_gfx_buffer);
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtGetGpuVirtualAddressRangeAndStride(GfxSbt const &sbt,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE * ray_generation_shader_record,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
+    {
+        Sbt &gfx_sbt = sbts_[sbt];
+        *ray_generation_shader_record = gfx_sbt.ray_generation_shader_record_;
+        *miss_shader_table = gfx_sbt.miss_shader_table_;
+        *hit_group_table = gfx_sbt.hit_group_table_;
+        *callable_shader_table = gfx_sbt.callable_shader_table_;
         return kGfxResult_NoError;
     }
 
@@ -2602,7 +2786,11 @@ public:
         return graphics_kernel;
     }
 
-    GfxKernel createRaytracingKernel(GfxProgram const &program, GfxLocalRootSignatureAssociation *local_root_signature_associations, uint32_t local_root_signature_association_count, char const **defines, uint32_t define_count)
+    GfxKernel createRaytracingKernel(GfxProgram const &program,
+        GfxLocalRootSignatureAssociation * local_root_signature_associations, uint32_t local_root_signature_association_count,
+        char const ** exports, uint32_t export_count,
+        char const ** subobjects, uint32_t subobject_count,
+        char const ** defines, uint32_t define_count)
     {
         GfxKernel raytracing_kernel = {};
         if(!program_handles_.has_handle(program.handle))
@@ -2620,6 +2808,8 @@ public:
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         GFX_ASSERT(local_root_signature_association_count == 0 || local_root_signature_associations != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
+        for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
         WCHAR wgroup_name[1024];
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
@@ -3284,7 +3474,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDispatchRays(uint32_t width, uint32_t height, uint32_t depth)
+    GfxResult encodeDispatchRays(GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3292,6 +3482,7 @@ public:
             return kGfxResult_NoError;  // nothing to dispatch
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
+        Sbt &gfx_sbt = sbts_[sbt];
         Kernel &kernel = kernels_[bound_kernel_];
         if(!kernel.isRaytracing())
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-rt kernel object");
@@ -3299,15 +3490,42 @@ public:
             return kGfxResult_NoError;  // skip dispatch call
         GFX_TRY(installShaderState(kernel));
         submitPipelineBarriers();   // transition our resources if needed
-        ::D3D12_DISPATCH_RAYS_DESC desc;
-        desc.RayGenerationShaderRecord = kernel.ray_generation_shader_record_;
-        desc.MissShaderTable = kernel.miss_shader_table_;
-        desc.HitGroupTable = kernel.hit_group_table_;
-        desc.CallableShaderTable = kernel.callable_shader_table_;
+        sbtCommit(sbt);
+        D3D12_DISPATCH_RAYS_DESC desc;
+        desc.RayGenerationShaderRecord = gfx_sbt.ray_generation_shader_record_;
+        desc.MissShaderTable = gfx_sbt.miss_shader_table_;
+        desc.HitGroupTable = gfx_sbt.hit_group_table_;
+        desc.CallableShaderTable = gfx_sbt.callable_shader_table_;
         desc.Width = width;
         desc.Height = height;
         desc.Depth = depth;
         dxr_command_list_->DispatchRays(&desc);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeDispatchRaysIndirect(GfxSbt sbt, GfxBuffer args_buffer)
+    {
+        if(command_list_ == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(!buffer_handles_.has_handle(args_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch rays using an invalid arguments buffer object");
+        if(args_buffer.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch rays using an arguments buffer object with read CPU access");
+        if(!kernel_handles_.has_handle(bound_kernel_.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch rays when bound kernel object is invalid");
+        Kernel &kernel = kernels_[bound_kernel_];
+        if(!kernel.isRaytracing())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch rays using non-rt kernel object");
+        if(kernel.root_signature_ == nullptr || kernel.state_object_ == nullptr)
+            return kGfxResult_NoError;  // skip dispatch rays call
+        Buffer &gfx_buffer = buffers_[args_buffer];
+        SetObjectName(gfx_buffer, args_buffer.name);
+        GFX_TRY(installShaderState(kernel));
+        if(args_buffer.cpu_access == kGfxCpuAccess_None)
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+        submitPipelineBarriers();   // transition our resources if needed
+        sbtCommit(sbt);
+        command_list_->ExecuteIndirect(dispatch_rays_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
     }
 
@@ -4620,6 +4838,12 @@ private:
         destroyBuffer(raytracing_primitive.vertex_buffer_);
     }
 
+    void collect(Sbt const &sbt)
+    {
+        for(uint32_t i = 0; i < ARRAYSIZE(sbt.sbt_buffers_); ++i)
+        destroyBuffer(sbt.sbt_buffers_[i]);
+    }
+
     void collect(Program const &program)
     {
         for(Program::Parameters::const_iterator it = program.parameters_.begin(); it != program.parameters_.end(); ++it)
@@ -4639,6 +4863,7 @@ private:
         collect(kernel.ps_reflection_);
         collect(kernel.root_signature_);
         collect(kernel.pipeline_state_);
+        collect(kernel.state_object_);
         for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
         {
             freeDescriptor(kernel.parameters_[i].descriptor_slot_);
@@ -5302,25 +5527,51 @@ private:
         GFX_ASSERT(kernel.state_object_ == nullptr);
         D3D12_GLOBAL_ROOT_SIGNATURE
         global_root_signature = { kernel.root_signature_ };
+        std::vector<D3D12_EXPORT_DESC> export_descs;
+        std::vector<std::wstring> exports;
+        size_t max_export_length = 0;
+        for(size_t i = 0; i < kernel.exports_.size(); ++i)
+            max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
+        for (size_t i = 0; i < kernel.subobjects_.size(); ++i)
+            max_export_length = GFX_MAX(max_export_length, strlen(kernel.subobjects_[i].c_str()));
+        max_export_length += 1;
+        WCHAR * wexport = (WCHAR *)alloca(max_export_length << 1);
+        char * lib_export = (char *)alloca(max_export_length);
+        for(size_t i = 0; i < kernel.exports_.size(); ++i)
+        {
+            GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
+            mbstowcs(wexport, lib_export, max_export_length);
+            exports.push_back(wexport);
+        }
+        for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
+        {
+            GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.subobjects_[i].c_str());
+            mbstowcs(wexport, lib_export, max_export_length);
+            exports.push_back(wexport);
+        }
+        for(size_t i = 0; i < exports.size(); ++i)
+        {
+            export_descs.push_back({ exports[i].c_str(), nullptr, D3D12_EXPORT_FLAG_NONE});
+        }
         D3D12_DXIL_LIBRARY_DESC
-        lib_desc = { GetShaderBytecode(kernel.lib_bytecode_), 0, nullptr };
+        lib_desc = { GetShaderBytecode(kernel.lib_bytecode_), (UINT)export_descs.size(), export_descs.data()};
         std::vector<D3D12_STATE_SUBOBJECT> subobjects;
         subobjects.reserve(kernel.local_root_signature_associations_.size() + 2);
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &global_root_signature});
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_desc });
         std::vector<D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION> local_root_signature_associations;
         std::vector<D3D12_LOCAL_ROOT_SIGNATURE> local_root_signatures;
-        std::vector<LPCWSTR> exports;
+        std::vector<LPCWSTR> local_root_signature_associated_exports;
         local_root_signature_associations.reserve(kernel.local_root_signature_associations_.size());
         local_root_signatures.reserve(kernel.local_root_signature_associations_.size());
-        exports.reserve(kernel.local_root_signature_associations_.size());
+        local_root_signature_associated_exports.reserve(kernel.local_root_signature_associations_.size());
         for(auto &i : kernel.local_root_signature_associations_)
         {
             auto &local_parameters = kernel.local_parameters_[i.second.local_root_signature_space];
             local_root_signatures.push_back({local_parameters.local_root_signature_});
             subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_LOCAL_ROOT_SIGNATURE, &local_root_signatures.back()});
-            exports.push_back({i.first.c_str()});
-            local_root_signature_associations.push_back({&subobjects.back(), 1, &exports.back()});
+            local_root_signature_associated_exports.push_back({i.first.c_str()});
+            local_root_signature_associations.push_back({&subobjects.back(), 1, &local_root_signature_associated_exports.back()});
         }
         D3D12_STATE_OBJECT_DESC
         so_desc               = {};
@@ -5595,95 +5846,6 @@ private:
                 installed_vertex_buffer_ = bound_vertex_buffer_;
                 force_install_vertex_buffer_ = false;
             }
-        }
-        // sbt initialization
-        if(kernel.state_object_)
-        {
-            size_t sbt_record_count[kGfxShaderGroupType_Count]{};
-            ID3D12StateObjectProperties *state_object_properties;
-            kernel.state_object_->QueryInterface(IID_PPV_ARGS(&state_object_properties));
-            for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
-            {
-                auto last_record_it = program.shader_records_[i].rbegin();
-                if (last_record_it == program.shader_records_[i].rend()) continue;
-                uint32_t record_count = last_record_it->first + 1;
-                sbt_record_count[i] = record_count;
-                size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + kernel.sbt_record_stride_[i] * record_count;
-                if(sbt_buffers_[i].size < sbt_buffer_size)
-                {
-                    auto old_sbt_buffer = sbt_buffers_[i];
-                    sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
-                    if(!sbt_buffers_[i])
-                        return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
-                    sbt_buffers_[i].setName("gfx_SbtBuffer");
-                    if(old_sbt_buffer)
-                    {
-                        encodeCopyBuffer(sbt_buffers_[i], 0, old_sbt_buffer, 0, old_sbt_buffer.getSize());
-                        destroyBuffer(old_sbt_buffer);
-                    }
-                }
-                GfxBuffer const upload_gfx_buffer = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_Write);
-                Buffer &upload_buffer = buffers_[upload_gfx_buffer];
-                Buffer &sbt_buffer = buffers_[sbt_buffers_[i]];
-                UINT64 upload_buffer_offset = upload_buffer.data_offset_;
-                for(auto &shader_record : program.shader_records_[i])
-                {
-                    uint32_t sbt_index = shader_record.first;
-                    Program::ShaderRecord const &sbt_record = shader_record.second;
-                    void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
-                    UINT64 dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
-                        sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * kernel.sbt_record_stride_[i];
-                    UINT64 const src_offset = upload_buffer_offset;
-                    memcpy((byte*)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
-                    upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
-                    auto local_root_signature_association = kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
-                    if(local_root_signature_association != kernel.local_root_signature_associations_.end())
-                    {
-                        for(auto &parameter : kernel.local_parameters_[local_root_signature_association->second.local_root_signature_space].parameters_)
-                        {
-                            if(parameter.type_ >= Kernel::Parameter::kType_Count) continue;
-                            switch(parameter.type_)
-                            {
-                            case Kernel::Parameter::kType_Constants:
-                            case Kernel::Parameter::kType_ConstantBuffer:
-                                populateRootConstants(program, *sbt_record.parameters_, parameter, (uint32_t*)((byte*)upload_buffer.data_ + upload_buffer_offset), true);
-                                upload_buffer_offset += parameter.variable_size_;
-                                break;
-                            }
-                        }
-                    }
-                    command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset,
-                        upload_buffer.resource_, src_offset, upload_buffer_offset - src_offset);
-                }
-                destroyBuffer(upload_gfx_buffer);
-            }
-            kernel.ray_generation_shader_record_ = sbt_buffers_[kGfxShaderGroupType_Raygen] ?
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
-                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
-                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-                    kernel.sbt_record_stride_[kGfxShaderGroupType_Raygen]} :
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
-            kernel.miss_shader_table_ = sbt_buffers_[kGfxShaderGroupType_Miss] ?
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
-                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-                    sbt_record_count[kGfxShaderGroupType_Miss] * kernel.sbt_record_stride_[kGfxShaderGroupType_Miss],
-                    kernel.sbt_record_stride_[kGfxShaderGroupType_Miss]} :
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-            kernel.hit_group_table_ = sbt_buffers_[kGfxShaderGroupType_Hit] ?
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
-                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-                    sbt_record_count[kGfxShaderGroupType_Hit] * kernel.sbt_record_stride_[kGfxShaderGroupType_Hit],
-                    kernel.sbt_record_stride_[kGfxShaderGroupType_Hit]} :
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-            kernel.callable_shader_table_ = sbt_buffers_[kGfxShaderGroupType_Callable] ?
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-                    GFX_ALIGN(buffers_[sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
-                    D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-                    sbt_record_count[kGfxShaderGroupType_Callable] * kernel.sbt_record_stride_[kGfxShaderGroupType_Callable],
-                    kernel.sbt_record_stride_[kGfxShaderGroupType_Callable]} :
-                D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
         }
         return kGfxResult_NoError;
     }
@@ -7519,6 +7681,7 @@ private:
         if(kernel.ps_reflection_ != nullptr) { kernel.ps_reflection_->Release(); kernel.ps_reflection_ = nullptr; }
         if(kernel.root_signature_ != nullptr) { collect(kernel.root_signature_); kernel.root_signature_ = nullptr; }
         if(kernel.pipeline_state_ != nullptr) { collect(kernel.pipeline_state_); kernel.pipeline_state_ = nullptr; }
+        if(kernel.state_object_ != nullptr) { collect(kernel.state_object_); kernel.state_object_ = nullptr; }
         for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
         {
             freeDescriptor(kernel.parameters_[i].descriptor_slot_);
@@ -7601,9 +7764,39 @@ private:
         std::vector<LPCWSTR> shader_args;
         shader_args.push_back(wshader_file);
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
-        shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
         shader_args.push_back(L"-HV 2021");
+        
+        std::vector<std::wstring> exports;
+        if(shader_type == kShaderType_LIB)
+        {
+            if (!kernel.exports_.empty())
+            {
+                size_t max_export_length = 0;
+                for(size_t i = 0; i < kernel.exports_.size(); ++i)
+                    max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
+                max_export_length += 1;
+                WCHAR * wexport = (WCHAR *)alloca(max_export_length << 1);
+                char * lib_export = (char *)alloca(max_export_length);
+                for(size_t i = 0; i < kernel.exports_.size(); ++i)
+                {
+                    GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
+                    mbstowcs(wexport, lib_export, max_export_length);
+                    exports.push_back(wexport);
+                }
+                for (size_t i = 0; i < exports.size(); ++i)
+                {
+                    shader_args.push_back(L"-exports");
+                    shader_args.push_back(exports[i].c_str());
+                }
+            }
+            shader_args.push_back(L"-auto-binding-space 0");
+        }
+        else
+        {
+            shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
+        }
+
         if(debug_shaders_)
         {
             shader_args.push_back(DXC_ARG_DEBUG);
@@ -8205,6 +8398,28 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     return gfx->updateRaytracingPrimitive(raytracing_primitive);
 }
 
+GfxBuildRaytracingPrimitiveFlags gfxRaytracingPrimitiveGetFlags(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->getRaytracingPrimitiveFlags(raytracing_primitive);
+}
+
+GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+{
+    GfxSbt const sbt = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return sbt;   // invalid context
+    return gfx->createSbt(kernels, kernel_count, entry_count);
+}
+
+GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->destroySbt(sbt);
+}
+
 GfxDrawState::GfxDrawState()
 {
     GfxInternal::DispenseDrawState(*this);
@@ -8333,18 +8548,34 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
     return gfx->setProgramConstants(program, parameter_name, data, data_size);
 }
 
-GfxResult gfxProgramSetShaderGroup(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->gfxProgramSetShaderGroup(program, shader_group_type, index, group_name);
+    return gfx->sbtSetShaderGroup(sbt, shader_group_type, index, group_name);
 }
 
-GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->gfxProgramSetConstants(program, shader_group_type, index, parameter_name, data, data_size);
+    return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
+}
+
+GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
+    GfxSbt sbt,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtGetGpuVirtualAddressRangeAndStride(sbt,
+        ray_generation_shader_record,
+        miss_shader_table,
+        hit_group_table,
+        callable_shader_table);
 }
 
 GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
@@ -8369,12 +8600,16 @@ GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDra
     return gfx->createGraphicsKernel(program, draw_state, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program, GfxLocalRootSignatureAssociation *local_root_signature_associations, uint32_t local_root_signature_association_count, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
+    GfxLocalRootSignatureAssociation * local_root_signature_associations, uint32_t local_root_signature_association_count,
+    char const ** exports, uint32_t export_count,
+    char const ** subobjects, uint32_t subobject_count,
+    char const ** defines, uint32_t define_count)
 {
     GfxKernel const raytracing_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_kernel;    // invalid context
-    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, defines, define_count);
+    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
@@ -8552,11 +8787,18 @@ GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buf
     return gfx->encodeMultiDispatchIndirect(args_buffer, args_count);
 }
 
-GfxResult gfxCommandDispatchRays(GfxContext context, uint32_t width, uint32_t height, uint32_t depth)
+GfxResult gfxCommandDispatchRays(GfxContext context, GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeDispatchRays(width, height, depth);
+    return gfx->encodeDispatchRays(sbt, width, height, depth);
+}
+
+GfxResult gfxCommandDispatchRaysIndirect(GfxContext context, GfxSbt sbt, GfxBuffer args_buffer)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeDispatchRaysIndirect(sbt, args_buffer);
 }
 
 GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
