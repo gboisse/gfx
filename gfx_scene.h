@@ -294,6 +294,7 @@ struct GfxMaterial
     glm::vec4 sheen               = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); //.w=sheen roughness
     float     clearcoat           = 0.0f;
     float     clearcoat_roughness = 0.0f;
+    bool      double_sided        = false;
 
     GfxConstRef<GfxImage> albedo_map;
     GfxConstRef<GfxImage> roughness_map;
@@ -1340,6 +1341,7 @@ private:
                 material.clearcoat = gltf_material.clearcoat.clearcoat_factor;
                 material.clearcoat_roughness = gltf_material.clearcoat.clearcoat_roughness_factor;
             }
+            material.double_sided                = gltf_material.double_sided;
             cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
             it = (albedo_map_text != nullptr ? images.find(albedo_map_text->basisu_image != nullptr ?
                   albedo_map_text->basisu_image : albedo_map_text->image) : images.end());
