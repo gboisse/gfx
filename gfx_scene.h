@@ -282,19 +282,26 @@ inline bool gfxImageIsFormatCompressed(GfxImage const& image)
 //! Material object.
 //!
 
+enum GfxMaterialFlag
+{
+    kGfxMaterialFlag_DoubleSided = 1 << 0
+};
+
+typedef uint32_t GfxMaterialFlags;
+
 struct GfxMaterial
 {
-    glm::vec4 albedo              = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
-    float     roughness           = 1.0f;
-    float     metallicity         = 0.0f;
-    glm::vec3 emissivity          = glm::vec3(0.0f, 0.0f, 0.0f);
-    float     ior                 = 1.5f;
-    glm::vec4 specular            = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); //.w=specular factor
-    float     transmission        = 0.0f;
-    glm::vec4 sheen               = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); //.w=sheen roughness
-    float     clearcoat           = 0.0f;
-    float     clearcoat_roughness = 0.0f;
-    bool      double_sided        = false;
+    glm::vec4        albedo              = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
+    float            roughness           = 1.0f;
+    float            metallicity         = 0.0f;
+    glm::vec3        emissivity          = glm::vec3(0.0f, 0.0f, 0.0f);
+    float            ior                 = 1.5f;
+    glm::vec4        specular            = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); //.w=specular factor
+    float            transmission        = 0.0f;
+    glm::vec4        sheen               = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); //.w=sheen roughness
+    float            clearcoat           = 0.0f;
+    float            clearcoat_roughness = 0.0f;
+    GfxMaterialFlags flags               = 0;
 
     GfxConstRef<GfxImage> albedo_map;
     GfxConstRef<GfxImage> roughness_map;
@@ -1341,7 +1348,7 @@ private:
                 material.clearcoat = gltf_material.clearcoat.clearcoat_factor;
                 material.clearcoat_roughness = gltf_material.clearcoat.clearcoat_roughness_factor;
             }
-            material.double_sided                = gltf_material.double_sided;
+            if(gltf_material.double_sided) material.flags |= kGfxMaterialFlag_DoubleSided;
             cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
             it = (albedo_map_text != nullptr ? images.find(albedo_map_text->basisu_image != nullptr ?
                   albedo_map_text->basisu_image : albedo_map_text->image) : images.end());
