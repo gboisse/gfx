@@ -376,7 +376,6 @@ struct GfxInstance
     GfxConstRef<GfxMesh> mesh;
 
     glm::mat4 transform = glm::mat4(1.0f);
-    uint32_t instance_contribution_to_hit_group_index = 0;
 };
 
 GfxRef<GfxInstance> gfxSceneCreateInstance(GfxScene scene);
