@@ -7811,13 +7811,13 @@ private:
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
                 max_define_length = GFX_MAX(max_define_length, strlen(kernel.defines_[i].c_str()));
             max_define_length += 3; // `//' + null terminator: https://github.com/gboisse/gfx/issues/41
-            WCHAR *wdefine = (WCHAR *)alloca(max_define_length << 1);
-            char *define = (char *)alloca(max_define_length);
+            std::vector<WCHAR> wdefine(max_define_length << 1);
+            std::vector<char> define(max_define_length);
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
             {
-                GFX_SNPRINTF(define, max_define_length, "%s//", kernel.defines_[i].c_str());
-                mbstowcs(wdefine, define, max_define_length);
-                user_defines.push_back(wdefine);
+                GFX_SNPRINTF(define.data(), max_define_length, "%s", kernel.defines_[i].c_str());
+                mbstowcs(wdefine.data(), define.data(), max_define_length);
+                user_defines.push_back(wdefine.data());
             }
             for(size_t i = 0; i < user_defines.size(); ++i)
             {
