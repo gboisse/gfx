@@ -5535,8 +5535,8 @@ private:
         for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
             max_export_length = GFX_MAX(max_export_length, strlen(kernel.subobjects_[i].c_str()));
         max_export_length += 1;
-        WCHAR * wexport = (WCHAR *)alloca(max_export_length << 1);
-        char * lib_export = (char *)alloca(max_export_length);
+        char *lib_export = (char *)alloca(max_export_length);
+        WCHAR *wexport = (WCHAR *)alloca(max_export_length << 1);
         for(size_t i = 0; i < kernel.exports_.size(); ++i)
         {
             GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
@@ -7776,8 +7776,8 @@ private:
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
                     max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
                 max_export_length += 1;
-                WCHAR * wexport = (WCHAR *)alloca(max_export_length << 1);
-                char * lib_export = (char *)alloca(max_export_length);
+                char *lib_export = (char *)alloca(max_export_length);
+                WCHAR *wexport = (WCHAR *)alloca(max_export_length << 1);
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
                 {
                     GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
