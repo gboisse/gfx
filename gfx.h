@@ -7815,7 +7815,7 @@ private:
             std::vector<char> define(max_define_length);
             for(size_t i = 0; i < kernel.defines_.size(); ++i)
             {
-                GFX_SNPRINTF(define.data(), max_define_length, "%s", kernel.defines_[i].c_str());
+                GFX_SNPRINTF(define.data(), max_define_length, "%s//", kernel.defines_[i].c_str());
                 mbstowcs(wdefine.data(), define.data(), max_define_length);
                 user_defines.push_back(wdefine.data());
             }
