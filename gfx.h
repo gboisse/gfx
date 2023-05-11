@@ -2667,7 +2667,7 @@ public:
             {
                 uint32_t sbt_index = shader_record.first;
                 Sbt::ShaderRecord const &sbt_record = shader_record.second;
-                void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
+                void *shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
                 uint64_t dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
                     sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * gfx_kernel.sbt_record_stride_[i];
                 uint64_t const src_offset = upload_buffer_offset;
@@ -2698,7 +2698,7 @@ public:
     }
 
     GfxResult sbtGetGpuVirtualAddressRangeAndStride(GfxSbt const &sbt,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE * ray_generation_shader_record,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
         D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
         D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
         D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
