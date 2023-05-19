@@ -1267,7 +1267,7 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
             if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
-            if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
+            if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && IsDeveloperModeEnabled() && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
             {
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
                 device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
@@ -1334,7 +1334,7 @@ public:
                     break;  // we've got a valid device :)
             if(device_ == nullptr)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
-            if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
+            if((flags & kGfxCreateContextFlag_EnableStablePowerState) != 0 && IsDeveloperModeEnabled() && !SUCCEEDED(device_->SetStablePowerState(TRUE)))
             {
                 GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to set stable power state, is developer mode enabled?");
                 device_->Release(); device_ = nullptr;  // release crashed device and try to re-create it
@@ -4754,6 +4754,22 @@ private:
             break;
         }
         return format;
+    }
+
+    // https://stackoverflow.com/questions/41231586/how-to-detect-if-developer-mode-is-active-on-windows-10/41232108#41232108
+    static inline bool IsDeveloperModeEnabled()
+    {
+        HKEY hkey;
+        LSTATUS status;
+        if(!SUCCEEDED(RegOpenKeyExW(HKEY_LOCAL_MACHINE, LR"(SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock)", 0, KEY_READ, &hkey)))
+            return false;
+        DWORD value = {};
+        DWORD dword_size = sizeof(value);
+        status = RegQueryValueExW(hkey, L"AllowDevelopmentWithoutDevLicense", 0, NULL, reinterpret_cast<LPBYTE>(&value), &dword_size);
+        RegCloseKey(hkey);
+        if(!SUCCEEDED(status))
+            return false;
+        return (value != 0 ? true : false);
     }
 
     uint64_t getDescriptorHeapId() const
