@@ -1,0 +1,8 @@
+RWStructuredBuffer<int> InputBuffer; 
+RWStructuredBuffer<int> OutputBuffer; 
+
+[numthreads(128, 1, 1)] 
+void main(in uint gidx : SV_DispatchThreadID) 
+{ 
+	OutputBuffer[gidx] = InputBuffer[gidx]; 
+}
