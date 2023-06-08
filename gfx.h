@@ -2672,7 +2672,6 @@ public:
         Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
         Kernel &gfx_kernel = kernels_[bound_kernel_];  // get hold of sbt object
         Program const &program = programs_[gfx_kernel.program_];
-        size_t sbt_record_count[kGfxShaderGroupType_Count]{};
         ID3D12StateObjectProperties *state_object_properties;
         gfx_kernel.state_object_->QueryInterface(IID_PPV_ARGS(&state_object_properties));
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
@@ -3550,9 +3549,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-rt kernel object");
         if(kernel.root_signature_ == nullptr || kernel.state_object_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch call
+        sbtCommit(sbt);
         GFX_TRY(installShaderState(kernel));
         submitPipelineBarriers();   // transition our resources if needed
-        sbtCommit(sbt);
         D3D12_DISPATCH_RAYS_DESC desc;
         desc.RayGenerationShaderRecord = gfx_sbt.ray_generation_shader_record_;
         desc.MissShaderTable = gfx_sbt.miss_shader_table_;
@@ -3584,11 +3583,11 @@ public:
             return kGfxResult_NoError;  // skip dispatch rays call
         Buffer &gfx_buffer = buffers_[args_buffer];
         SetObjectName(gfx_buffer, args_buffer.name);
+        sbtCommit(sbt);
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
-        sbtCommit(sbt);
         command_list_->ExecuteIndirect(dispatch_rays_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
     }
