@@ -2728,16 +2728,17 @@ public:
                                 freeDescriptor(parameter.descriptor_slot_);
                                 GFX_ASSERT(parameter.descriptor_count_ > 0);
                                 parameter.descriptor_slot_ = allocateDescriptor(parameter.descriptor_count_);
-                                uint32_t descriptor_slot   = (parameter.descriptor_slot_ != 0xFFFFFFFFu
-                                                                  ? parameter.descriptor_slot_
-                                                                  : dummy_descriptors_[parameter.type_]);
-                                initDescriptorParameter(
-                                    program, false, parameter, descriptor_slot);
+                                if (parameter.descriptor_slot_ != 0xFFFFFFFFu)
+                                    initDescriptorParameter(
+                                        program, false, parameter, parameter.descriptor_slot_);
                             }
                             for (uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                             {
+                                uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu
+                                                                ? parameter.descriptor_slot_
+                                                                : dummy_descriptors_[parameter.type_]);
                                 auto descriptor_handle =
-                                    descriptors_.getGPUHandle(parameter.descriptor_slot_ + j);
+                                    descriptors_.getGPUHandle(descriptor_slot + j);
                                 memcpy((byte *)upload_buffer.data_ + upload_buffer_offset,
                                     &descriptor_handle, sizeof(descriptor_handle));
                                 upload_buffer_offset += sizeof(descriptor_handle);
@@ -3537,6 +3538,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if (!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!width || !height || !depth)
             return kGfxResult_NoError;  // nothing to dispatch
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
@@ -3566,6 +3569,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if (!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!buffer_handles_.has_handle(args_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch rays using an invalid arguments buffer object");
         if(args_buffer.cpu_access == kGfxCpuAccess_Read)
