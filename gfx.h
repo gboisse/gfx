@@ -326,6 +326,7 @@ GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt);
 
 GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name);
 GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size);
+GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level = 0);
 GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
     GfxSbt sbt,
     D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
@@ -1173,7 +1174,10 @@ class GfxInternal
     {
         struct ShaderRecord
         {
+            uint32_t id_ = 0;
+            uint32_t commited_id_ = 0xFFFFFFFFu;
             std::wstring shader_identifier_;
+            std::vector<Kernel::Parameter> bound_parameters_;
             std::unique_ptr<Program::Parameters> parameters_;
         };
 
@@ -1192,10 +1196,11 @@ class GfxInternal
         void insertSbtRecordShaderIdentifier(GfxShaderGroupType shader_group_type, uint32_t index, WCHAR *shader_identifier)
         {
             ShaderRecord &record = insertSbtRecord(shader_group_type, index);
+            record.id_ += record.shader_identifier_ != shader_identifier;
             record.shader_identifier_ = shader_identifier;
         }
 
-        Program::Parameter &insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
+        std::pair<ShaderRecord&, Program::Parameter&> insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
         {
             uint64_t const parameter_id = Hash(parameter_name);
             ShaderRecord &record = insertSbtRecord(shader_group_type, index);
@@ -1205,10 +1210,10 @@ class GfxInternal
             {
                 Program::Parameter &parameter = (*record.parameters_)[parameter_id];
                 parameter.name_ = parameter_name;
-                return parameter;
+                return {record, parameter};
             }
             GFX_ASSERT(strcmp((*it).second.name_.c_str(), parameter_name) == 0);
-            return (*it).second;    // ^ assert on hashing conflicts
+            return {record, (*it).second}; // ^ assert on hashing conflicts
         }
 
         std::map<uint32_t, ShaderRecord> shader_records_[kGfxShaderGroupType_Count];
@@ -2641,7 +2646,24 @@ public:
         if(!data && data_size > 0)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
         Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name).set(data, data_size);
+        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
+        uint32_t const parameter_prev_id = record_and_param.second.id_;
+        record_and_param.second.set(data, data_size);
+        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
+        uint32_t const parameter_prev_id = record_and_param.second.id_;
+        record_and_param.second.set(&texture, &mip_level, 1);
+        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
         return kGfxResult_NoError;
     }
 
@@ -2650,7 +2672,6 @@ public:
         Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
         Kernel &gfx_kernel = kernels_[bound_kernel_];  // get hold of sbt object
         Program const &program = programs_[gfx_kernel.program_];
-        size_t sbt_record_count[kGfxShaderGroupType_Count]{};
         ID3D12StateObjectProperties *state_object_properties;
         gfx_kernel.state_object_->QueryInterface(IID_PPV_ARGS(&state_object_properties));
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
@@ -2666,17 +2687,26 @@ public:
             for(auto &shader_record : gfx_sbt.shader_records_[i])
             {
                 uint32_t sbt_index = shader_record.first;
-                Sbt::ShaderRecord const &sbt_record = shader_record.second;
-                void *shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
+                Sbt::ShaderRecord &sbt_record = shader_record.second;
+                if (sbt_record.id_ == sbt_record.commited_id_) continue;
                 uint64_t dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
                     sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * gfx_kernel.sbt_record_stride_[i];
                 uint64_t const src_offset = upload_buffer_offset;
+                void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
                 memcpy((byte*)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
                 upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
                 auto local_root_signature_association = gfx_kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
                 if(local_root_signature_association != gfx_kernel.local_root_signature_associations_.end())
                 {
-                    for(auto &parameter : gfx_kernel.local_parameters_[local_root_signature_association->second.local_root_signature_space].parameters_)
+                    if (gfx_sbt.kernel_ != bound_kernel_)
+                    {
+                        for (auto &bound_parameter : sbt_record.bound_parameters_)
+                        {
+                            freeDescriptor(bound_parameter.descriptor_slot_);
+                        }
+                        sbt_record.bound_parameters_ = gfx_kernel.local_parameters_[local_root_signature_association->second.local_root_signature_space].parameters_;
+                    }
+                    for(auto &parameter : sbt_record.bound_parameters_)
                     {
                         if(parameter.type_ >= Kernel::Parameter::kType_Count) continue;
                         switch(parameter.type_)
@@ -2686,14 +2716,43 @@ public:
                             populateRootConstants(program, *sbt_record.parameters_, parameter, (uint32_t*)((byte*)upload_buffer.data_ + upload_buffer_offset), true);
                             upload_buffer_offset += parameter.variable_size_;
                             break;
+                        default:
+                            if(parameter.parameter_ == nullptr)
+                            {
+                                Program::Parameters::const_iterator const it = sbt_record.parameters_->find(parameter.parameter_id_);
+                                if(it != sbt_record.parameters_->end()) parameter.parameter_ = &(*it).second;
+                            }
+                            if (parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
+                            {
+                                freeDescriptor(parameter.descriptor_slot_);
+                                GFX_ASSERT(parameter.descriptor_count_ > 0);
+                                parameter.descriptor_slot_ = allocateDescriptor(parameter.descriptor_count_);
+                                if (parameter.descriptor_slot_ != 0xFFFFFFFFu)
+                                    initDescriptorParameter(
+                                        program, false, parameter, parameter.descriptor_slot_);
+                            }
+                            for (uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            {
+                                uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu
+                                                                ? parameter.descriptor_slot_
+                                                                : dummy_descriptors_[parameter.type_]);
+                                auto descriptor_handle =
+                                    descriptors_.getGPUHandle(descriptor_slot + j);
+                                memcpy((byte *)upload_buffer.data_ + upload_buffer_offset,
+                                    &descriptor_handle, sizeof(descriptor_handle));
+                                upload_buffer_offset += sizeof(descriptor_handle);
+                            }
+                            break;
                         }
                     }
                 }
-                command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset,
-                    upload_buffer.resource_, src_offset, upload_buffer_offset - src_offset);
+                command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset, upload_buffer.resource_,
+                    src_offset, upload_buffer_offset - src_offset);
+                sbt_record.commited_id_  = sbt_record.id_;
             }
             destroyBuffer(upload_gfx_buffer);
         }
+        gfx_sbt.kernel_ = bound_kernel_;
         return kGfxResult_NoError;
     }
 
@@ -3478,6 +3537,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if (!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!width || !height || !depth)
             return kGfxResult_NoError;  // nothing to dispatch
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
@@ -3488,9 +3549,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-rt kernel object");
         if(kernel.root_signature_ == nullptr || kernel.state_object_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch call
+        sbtCommit(sbt);
         GFX_TRY(installShaderState(kernel));
         submitPipelineBarriers();   // transition our resources if needed
-        sbtCommit(sbt);
         D3D12_DISPATCH_RAYS_DESC desc;
         desc.RayGenerationShaderRecord = gfx_sbt.ray_generation_shader_record_;
         desc.MissShaderTable = gfx_sbt.miss_shader_table_;
@@ -3507,6 +3568,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if (!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!buffer_handles_.has_handle(args_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch rays using an invalid arguments buffer object");
         if(args_buffer.cpu_access == kGfxCpuAccess_Read)
@@ -3520,11 +3583,11 @@ public:
             return kGfxResult_NoError;  // skip dispatch rays call
         Buffer &gfx_buffer = buffers_[args_buffer];
         SetObjectName(gfx_buffer, args_buffer.name);
+        sbtCommit(sbt);
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
             transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
         submitPipelineBarriers();   // transition our resources if needed
-        sbtCommit(sbt);
         command_list_->ExecuteIndirect(dispatch_rays_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
     }
@@ -4856,8 +4919,18 @@ private:
 
     void collect(Sbt const &sbt)
     {
-        for(uint32_t i = 0; i < ARRAYSIZE(sbt.sbt_buffers_); ++i)
-        destroyBuffer(sbt.sbt_buffers_[i]);
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+        {
+            destroyBuffer(sbt.sbt_buffers_[i]);
+            for(auto &shader_record : sbt.shader_records_[i])
+            {
+                Sbt::ShaderRecord const &sbt_record = shader_record.second;
+                for(auto &parameter : sbt_record.bound_parameters_)
+                {
+                    freeDescriptor(parameter.descriptor_slot_);
+                }
+            }
+        }
     }
 
     void collect(Program const &program)
@@ -5405,7 +5478,7 @@ private:
                     local_root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
                     break;
                 default:
-                    local_root_signature_parameters_size += sizeof(D3D12_GPU_VIRTUAL_ADDRESS);
+                    local_root_signature_parameters_size += sizeof(D3D12_GPU_DESCRIPTOR_HANDLE);
                     break;
                 }
             }
@@ -8576,6 +8649,13 @@ GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType 
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
+}
+
+GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetTexture(sbt, shader_group_type, index, parameter_name, texture, mip_level);
 }
 
 GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
