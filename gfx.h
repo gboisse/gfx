@@ -1200,7 +1200,7 @@ class GfxInternal
             record.shader_identifier_ = shader_identifier;
         }
 
-        std::pair<ShaderRecord&, Program::Parameter&> insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
+        std::pair<ShaderRecord &, Program::Parameter &> insertSbtRecordParameter(GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name)
         {
             uint64_t const parameter_id = Hash(parameter_name);
             ShaderRecord &record = insertSbtRecord(shader_group_type, index);
@@ -1213,7 +1213,7 @@ class GfxInternal
                 return {record, parameter};
             }
             GFX_ASSERT(strcmp((*it).second.name_.c_str(), parameter_name) == 0);
-            return {record, (*it).second}; // ^ assert on hashing conflicts
+            return {record, (*it).second};  // ^ assert on hashing conflicts
         }
 
         std::map<uint32_t, ShaderRecord> shader_records_[kGfxShaderGroupType_Count];
@@ -2688,19 +2688,19 @@ public:
             {
                 uint32_t sbt_index = shader_record.first;
                 Sbt::ShaderRecord &sbt_record = shader_record.second;
-                if (sbt_record.id_ == sbt_record.commited_id_) continue;
+                if(sbt_record.id_ == sbt_record.commited_id_) continue;
                 uint64_t dst_offset = GFX_ALIGN(sbt_buffer.resource_->GetGPUVirtualAddress(), D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT) -
                     sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * gfx_kernel.sbt_record_stride_[i];
                 uint64_t const src_offset = upload_buffer_offset;
-                void * shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
-                memcpy((byte*)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
+                void *shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
+                memcpy((uint8_t *)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
                 upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
                 auto local_root_signature_association = gfx_kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
                 if(local_root_signature_association != gfx_kernel.local_root_signature_associations_.end())
                 {
-                    if (gfx_sbt.kernel_ != bound_kernel_)
+                    if(gfx_sbt.kernel_ != bound_kernel_)
                     {
-                        for (auto &bound_parameter : sbt_record.bound_parameters_)
+                        for(auto &bound_parameter : sbt_record.bound_parameters_)
                         {
                             freeDescriptor(bound_parameter.descriptor_slot_);
                         }
@@ -2713,7 +2713,7 @@ public:
                         {
                         case Kernel::Parameter::kType_Constants:
                         case Kernel::Parameter::kType_ConstantBuffer:
-                            populateRootConstants(program, *sbt_record.parameters_, parameter, (uint32_t*)((byte*)upload_buffer.data_ + upload_buffer_offset), true);
+                            populateRootConstants(program, *sbt_record.parameters_, parameter, (uint32_t*)((uint8_t *)upload_buffer.data_ + upload_buffer_offset), true);
                             upload_buffer_offset += parameter.variable_size_;
                             break;
                         default:
@@ -2722,23 +2722,23 @@ public:
                                 Program::Parameters::const_iterator const it = sbt_record.parameters_->find(parameter.parameter_id_);
                                 if(it != sbt_record.parameters_->end()) parameter.parameter_ = &(*it).second;
                             }
-                            if (parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
+                            if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
                             {
                                 freeDescriptor(parameter.descriptor_slot_);
                                 GFX_ASSERT(parameter.descriptor_count_ > 0);
                                 parameter.descriptor_slot_ = allocateDescriptor(parameter.descriptor_count_);
-                                if (parameter.descriptor_slot_ != 0xFFFFFFFFu)
+                                if(parameter.descriptor_slot_ != 0xFFFFFFFFu)
                                     initDescriptorParameter(
                                         program, false, parameter, parameter.descriptor_slot_);
                             }
-                            for (uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                            for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                             {
                                 uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu
                                                                 ? parameter.descriptor_slot_
                                                                 : dummy_descriptors_[parameter.type_]);
                                 auto descriptor_handle =
                                     descriptors_.getGPUHandle(descriptor_slot + j);
-                                memcpy((byte *)upload_buffer.data_ + upload_buffer_offset,
+                                memcpy((uint8_t *)upload_buffer.data_ + upload_buffer_offset,
                                     &descriptor_handle, sizeof(descriptor_handle));
                                 upload_buffer_offset += sizeof(descriptor_handle);
                             }
@@ -2748,7 +2748,7 @@ public:
                 }
                 command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset, upload_buffer.resource_,
                     src_offset, upload_buffer_offset - src_offset);
-                sbt_record.commited_id_  = sbt_record.id_;
+                sbt_record.commited_id_ = sbt_record.id_;
             }
             destroyBuffer(upload_gfx_buffer);
         }
@@ -3537,7 +3537,7 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
-        if (!sbt_handles_.has_handle(sbt.handle))
+        if(!sbt_handles_.has_handle(sbt.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!width || !height || !depth)
             return kGfxResult_NoError;  // nothing to dispatch
@@ -3568,7 +3568,7 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
-        if (!sbt_handles_.has_handle(sbt.handle))
+        if(!sbt_handles_.has_handle(sbt.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!buffer_handles_.has_handle(args_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch rays using an invalid arguments buffer object");
