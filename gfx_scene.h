@@ -165,7 +165,7 @@ GfxResult gfxSceneDestroyCamera(GfxScene scene, uint64_t camera_handle);
 GfxResult gfxSceneDestroyAllCameras(GfxScene scene);
 
 GfxResult gfxSceneSetActiveCamera(GfxScene scene, uint64_t camera_handle);
-GfxConstRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene);
+GfxRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene);
 
 uint32_t gfxSceneGetCameraCount(GfxScene scene);
 GfxCamera const *gfxSceneGetCameras(GfxScene scene);
@@ -535,7 +535,7 @@ class GfxSceneInternal
     GfxArray<GfxCamera> cameras_;
     GfxArray<uint64_t> camera_refs_;
     GfxArray<GfxMetadata> camera_metadata_;
-    GfxConstRef<GfxCamera> active_camera_;
+    GfxRef<GfxCamera> active_camera_;
     GfxHandles camera_handles_;
 
     GfxArray<GfxLight> lights_;
@@ -839,7 +839,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxConstRef<GfxCamera> getActiveCamera()
+    GfxRef<GfxCamera> getActiveCamera()
     {
         return active_camera_;
     }
@@ -2342,9 +2342,9 @@ GfxResult gfxSceneSetActiveCamera(GfxScene scene, uint64_t camera_handle)
     return gfx_scene->setActiveCamera(scene, camera_handle);
 }
 
-GfxConstRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene)
+GfxRef<GfxCamera> gfxSceneGetActiveCamera(GfxScene scene)
 {
-    GfxConstRef<GfxCamera> const camera_ref = {};
+    GfxRef<GfxCamera> const camera_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return camera_ref;   // invalid parameter
     return gfx_scene->getActiveCamera();
