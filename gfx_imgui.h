@@ -24,15 +24,18 @@ SOFTWARE.
 #ifndef GFX_INCLUDE_GFX_IMGUI_H
 #define GFX_INCLUDE_GFX_IMGUI_H
 
-#include "gfx.h"
+// Required to support unicode values above 0x10000: https://github.com/gboisse/gfx/pull/71
 #define IMGUI_USE_WCHAR32
+#define IMGUI_DEFINE_MATH_OPERATORS
+
+#include "gfx.h"
 #include "imgui.h"
 
 //!
 //! ImGui initialization/termination.
 //!
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filename = nullptr, uint32_t font_count = 0,
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames = nullptr, uint32_t font_count = 0,
     ImFontConfig const *font_configs = nullptr, ImGuiConfigFlags flags = 0);
 GfxResult gfxImGuiTerminate();
 GfxResult gfxImGuiRender();
@@ -75,7 +78,7 @@ public:
     GfxImGuiInternal() {}
     ~GfxImGuiInternal() { terminate(); }
 
-    GfxResult initialize(GfxContext const &gfx, char const **font_filename, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
+    GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
     {
         if(!gfx)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
@@ -92,14 +95,14 @@ public:
 
         uint8_t *font_data;
         int32_t font_width, font_height;
-        for (uint32_t i = 0; i < font_count; ++i)
+        for(uint32_t i = 0; i < font_count; ++i)
         {
-            if (i == 0 && font_configs != nullptr && font_configs[0].MergeMode == true)
-				io.Fonts->AddFontDefault();
-            float font_size = (font_configs != nullptr && font_configs[i].SizePixels > 0.0f)
+            if(i == 0 && font_configs != nullptr && font_configs[0].MergeMode == true)
+                io.Fonts->AddFontDefault();
+            float const font_size = (font_configs != nullptr && font_configs[i].SizePixels > 0.0f)
                                 ? font_configs[i].SizePixels
                                 : 16.0f;
-            io.Fonts->AddFontFromFileTTF(font_filename[i], font_size, &font_configs[i]);
+            io.Fonts->AddFontFromFileTTF(font_filenames[i], font_size, &font_configs[i]);
         }
         io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
         GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
@@ -324,13 +327,13 @@ public:
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filename, uint32_t font_count,
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count,
     ImFontConfig const *font_configs, ImGuiConfigFlags flags)
 {
     GfxResult result;
     GfxImGuiInternal *gfx_imgui = new GfxImGuiInternal();
     if(!gfx_imgui) return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to initialize ImGui");
-    result = gfx_imgui->initialize(gfx, font_filename, font_count, font_configs, flags);
+    result = gfx_imgui->initialize(gfx, font_filenames, font_count, font_configs, flags);
     if(result != kGfxResult_NoError)
     {
         delete gfx_imgui;
