@@ -1532,14 +1532,17 @@ public:
         if(!SUCCEEDED(device_->CreateCommandSignature(&multi_draw_indexed_signature_desc, nullptr, IID_PPV_ARGS(&multi_draw_indexed_signature_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create indexed multi-draw command signature");
 
-        D3D12_INDIRECT_ARGUMENT_DESC dispatch_rays_argument_desc = {};
-        dispatch_rays_argument_desc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_RAYS;
-        D3D12_COMMAND_SIGNATURE_DESC dispatch_rays_signature_desc = {};
-        dispatch_rays_signature_desc.ByteStride = sizeof(D3D12_DISPATCH_RAYS_DESC);
-        dispatch_rays_signature_desc.NumArgumentDescs = 1;
-        dispatch_rays_signature_desc.pArgumentDescs = &dispatch_rays_argument_desc;
-        if(!SUCCEEDED(device_->CreateCommandSignature(&dispatch_rays_signature_desc, nullptr, IID_PPV_ARGS(&dispatch_rays_signature_))))
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the dispatch rays command signature");
+        if(dxr_device_ != nullptr)
+        {
+            D3D12_INDIRECT_ARGUMENT_DESC dispatch_rays_argument_desc = {};
+            dispatch_rays_argument_desc.Type = D3D12_INDIRECT_ARGUMENT_TYPE_DISPATCH_RAYS;
+            D3D12_COMMAND_SIGNATURE_DESC dispatch_rays_signature_desc = {};
+            dispatch_rays_signature_desc.ByteStride = sizeof(D3D12_DISPATCH_RAYS_DESC);
+            dispatch_rays_signature_desc.NumArgumentDescs = 1;
+            dispatch_rays_signature_desc.pArgumentDescs = &dispatch_rays_argument_desc;
+            if(!SUCCEEDED(device_->CreateCommandSignature(&dispatch_rays_signature_desc, nullptr, IID_PPV_ARGS(&dispatch_rays_signature_))))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the dispatch rays command signature");
+        }
 
         GfxProgramDesc clear_buffer_program_desc = {};
         clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
@@ -2428,6 +2431,11 @@ public:
     GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
     {
         GfxSbt sbt = {};
+        if(dxr_device_ == nullptr)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create SBT");
+            return sbt; // invalid operation
+        }
         sbt.handle = sbt_handles_.allocate_handle();
         Sbt &gfx_sbt = sbts_.insert(sbt);
         for(uint32_t i = 0; i < kernel_count; ++i)
@@ -2852,6 +2860,11 @@ public:
         char const **defines, uint32_t define_count)
     {
         GfxKernel raytracing_kernel = {};
+        if(dxr_device_ == nullptr)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create raytracing kernel");
+            return raytracing_kernel;   // invalid operation
+        }
         if(!program_handles_.has_handle(program.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a compute kernel using an invalid program object");
@@ -7852,10 +7865,12 @@ private:
 
         std::vector<LPCWSTR> shader_args;
         shader_args.push_back(wshader_file);
+        if(dxr_device_ != nullptr)
+            shader_args.push_back(L"-enable-16bit-types");
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
         shader_args.push_back(L"-HV 2021");
-        
+
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
         {
