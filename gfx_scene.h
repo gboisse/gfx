@@ -464,7 +464,11 @@ template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene sc
 #pragma warning(push)
 #pragma warning(disable : 4018)
 #define TINYEXR_IMPLEMENTATION
-#include <tinyexr.h>
+#define TINYEXR_USE_MINIZ    0
+#define TINYEXR_USE_STB_ZLIB 1
+#include "tinyexr.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "stb_image_write.h"
 #pragma warning(pop)
 #include "ktx.h"
 #include "vulkan/vulkan.h"
