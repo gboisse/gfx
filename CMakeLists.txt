@@ -10,6 +10,7 @@ set(KTX_FEATURE_STATIC_LIBRARY ON)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software)
+add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz EXCLUDE_FROM_ALL)
 
 option(GFX_BUILD_EXAMPLES "Build gfx examples" ON)
 
@@ -34,6 +35,8 @@ target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/im
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/miniz)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
@@ -67,7 +70,7 @@ set_target_properties(WinPixEventRuntime PROPERTIES
     IMPORTED_IMPLIB ${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib
 )
 
-target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader ktx dxcompiler dxil WinPixEventRuntime)
+target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib glm tinyobjloader miniz ktx dxcompiler dxil WinPixEventRuntime)
 
 if(GFX_BUILD_EXAMPLES)
     add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/examples)
