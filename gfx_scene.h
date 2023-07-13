@@ -291,7 +291,6 @@ enum GfxMaterialFlag
 {
     kGfxMaterialFlag_DoubleSided = 1 << 0
 };
-
 typedef uint32_t GfxMaterialFlags;
 
 struct GfxMaterial
