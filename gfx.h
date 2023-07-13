@@ -5906,14 +5906,13 @@ private:
                                 upload_buffer_offset += parameter.variable_size_;
                                 break;
                             default:
+                                uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu
+                                                                ? parameter.descriptor_slot_
+                                                                : dummy_descriptors_[parameter.type_]);
                                 if (parameter.descriptor_slot_ != 0xFFFFFFFFu)
-                                    initDescriptorParameter(program, invalidate_sbt_descriptors, parameter,
-                                        parameter.descriptor_slot_);
+                                    initDescriptorParameter(program, invalidate_sbt_descriptors, parameter, descriptor_slot);
                                 for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                                 {
-                                    uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu
-                                                                    ? parameter.descriptor_slot_
-                                                                    : dummy_descriptors_[parameter.type_]);
                                     auto descriptor_handle =
                                         descriptors_.getGPUHandle(descriptor_slot + j);
                                     memcpy((uint8_t *)upload_buffer.data_ + upload_buffer_offset,
