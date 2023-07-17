@@ -651,7 +651,7 @@ public:
         else if(CaseInsensitiveCompare(asset_extension, ".ktx2") ||
             CaseInsensitiveCompare(asset_extension, ".ktx"))
             GFX_TRY(importKtx(scene, asset_file));
-        else if (CaseInsensitiveCompare(asset_extension, ".exr"))
+        else if(CaseInsensitiveCompare(asset_extension, ".exr"))
             GFX_TRY(importExr(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||
                 CaseInsensitiveCompare(asset_extension, ".png") ||
@@ -1949,7 +1949,7 @@ private:
         int32_t image_width, image_height, channel_count;
         if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
             return kGfxResult_NoError;  // image was already imported
-        float* image_data = stbi_loadf(asset_file, &image_width, &image_height, &channel_count, 0);
+        float *image_data = stbi_loadf(asset_file, &image_width, &image_height, &channel_count, 0);
         if(image_data == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, stbi_failure_reason());
         uint32_t const resolved_channel_count = (uint32_t)(channel_count != 3 ? channel_count : 4);
@@ -1994,10 +1994,10 @@ private:
     }
 
     static inline KTX_error_code IterateKtxImage(int32_t miplevel, int32_t face, int32_t width, int32_t height, int32_t depth,
-        ktx_uint64_t faceLodSize, void* pixels, void* userdata)
+        ktx_uint64_t faceLodSize, void *pixels, void *userdata)
     {
-        GfxRef<GfxImage>* image_ref = (GfxRef<GfxImage>*)userdata;
-        uint8_t* back = &*((*image_ref)->data.end());
+        GfxRef<GfxImage> *image_ref = (GfxRef<GfxImage> *)userdata;
+        uint8_t *back = &*((*image_ref)->data.end());
         uint64_t current_pos = (*image_ref)->data.size();
         (*image_ref)->data.resize((*image_ref)->data.size() + faceLodSize);
         memcpy(back, pixels, faceLodSize);
@@ -2009,7 +2009,7 @@ private:
         GFX_ASSERT(asset_file != nullptr);
         if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
             return kGfxResult_NoError;  // image was already imported
-        ktxTexture2* ktx_texture;
+        ktxTexture2 *ktx_texture;
         KTX_error_code result;
         result = ktxTexture2_CreateFromNamedFile(asset_file, KTX_TEXTURE_CREATE_NO_FLAGS, &ktx_texture);
         if(result != KTX_SUCCESS)
@@ -2092,7 +2092,7 @@ private:
         image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_HasAlphaChannel);
         image_ref->flags |= (ktx_texture->numLevels > 1 ? kGfxImageFlag_HasMipLevels : 0);
 
-        GfxMetadata& image_metadata = image_metadata_[image_ref];
+        GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
         ktxTexture_Destroy((ktxTexture*)ktx_texture);
@@ -2105,7 +2105,7 @@ private:
         if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
             return kGfxResult_NoError; // image was already imported
         EXRVersion exr_version;
-        int        ret = ParseEXRVersionFromFile(&exr_version, asset_file);
+        int32_t    ret = ParseEXRVersionFromFile(&exr_version, asset_file);
         if(ret != 0)
         {
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Invalid EXR file `%s'", asset_file);
@@ -2122,7 +2122,7 @@ private:
 
         EXRHeader exr_header;
         InitEXRHeader(&exr_header);
-        char const* err = nullptr;
+        char const *err = nullptr;
         ret             = ParseEXRHeaderFromFile(&exr_header, &exr_version, asset_file, &err);
         if(ret != 0)
         {
@@ -2132,7 +2132,7 @@ private:
         }
 
         // Force always loading data as float
-        for(int i = 0; i < exr_header.num_channels; i++)
+        for(int32_t i = 0; i < exr_header.num_channels; ++i)
         {
             if(exr_header.pixel_types[i] == TINYEXR_PIXELTYPE_HALF
                 || exr_header.pixel_types[i] == TINYEXR_PIXELTYPE_UINT)
@@ -2165,7 +2165,7 @@ private:
         image_ref->channel_count     = resolved_channel_count;
         image_ref->bytes_per_channel = 4;
         image_ref->format            = GetImageFormat(*image_ref);
-        float* data                  = reinterpret_cast<float *>(image_ref->data.data());
+        float *data                  = reinterpret_cast<float *>(image_ref->data.data());
         bool   alpha_check           = false; // check alpha
         for(int32_t y = 0; y < exr_image.height; ++y)
             for(int32_t x = 0; x < exr_image.width; ++x)
@@ -2184,7 +2184,7 @@ private:
                 }
             }
         image_ref->flags            = (!alpha_check ? 0 : kGfxImageFlag_HasAlphaChannel);
-        GfxMetadata& image_metadata = image_metadata_[image_ref];
+        GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file   = asset_file; // set up metadata
         image_metadata.object_name  = file;
         FreeEXRImage(&exr_image);
