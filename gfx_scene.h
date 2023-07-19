@@ -81,7 +81,7 @@ class GfxConstRef : public GfxRefBase<TYPE, TYPE const> { public: GfxConstRef() 
 //! Metadata API.
 //!
 
-class GfxMetadata { friend class GfxSceneInternal; bool is_valid; std::string asset_file; std::string object_name; public: GfxMetadata() : is_valid(false) {}
+class GfxMetadata { friend class GfxSceneInternal; bool is_valid; public: std::string asset_file; std::string object_name; GfxMetadata() : is_valid(false) {}
                     inline char const *getAssetFile() const { return asset_file.c_str(); }
                     inline char const *getObjectName() const { return object_name.c_str(); }
                     inline bool getIsValid() const { return is_valid; }
