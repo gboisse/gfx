@@ -351,6 +351,12 @@ struct GfxVertex
     glm::vec2 uv       = glm::vec3(0.0f);
 };
 
+struct GfxJoint
+{
+    glm::uvec4 joints  = glm::uvec4(-1);
+    glm::vec4  weights = glm::vec4(0.0f);
+};
+
 struct GfxMesh
 {
     GfxConstRef<GfxMaterial> material;
@@ -360,6 +366,9 @@ struct GfxMesh
 
     std::vector<GfxVertex> vertices;
     std::vector<uint32_t>  indices;
+
+    std::vector<glm::mat4> jointMatrices;   // should contain list of `inverse(meshGlobalTransform) * jointGlobalTransform * inverseBindMatrix' matrices for this mesh
+    std::vector<GfxJoint>  jointWeights;    // should contain list of per-vertex joint indices and weights values for skinning on the GPU (see `GfxJoint' structure)
 };
 
 GfxRef<GfxMesh> gfxSceneCreateMesh(GfxScene scene);
