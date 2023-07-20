@@ -367,7 +367,7 @@ struct GfxMesh
     std::vector<GfxVertex> vertices;
     std::vector<uint32_t>  indices;
 
-    std::vector<glm::mat4> jointMatrices;   // should contain list of `inverse(meshGlobalTransform) * jointGlobalTransform * inverseBindMatrix' matrices for this mesh
+    std::vector<glm::mat4> jointMatrices;   // should contain list of `inverse(meshGlobalTransform) * jointGlobalTransform * inverseBindMatrix' matrices for each joint
     std::vector<GfxJoint>  jointWeights;    // should contain list of per-vertex joint indices and weights values for skinning on the GPU (see `GfxJoint' structure)
 };
 
