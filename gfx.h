@@ -221,6 +221,7 @@ GfxResult gfxDrawStateSetDepthStencilTarget(GfxDrawState draw_state, GfxTexture 
 
 GfxResult gfxDrawStateSetCullMode(GfxDrawState draw_state, D3D12_CULL_MODE cull_mode);
 GfxResult gfxDrawStateSetFillMode(GfxDrawState draw_state, D3D12_FILL_MODE fill_mode);
+GfxResult gfxDrawStateSetDepthWriteMask(GfxDrawState draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask);
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha);
 
 //!
@@ -742,6 +743,10 @@ class GfxInternal
                 D3D12_BLEND dst_blend_alpha_ = {};
                 D3D12_BLEND_OP blend_op_alpha_ = {};
             } blend_state_;
+            struct
+            {
+                D3D12_DEPTH_WRITE_MASK depth_write_mask_ = D3D12_DEPTH_WRITE_MASK_ALL;
+            } depth_stencil_state_;
             struct
             {
                 D3D12_CULL_MODE cull_mode_ = D3D12_CULL_MODE_BACK;
@@ -4383,6 +4388,16 @@ public:
         return kGfxResult_NoError;
     }
 
+    static GfxResult SetDrawStateDepthWriteMask(GfxDrawState const &draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask)
+    {
+        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
+        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        if(!gfx_draw_state)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth write mask on an invalid draw state object");
+        gfx_draw_state->draw_state_.depth_stencil_state_.depth_write_mask_ = depth_write_mask;
+        return kGfxResult_NoError;
+    }
+
     static GfxResult SetDrawStateBlendMode(GfxDrawState const &draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
     {
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
@@ -5511,6 +5526,7 @@ private:
             if(draw_state.depth_stencil_target_.texture_)
             {
                 pso_desc.DepthStencilState.DepthEnable = TRUE;
+                pso_desc.DepthStencilState.DepthWriteMask = draw_state.depth_stencil_state_.depth_write_mask_;
                 pso_desc.DSVFormat = draw_state.depth_stencil_target_.texture_.format;
             }
             else if(pso_desc.NumRenderTargets == 0)  // special case - if no color target is supplied, draw to back buffer
@@ -8596,6 +8612,11 @@ GfxResult gfxDrawStateSetCullMode(GfxDrawState draw_state, D3D12_CULL_MODE cull_
 GfxResult gfxDrawStateSetFillMode(GfxDrawState draw_state, D3D12_FILL_MODE fill_mode)
 {
     return GfxInternal::SetDrawStateFillMode(draw_state, fill_mode);
+}
+
+GfxResult gfxDrawStateSetDepthWriteMask(GfxDrawState draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask)
+{
+    return GfxInternal::SetDrawStateDepthWriteMask(draw_state, depth_write_mask);
 }
 
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
