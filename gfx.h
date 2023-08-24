@@ -4474,7 +4474,7 @@ private:
         pso_desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
         pso_desc.RasterizerState.FrontCounterClockwise = TRUE;
         pso_desc.RasterizerState.DepthClipEnable = TRUE;
-        pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
+        pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER_EQUAL;
         pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
         pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pso_desc.SampleDesc.Count = 1;
