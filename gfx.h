@@ -222,6 +222,7 @@ GfxResult gfxDrawStateSetDepthStencilTarget(GfxDrawState draw_state, GfxTexture 
 GfxResult gfxDrawStateSetCullMode(GfxDrawState draw_state, D3D12_CULL_MODE cull_mode);
 GfxResult gfxDrawStateSetFillMode(GfxDrawState draw_state, D3D12_FILL_MODE fill_mode);
 GfxResult gfxDrawStateSetDepthWriteMask(GfxDrawState draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask);
+GfxResult gfxDrawStateSetDepthFunction(GfxDrawState draw_state, D3D12_COMPARISON_FUNC depth_function);
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha);
 
 //!
@@ -344,9 +345,9 @@ GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_o
 GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value = 0);
 
 GfxResult gfxCommandClearBackBuffer(GfxContext context);    // clears to (0.0, 0.0, 0.0, 1.0)
-GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
+GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture, float clear_value = NAN);
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
-GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
+GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0, float clear_value = NAN);
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
@@ -745,6 +746,7 @@ class GfxInternal
             } blend_state_;
             struct
             {
+                D3D12_COMPARISON_FUNC  depth_func_       = D3D12_COMPARISON_FUNC_LESS;
                 D3D12_DEPTH_WRITE_MASK depth_write_mask_ = D3D12_DEPTH_WRITE_MASK_ALL;
             } depth_stencil_state_;
             struct
@@ -2973,13 +2975,13 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearTexture(GfxTexture const &texture)
+    GfxResult encodeClearTexture(GfxTexture const &texture, float clear_value)
     {
         uint32_t depth = texture.depth;
         for(uint32_t i = 0; i < texture.mip_levels; ++i)
         {
             for(uint32_t j = 0; j < depth; ++j)
-                GFX_TRY(encodeClearImage(texture, i, j));
+                GFX_TRY(encodeClearImage(texture, i, j, clear_value));
             if(texture.is3D())
                 depth = GFX_MAX(depth >> 1, 1u);
         }
@@ -3007,7 +3009,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearImage(GfxTexture const &texture, uint32_t mip_level, uint32_t slice)
+    GfxResult encodeClearImage(GfxTexture const &texture, uint32_t mip_level, uint32_t slice, float clear_value)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3032,11 +3034,13 @@ public:
             rect.bottom = (uint32_t)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             submitPipelineBarriers();   // transition our resources if needed
-            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, 0.0f, 0, 1, &rect);
+            float const clear = isnan(clear_value) ? 1.0f : clear_value;
+            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, clear, 0, 1, &rect);
         }
         else
         {
-            float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+            float const clear         = isnan(clear_value) ? 0.0f : clear_value;
+            float const clear_color[] = {clear, clear, clear, 1.0f};
             GFX_TRY(ensureTextureHasRenderTargetView(texture, gfx_texture, mip_level, slice));
             GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[mip_level][slice] != 0xFFFFFFFFu);
             D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
@@ -4398,6 +4402,17 @@ public:
         return kGfxResult_NoError;
     }
 
+    static GfxResult SetDrawStateDepthFunction(GfxDrawState const &draw_state, D3D12_COMPARISON_FUNC depth_function)
+    {
+        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
+        DrawState     *gfx_draw_state   = draw_states_.at(draw_state_index);
+        if (!gfx_draw_state)
+            return GFX_SET_ERROR(
+                kGfxResult_InvalidParameter, "Cannot set depth function on an invalid draw state object");
+        gfx_draw_state->draw_state_.depth_stencil_state_.depth_func_ = depth_function;
+        return kGfxResult_NoError;
+    }
+
     static GfxResult SetDrawStateBlendMode(GfxDrawState const &draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
     {
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
@@ -4489,7 +4504,7 @@ private:
         pso_desc.RasterizerState.CullMode = D3D12_CULL_MODE_BACK;
         pso_desc.RasterizerState.FrontCounterClockwise = TRUE;
         pso_desc.RasterizerState.DepthClipEnable = TRUE;
-        pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_GREATER;
+        pso_desc.DepthStencilState.DepthFunc = D3D12_COMPARISON_FUNC_LESS;
         pso_desc.DepthStencilState.DepthWriteMask = D3D12_DEPTH_WRITE_MASK_ALL;
         pso_desc.PrimitiveTopologyType = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
         pso_desc.SampleDesc.Count = 1;
@@ -5527,6 +5542,7 @@ private:
             {
                 pso_desc.DepthStencilState.DepthEnable = TRUE;
                 pso_desc.DepthStencilState.DepthWriteMask = draw_state.depth_stencil_state_.depth_write_mask_;
+                pso_desc.DepthStencilState.DepthFunc      = draw_state.depth_stencil_state_.depth_func_;
                 pso_desc.DSVFormat = draw_state.depth_stencil_target_.texture_.format;
             }
             else if(pso_desc.NumRenderTargets == 0)  // special case - if no color target is supplied, draw to back buffer
@@ -8619,6 +8635,11 @@ GfxResult gfxDrawStateSetDepthWriteMask(GfxDrawState draw_state, D3D12_DEPTH_WRI
     return GfxInternal::SetDrawStateDepthWriteMask(draw_state, depth_write_mask);
 }
 
+GfxResult gfxDrawStateSetDepthFunction(GfxDrawState draw_state, D3D12_COMPARISON_FUNC depth_function)
+{
+    return GfxInternal::SetDrawStateDepthFunction(draw_state, depth_function);
+}
+
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
 {
     return GfxInternal::SetDrawStateBlendMode(draw_state, src_blend, dst_blend, blend_op, src_blend_alpha, dst_blend_alpha, blend_op_alpha);
@@ -8823,11 +8844,11 @@ GfxResult gfxCommandClearBackBuffer(GfxContext context)
     return gfx->encodeClearBackBuffer();
 }
 
-GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture)
+GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture, float clear_value)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeClearTexture(texture);
+    return gfx->encodeClearTexture(texture, clear_value);
 }
 
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src)
@@ -8837,11 +8858,11 @@ GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture s
     return gfx->encodeCopyTexture(dst, src);
 }
 
-GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice)
+GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice, float clear_value)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeClearImage(texture, mip_level, slice);
+    return gfx->encodeClearImage(texture, mip_level, slice, clear_value);
 }
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture)
