@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#ifndef GFX_INCLUDE_GFX_SCENE_H
+#if !defined(GFX_INCLUDE_GFX_SCENE_H) && defined(GFX_ENABLE_SCENE)
 #define GFX_INCLUDE_GFX_SCENE_H
 
 #include "gfx.h"
@@ -468,23 +468,20 @@ template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene scene, uint64_t 
 #include <map>
 #include <set>
 #include <functional>
-#pragma warning(push)
-#pragma warning(disable:4789)   // buffer will be overrun
 #define CGLTF_IMPLEMENTATION
 #include "cgltf.h"              // glTF loader
+#pragma warning(push)
+#pragma warning(disable:4244)   // buffer will be overrun
 #include "tiny_obj_loader.cc"   // obj loader
 #pragma warning(pop)
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
-#pragma warning(push)
-#pragma warning(disable : 4018)
 #define TINYEXR_IMPLEMENTATION
 #define TINYEXR_USE_MINIZ    0
 #define TINYEXR_USE_STB_ZLIB 1
 #include "tinyexr.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
-#pragma warning(pop)
 #include "ktx.h"
 #include "vulkan/vulkan.h"
 #include "glm/gtx/quaternion.hpp"
