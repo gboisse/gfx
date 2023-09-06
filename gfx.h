@@ -3035,7 +3035,7 @@ public:
             rect.bottom = (uint32_t)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             submitPipelineBarriers();   // transition our resources if needed
-            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, gfx_texture.clear_value[0], 0, 1, &rect);
+            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, gfx_texture.clear_value[0], (UINT8)gfx_texture.clear_value[1], 1, &rect);
         }
         else
         {
