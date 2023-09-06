@@ -126,11 +126,11 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32
                    inline DXGI_FORMAT getFormat() const { return format; }
                    inline uint32_t getMipLevels() const { return mip_levels; } };
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format);  // creates auto-resize window-sized texture
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1);
-GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels = 1);
-GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1);
-GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1);
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr);  // creates auto-resize window-sized texture
+GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 
 //!
@@ -345,9 +345,9 @@ GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_o
 GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value = 0);
 
 GfxResult gfxCommandClearBackBuffer(GfxContext context);    // clears to (0.0, 0.0, 0.0, 1.0)
-GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture, float clear_value = NAN);
+GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
-GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0, float clear_value = NAN);
+GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
@@ -818,6 +818,7 @@ class GfxInternal
         std::vector<uint32_t> rtv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         D3D12_RESOURCE_STATES resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+        float                 clear_value[4]          = {0.0f, 0.0f, 0.0f, 1.0f};
     };
     GfxArray<Texture> textures_;
     GfxHandles texture_handles_;
@@ -1772,7 +1773,7 @@ public:
             resource_desc.Flags = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
             break;
         }
-        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_buffer.allocation_, IID_PPV_ARGS(&gfx_buffer.resource_)) != kGfxResult_NoError)
+        if(createResource(allocation_desc, resource_desc, resource_state, nullptr, &gfx_buffer.allocation_, IID_PPV_ARGS(&gfx_buffer.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create buffer object of size %u MiB", (uint32_t)((size + 1024 * 1024 - 1) / (1024 * 1024)));
             gfx_buffer.resource_ = nullptr; gfx_buffer.allocation_ = nullptr;
@@ -1867,12 +1868,12 @@ public:
         return gfx_buffer.data_;
     }
 
-    GfxTexture createTexture2D(DXGI_FORMAT format)
+    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
     {
-        return createTexture2D(window_width_, window_height_, format, 1, Texture::kFlag_AutoResize);
+        return createTexture2D(window_width_, window_height_, format, 1, clear_value, Texture::kFlag_AutoResize);
     }
 
-    GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, uint32_t flags = 0)
+    GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, uint32_t flags = 0)
     {
         GfxTexture texture = {};
         if(isInterop() && (flags & Texture::kFlag_AutoResize) != 0)
@@ -1902,7 +1903,7 @@ public:
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
         allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        if(createResource(allocation_desc, resource_desc, resource_state, clear_value, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create 2D texture object of size %ux%u", width, height);
             gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
@@ -1923,7 +1924,7 @@ public:
         return texture;
     }
 
-    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels)
+    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -1954,7 +1955,7 @@ public:
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
         allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        if(createResource(allocation_desc, resource_desc, resource_state, clear_value, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create 2D texture array object of size %ux%ux%u", width, height, slice_count);
             gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
@@ -1971,7 +1972,7 @@ public:
         return texture;
     }
 
-    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels)
+    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2002,7 +2003,7 @@ public:
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
         allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        if(createResource(allocation_desc, resource_desc, resource_state, clear_value, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create 3D texture object of size %ux%ux%u", width, height, depth);
             gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
@@ -2019,7 +2020,7 @@ public:
         return texture;
     }
 
-    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels)
+    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2043,7 +2044,7 @@ public:
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
         allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-        if(createResource(allocation_desc, resource_desc, resource_state, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
+        if(createResource(allocation_desc, resource_desc, resource_state, clear_value, &gfx_texture.allocation_, IID_PPV_ARGS(&gfx_texture.resource_)) != kGfxResult_NoError)
         {
             GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create cubemap texture object of size %u", size);
             gfx_texture.resource_ = nullptr; gfx_texture.allocation_ = nullptr;
@@ -2975,13 +2976,13 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearTexture(GfxTexture const &texture, float clear_value)
+    GfxResult encodeClearTexture(GfxTexture const &texture)
     {
         uint32_t depth = texture.depth;
         for(uint32_t i = 0; i < texture.mip_levels; ++i)
         {
             for(uint32_t j = 0; j < depth; ++j)
-                GFX_TRY(encodeClearImage(texture, i, j, clear_value));
+                GFX_TRY(encodeClearImage(texture, i, j));
             if(texture.is3D())
                 depth = GFX_MAX(depth >> 1, 1u);
         }
@@ -3009,7 +3010,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearImage(GfxTexture const &texture, uint32_t mip_level, uint32_t slice, float clear_value)
+    GfxResult encodeClearImage(GfxTexture const &texture, uint32_t mip_level, uint32_t slice)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3034,13 +3035,10 @@ public:
             rect.bottom = (uint32_t)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
             submitPipelineBarriers();   // transition our resources if needed
-            float const clear = isnan(clear_value) ? 1.0f : clear_value;
-            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, clear, 0, 1, &rect);
+            command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, gfx_texture.clear_value[0], 0, 1, &rect);
         }
         else
         {
-            float const clear         = isnan(clear_value) ? 0.0f : clear_value;
-            float const clear_color[] = {clear, clear, clear, 1.0f};
             GFX_TRY(ensureTextureHasRenderTargetView(texture, gfx_texture, mip_level, slice));
             GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[mip_level][slice] != 0xFFFFFFFFu);
             D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
@@ -3050,7 +3048,7 @@ public:
             rect.bottom = (uint32_t)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
             submitPipelineBarriers();   // transition our resources if needed
-            command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]), clear_color, 1, &rect);
+            command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]), gfx_texture.clear_value, 1, &rect);
         }
         return kGfxResult_NoError;
     }
@@ -6027,7 +6025,7 @@ private:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
             resource_desc.Alignment = 0;    // default alignment
             resource_desc.Flags |= usage_flag;  // add usage flag
-            GFX_TRY(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, &allocation, IID_PPV_ARGS(&resource)));
+            GFX_TRY(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value, &allocation, IID_PPV_ARGS(&resource)));
             if(texture.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)
             {
                 D3D12_RESOURCE_BARRIER resource_barrier = {};
@@ -8068,7 +8066,8 @@ private:
     }
 
     GfxResult createResource(D3D12MA::ALLOCATION_DESC const &allocation_desc, D3D12_RESOURCE_DESC const &resource_desc,
-        D3D12_RESOURCE_STATES initial_resource_state, D3D12MA::Allocation **allocation, REFIID riid_resource, void** ppv_resource)
+        D3D12_RESOURCE_STATES initial_resource_state, float const *clear, D3D12MA::Allocation **allocation,
+        REFIID riid_resource, void **ppv_resource)
     {
         HRESULT result;
         D3D12_CLEAR_VALUE
@@ -8076,15 +8075,33 @@ private:
         clear_value.Format   = resource_desc.Format;
         if(IsDepthStencilFormat(resource_desc.Format))
         {
-            clear_value.DepthStencil.Depth   = 0.0f;
-            clear_value.DepthStencil.Stencil = 0;
+            if(clear!= nullptr)
+            {
+                clear_value.DepthStencil.Depth   = clear[0];
+                clear_value.DepthStencil.Stencil = (UINT8)clear[1];
+            }
+            else
+            {
+                clear_value.DepthStencil.Depth   = 0.0f;
+                clear_value.DepthStencil.Stencil = 0;
+            }
         }
         else
         {
-            clear_value.Color[0] = 0.0f;
-            clear_value.Color[1] = 0.0f;
-            clear_value.Color[2] = 0.0f;
-            clear_value.Color[3] = 1.0f;
+            if (clear != nullptr)
+            {
+                clear_value.Color[0] = clear[0];
+                clear_value.Color[1] = clear[1];
+                clear_value.Color[2] = clear[2];
+                clear_value.Color[3] = clear[3];
+            }
+            else
+            {
+                clear_value.Color[0] = 0.0f;
+                clear_value.Color[1] = 0.0f;
+                clear_value.Color[2] = 0.0f;
+                clear_value.Color[3] = 1.0f;
+            }
         }
         result = mem_allocator_->CreateResource(&allocation_desc, &resource_desc, initial_resource_state,
             (resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0 || (resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0 ? &clear_value : nullptr,
@@ -8246,7 +8263,7 @@ private:
             resource_desc.Height = window_height;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to auto-resize texture object(s) to %ux%u", window_width, window_height);
                 break;  // out of memory
@@ -8394,44 +8411,44 @@ void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
     return gfx->getBufferData(buffer);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format)
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(format);
+    return gfx->createTexture2D(format, clear_value);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels)
+GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(width, height, format, mip_levels);
+    return gfx->createTexture2D(width, height, format, mip_levels, clear_value);
 }
 
-GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels)
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels);
+    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels, clear_value);
 }
 
-GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels)
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture3D(width, height, depth, format, mip_levels);
+    return gfx->createTexture3D(width, height, depth, format, mip_levels, clear_value);
 }
 
-GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels)
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTextureCube(size, format, mip_levels);
+    return gfx->createTextureCube(size, format, mip_levels, clear_value);
 }
 
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
@@ -8844,11 +8861,11 @@ GfxResult gfxCommandClearBackBuffer(GfxContext context)
     return gfx->encodeClearBackBuffer();
 }
 
-GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture, float clear_value)
+GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeClearTexture(texture, clear_value);
+    return gfx->encodeClearTexture(texture);
 }
 
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src)
@@ -8858,11 +8875,11 @@ GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture s
     return gfx->encodeCopyTexture(dst, src);
 }
 
-GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice, float clear_value)
+GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeClearImage(texture, mip_level, slice, clear_value);
+    return gfx->encodeClearImage(texture, mip_level, slice);
 }
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture)
