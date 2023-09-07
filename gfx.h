@@ -512,6 +512,7 @@ class GfxInternal
     ID3D12GraphicsCommandList *command_list_ = nullptr;
     ID3D12GraphicsCommandList4 *dxr_command_list_ = nullptr;
     ID3D12CommandAllocator **command_allocators_ = nullptr;
+    std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
     uint32_t fence_index_ = 0;
@@ -1678,6 +1679,8 @@ public:
             device_->Release();
         if(dxr_device_ != nullptr)
             dxr_device_->Release();
+        for(IAmdExtD3DDevice1 *amd_ext_device : amd_ext_devices_)
+            amd_ext_device->Release();
         if(command_queue_ != nullptr)
             command_queue_->Release();
         if(command_list_ != nullptr)
@@ -1722,8 +1725,6 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
                     back_buffers_[i]->Release();
-        if(tls_pAmdExtDeviceObject != nullptr)
-            tls_pAmdExtDeviceObject->Release();
         free(back_buffer_rtvs_);
         free(back_buffers_);
 
@@ -3673,7 +3674,10 @@ public:
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         vsnprintf(buffer, sizeof(buffer), format, args);
+        IAmdExtD3DDevice1 *amd_ext_device = tls_pAmdExtDeviceObject;
         PIXBeginEvent(command_list_, color, buffer);
+        if(amd_ext_device == nullptr && tls_pAmdExtDeviceObject != nullptr)
+            amd_ext_devices_.push_back(tls_pAmdExtDeviceObject);
         return kGfxResult_NoError;
     }
 
@@ -3681,7 +3685,10 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        IAmdExtD3DDevice1 *amd_ext_device = tls_pAmdExtDeviceObject;
         PIXEndEvent(command_list_);
+        if(amd_ext_device == nullptr && tls_pAmdExtDeviceObject != nullptr)
+            amd_ext_devices_.push_back(tls_pAmdExtDeviceObject);
         return kGfxResult_NoError;
     }
 
