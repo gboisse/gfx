@@ -208,7 +208,6 @@ GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingP
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
 GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
-GfxBuildRaytracingPrimitiveFlags gfxRaytracingPrimitiveGetFlags(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
 //! Draw state manipulation.
@@ -240,11 +239,14 @@ inline GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state)
 class GfxProgram { GFX_INTERNAL_HANDLE(GfxProgram); char name[kGfxConstant_MaxNameLength + 1]; public:
                    inline char const *getName() const { return name; } };
 
-class GfxProgramDesc { public: inline GfxProgramDesc() : cs(nullptr), vs(nullptr), gs(nullptr), ps(nullptr) {}
+class GfxProgramDesc { public: inline GfxProgramDesc() : cs(nullptr), as(nullptr), ms(nullptr), vs(nullptr), gs(nullptr), ps(nullptr), lib(nullptr) {}
                        char const *cs;
+                       char const *as;
+                       char const *ms;
                        char const *vs;
                        char const *gs;
-                       char const *ps; };
+                       char const *ps;
+                       char const *lib; };
 
 GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path = nullptr, char const *shader_model = nullptr);
 GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, char const *name = nullptr, char const *shader_model = nullptr);
@@ -1039,6 +1041,8 @@ class GfxInternal
         }
 
         String cs_;
+        String as_;
+        String ms_;
         String vs_;
         String gs_;
         String ps_;
@@ -1248,7 +1252,7 @@ class GfxInternal
 public:
     GfxInternal(GfxContext &gfx) : buffer_handles_("buffer"), texture_handles_("texture"), sampler_state_handles_("sampler state")
                                  , acceleration_structure_handles_("acceleration structure"), raytracing_primitive_handles_("raytracing primitive")
-                                 , program_handles_("program"), kernel_handles_("kernel"), timestamp_query_handles_("timestamp query")
+                                 , program_handles_("program"), kernel_handles_("kernel"), timestamp_query_handles_("timestamp query"), sbt_handles_("shader binding table")
                                  { gfx.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxInternal() { terminate(); }
 
@@ -2209,7 +2213,7 @@ public:
                 instance_desc.Transform[j][3] = gfx_raytracing_primitive.transform_[4 * j + 3];
             instance_desc.InstanceID = gfx_raytracing_primitive.instance_id_;
             instance_desc.InstanceMask = gfx_raytracing_primitive.instance_mask_;
-            instance_desc.InstanceContributionToHitGroupIndex  = gfx_raytracing_primitive.instance_contribution_to_hit_group_index_;
+            instance_desc.InstanceContributionToHitGroupIndex = gfx_raytracing_primitive.instance_contribution_to_hit_group_index_;
             instance_desc.AccelerationStructure = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             instance_descs[instance_desc_count++] = instance_desc;
         }
@@ -2434,16 +2438,6 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
-    
-    GfxBuildRaytracingPrimitiveFlags getRaytracingPrimitiveFlags(GfxRaytracingPrimitive const &raytracing_primitive)
-    {
-        if(dxr_device_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
-        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update an invalid raytracing primitive object");
-        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        return gfx_raytracing_primitive.build_flags_;
-    }
 
     GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
     {
@@ -2548,9 +2542,12 @@ public:
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_path_ = program.name;
         gfx_program.cs_ = program_desc.cs;
+        gfx_program.as_ = program_desc.as;
+        gfx_program.ms_ = program_desc.ms;
         gfx_program.vs_ = program_desc.vs;
         gfx_program.gs_ = program_desc.gs;
         gfx_program.ps_ = program_desc.ps;
+        gfx_program.lib_ = program_desc.lib;
         return program;
     }
 
@@ -4916,6 +4913,8 @@ private:
                 {
                     freeDescriptor(parameter.descriptor_slot_);
                 }
+                for(auto &parameter : *sbt_record.parameters_)
+                    parameter.second.unset();   // release parameter resources
             }
         }
     }
@@ -4944,6 +4943,8 @@ private:
         collect(kernel.ps_reflection_);
         collect(kernel.lib_reflection_);
         collect(kernel.root_signature_);
+        for(std::map<uint32_t, Kernel::LocalParameter>::const_iterator it = kernel.local_parameters_.begin(); it != kernel.local_parameters_.end(); ++it)
+            collect((*it).second.local_root_signature_);
         collect(kernel.pipeline_state_);
         collect(kernel.state_object_);
         for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
@@ -5938,9 +5939,9 @@ private:
             else
                 command_list_->SetGraphicsRootDescriptorTable(i, descriptors_.getGPUHandle(descriptor_slot));
         }
-        if(sbt)
+        if(sbt != nullptr)
         {
-            ID3D12StateObjectProperties *state_object_properties;
+            ID3D12StateObjectProperties *state_object_properties = nullptr;
             kernel.state_object_->QueryInterface(IID_PPV_ARGS(&state_object_properties));
             bool const invalidate_sbt_descriptors = sbt->descriptor_heap_id_ != descriptor_heap_id;
             bool const invalidate_sbt_parameters = sbt->kernel_ != bound_kernel_;
@@ -6005,6 +6006,7 @@ private:
                 }
                 destroyBuffer(upload_gfx_buffer);
             }
+            state_object_properties->Release();
         }
         if(!is_compute && kernel.vertex_stride_ > 0)
         {
@@ -7943,6 +7945,12 @@ private:
             case kShaderType_CS:
                 shader_source.Ptr = program.cs_.c_str();
                 break;
+            case kShaderType_AS:
+                shader_source.Ptr = program.as_.c_str();
+                break;
+            case kShaderType_MS:
+                shader_source.Ptr = program.ms_.c_str();
+                break;
             case kShaderType_VS:
                 shader_source.Ptr = program.vs_.c_str();
                 break;
@@ -8619,13 +8627,6 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateRaytracingPrimitive(raytracing_primitive);
-}
-
-GfxBuildRaytracingPrimitiveFlags gfxRaytracingPrimitiveGetFlags(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->getRaytracingPrimitiveFlags(raytracing_primitive);
 }
 
 GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
