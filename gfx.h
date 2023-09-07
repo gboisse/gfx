@@ -479,6 +479,7 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
 
 #include <map>                  // std::map
 #include <deque>                // std::deque
+#include <memory>               // std::unique_ptr
 #include "direct.h"             // _mkdir()
 #include "inc/dxcapi.h"         // shader compiler
 #include "inc/d3d12shader.h"    // shader reflection
