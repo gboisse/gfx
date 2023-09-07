@@ -1722,6 +1722,8 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
                     back_buffers_[i]->Release();
+        if(tls_pAmdExtDeviceObject != nullptr)
+            tls_pAmdExtDeviceObject->Release();
         free(back_buffer_rtvs_);
         free(back_buffers_);
 
