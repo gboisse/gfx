@@ -29,7 +29,13 @@ struct Vertex
 
 [outputtopology("triangle")]
 [numthreads(1, 1, 1)]
-void main(in uint local_id : SV_GroupThreadID, out vertices Vertex verts[8], out indices uint3 triangles[12])
+void main(in uint local_id : SV_GroupThreadID, out vertices Vertex verts[3], out indices uint3 triangles[1])
 {
-    // TODO: ... (gboisse)
+    SetMeshOutputCounts(3, 1);
+
+    verts[0].position = float4( 0.5f, -0.5f, 0.0f, 1.0f);
+    verts[1].position = float4( 0.0f,  0.7f, 0.0f, 1.0f);
+    verts[2].position = float4(-0.5f, -0.5f, 0.0f, 1.0f);
+
+    triangles[0] = uint3(0, 1, 2);
 }

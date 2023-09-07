@@ -373,8 +373,8 @@ GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer);
 GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count);      // expects a buffer of D3D12_DISPATCH_ARGUMENTS elements
 GfxResult gfxCommandDispatchRays(GfxContext context, GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth);
 GfxResult gfxCommandDispatchRaysIndirect(GfxContext context, GfxSbt sbt, GfxBuffer args_buffer);
-GfxResult gfxCommandDispatchMesh(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
-GfxResult gfxCommandDispatchMeshIndirect(GfxContext context, GfxBuffer args_buffer);                            // expects a buffer of D3D12_DISPATCH_MESH_ARGUMENTS elements
+GfxResult gfxCommandDrawMesh(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z);
+GfxResult gfxCommandDrawMeshIndirect(GfxContext context, GfxBuffer args_buffer);                                // expects a buffer of D3D12_DISPATCH_MESH_ARGUMENTS elements
 
 //!
 //! Debug/profile API.
@@ -1059,8 +1059,20 @@ class GfxInternal
 
     struct Kernel
     {
-        inline bool isCompute() const { return (num_threads_ != nullptr && *num_threads_ > 0); }
-        inline bool isRaytracing() const { return (lib_bytecode_ != nullptr); }
+        enum Type
+        {
+            kType_Mesh = 0,
+            kType_Compute,
+            kType_Graphics,
+            kType_Raytracing,
+
+            kType_Count
+        };
+
+        inline bool isMesh() const { return type_ == kType_Mesh; }
+        inline bool isCompute() const { return type_ == kType_Compute; }
+        inline bool isGraphics() const { return type_ == kType_Graphics; }
+        inline bool isRaytracing() const { return type_ == kType_Raytracing; }
 
         struct Parameter
         {
@@ -1114,18 +1126,19 @@ class GfxInternal
 
         struct LocalParameter
         {
-            ID3D12RootSignature *local_root_signature_;
+            ID3D12RootSignature *local_root_signature_ = nullptr;
             std::vector<Parameter> parameters_;
         };
 
         struct LocalRootSignatureAssociation
         {
-            uint32_t local_root_signature_space;
-            GfxShaderGroupType shader_group_type;
+            uint32_t local_root_signature_space = 0;
+            GfxShaderGroupType shader_group_type = kGfxShaderGroupType_Count;
         };
 
         String entry_point_;
         GfxProgram program_ = {};
+        Type type_ = kType_Count;
         DrawState::Data draw_state_;
         std::vector<String> defines_;
         std::vector<String> exports_;
@@ -2731,6 +2744,8 @@ public:
         Kernel &gfx_kernel = kernels_.insert(mesh_kernel);
         gfx_kernel.program_ = program;
         gfx_kernel.entry_point_ = entry_point;
+        gfx_kernel.type_ = Kernel::kType_Mesh;
+        gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         createKernel(gfx_program, gfx_kernel);  // create mesh kernel
@@ -2760,6 +2775,7 @@ public:
         Kernel &gfx_kernel = kernels_.insert(compute_kernel);
         gfx_kernel.program_ = program;
         gfx_kernel.entry_point_ = entry_point;
+        gfx_kernel.type_ = Kernel::kType_Compute;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
@@ -2799,6 +2815,7 @@ public:
         Kernel &gfx_kernel = kernels_.insert(graphics_kernel);
         gfx_kernel.program_ = program;
         gfx_kernel.entry_point_ = entry_point;
+        gfx_kernel.type_ = Kernel::kType_Graphics;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
@@ -2843,6 +2860,7 @@ public:
         Kernel &gfx_kernel = kernels_.insert(raytracing_kernel);
         gfx_kernel.program_ = program;
         gfx_kernel.entry_point_ = "";
+        gfx_kernel.type_ = Kernel::kType_Raytracing;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         GFX_ASSERT(local_root_signature_association_count == 0 || local_root_signature_associations != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
@@ -2855,7 +2873,6 @@ public:
             gfx_kernel.local_root_signature_associations_[wgroup_name] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
         }
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
-        gfx_kernel.lib_bytecode_ = (IDxcBlob *)~0ull;
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i) gfx_kernel.sbt_record_stride_[i] = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
         createKernel(gfx_program, gfx_kernel);  // create raytracing kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
@@ -3249,15 +3266,14 @@ public:
         Kernel const &gfx_kernel = kernels_[kernel];
         if(gfx_kernel.isRaytracing())
         {
-            if(gfx_kernel.state_object_)
+            if(gfx_kernel.state_object_ != nullptr)
                 dxr_command_list_->SetPipelineState1(gfx_kernel.state_object_);
         }
         else
         {
-            if(gfx_kernel.pipeline_state_)
+            if(gfx_kernel.pipeline_state_ != nullptr)
                 command_list_->SetPipelineState(gfx_kernel.pipeline_state_);
         }
-
         if(gfx_kernel.root_signature_ != nullptr)
         {
             if(gfx_kernel.isCompute() || gfx_kernel.isRaytracing())
@@ -3332,8 +3348,8 @@ public:
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
-        if(kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a compute kernel object");
+        if(!kernel.isGraphics())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a non-graphics kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip draw call
         GFX_TRY(installShaderState(kernel));
@@ -3351,8 +3367,8 @@ public:
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
-        if(kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a compute kernel object");
+        if(!kernel.isGraphics())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a non-graphics kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip draw call
         GFX_TRY(installShaderState(kernel, true));
@@ -3374,8 +3390,8 @@ public:
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
-        if(kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a compute kernel object");
+        if(!kernel.isGraphics())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a non-graphics kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip multi-draw call
         GFX_TRY(populateDrawIdBuffer(args_count));
@@ -3402,8 +3418,8 @@ public:
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
-        if(kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a compute kernel object");
+        if(!kernel.isGraphics())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw using a non-graphics kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip multi-draw call
         GFX_TRY(populateDrawIdBuffer(args_count));
@@ -3427,7 +3443,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
         if(!kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a graphics kernel object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-compute kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch call
         GFX_TRY(installShaderState(kernel));
@@ -3448,7 +3464,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
         if(!kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a graphics kernel object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-compute kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch call
         Buffer &gfx_buffer = buffers_[args_buffer];
@@ -3475,7 +3491,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
         if(!kernel.isCompute())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a graphics kernel object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-compute kernel object");
         if(kernel.root_signature_ == nullptr || kernel.pipeline_state_ == nullptr)
             return kGfxResult_NoError;  // skip multi-dispatch call
         Buffer &gfx_buffer = buffers_[args_buffer];
@@ -3524,7 +3540,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
         if(!kernel.isRaytracing())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-rt kernel object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch using a non-raytracing kernel object");
         if(kernel.root_signature_ == nullptr || kernel.state_object_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch call
         Sbt &gfx_sbt = sbts_[sbt];
@@ -3556,7 +3572,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch rays when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
         if(!kernel.isRaytracing())
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch rays using non-rt kernel object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch rays using non-raytracing kernel object");
         if(kernel.root_signature_ == nullptr || kernel.state_object_ == nullptr)
             return kGfxResult_NoError;  // skip dispatch rays call
         Buffer &gfx_buffer = buffers_[args_buffer];
@@ -5499,6 +5515,14 @@ private:
         return kGfxResult_NoError;
     }
 
+    GfxResult createMeshPipelineState(Kernel &kernel, DrawState::Data const &draw_state)
+    {
+        (void)&kernel;
+        (void)&draw_state;
+
+        return kGfxResult_NoError;
+    }
+
     GfxResult createComputePipelineState(Kernel &kernel)
     {
         GFX_ASSERT(kernel.pipeline_state_ == nullptr);
@@ -5685,7 +5709,7 @@ private:
     GfxResult installShaderState(Kernel &kernel, bool indexed = false, Sbt *sbt = nullptr)
     {
         uint32_t root_constants[64];
-        bool const is_compute = kernel.isCompute() || kernel.isRaytracing();
+        bool const is_compute = (kernel.isCompute() || kernel.isRaytracing());
         if(!program_handles_.has_handle(kernel.program_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot %s with a %s kernel pointing to an invalid program object",
                 is_compute ? "dispatch" : "draw", is_compute ? "compute" : "graphics");
@@ -6018,7 +6042,7 @@ private:
             }
             state_object_properties->Release();
         }
-        if(!is_compute && kernel.vertex_stride_ > 0)
+        if(kernel.vertex_stride_ > 0)
         {
             if(indexed && (force_install_index_buffer_ || bound_index_buffer_.handle != installed_index_buffer_.handle))
             {
@@ -7849,7 +7873,21 @@ private:
         GFX_ASSERT(kernel.root_signature_ == nullptr);
         GFX_ASSERT(kernel.pipeline_state_ == nullptr);
         GFX_ASSERT(kernel.parameters_ == nullptr);
-        if(kernel.isCompute())
+        if(kernel.isMesh())
+        {
+            kernel_type = "Mesh";
+            compileShader(program, kernel, kShaderType_AS, kernel.as_bytecode_, kernel.as_reflection_);
+            compileShader(program, kernel, kShaderType_MS, kernel.ms_bytecode_, kernel.ms_reflection_);
+            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            createRootSignature(kernel);
+            createMeshPipelineState(kernel, kernel.draw_state_);
+            // TODO: where should we query group size!? (gboisse)
+            if(kernel.ms_reflection_ == nullptr)
+                for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
+            else
+                kernel.ms_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
+        }
+        else if(kernel.isCompute())
         {
             kernel_type = "Compute";
             compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
@@ -7860,14 +7898,7 @@ private:
             else
                 kernel.cs_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
         }
-        else if(kernel.isRaytracing())
-        {
-            kernel_type = "Raytracing";
-            compileShader(program, kernel, kShaderType_LIB, kernel.lib_bytecode_, kernel.lib_reflection_);
-            createRootSignature(kernel);
-            result = createRaytracingPipelineState(kernel);
-        }
-        else
+        else if(kernel.isGraphics())
         {
             kernel_type = "Graphics";
             compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_);
@@ -7876,6 +7907,15 @@ private:
             createRootSignature(kernel);
             result = createGraphicsPipelineState(kernel, kernel.draw_state_);
         }
+        else if(kernel.isRaytracing())
+        {
+            kernel_type = "Raytracing";
+            compileShader(program, kernel, kShaderType_LIB, kernel.lib_bytecode_, kernel.lib_reflection_);
+            createRootSignature(kernel);
+            createRaytracingPipelineState(kernel);
+        }
+        else
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Cannot create unsupported kernel type");
         if(kernel.root_signature_ != nullptr)
         {
             GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
