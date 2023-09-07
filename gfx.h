@@ -433,6 +433,7 @@ GfxResult gfxFinish(GfxContext context);
 GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight = kGfxConstant_BackBufferCount);
 
 ID3D12Device *gfxGetDevice(GfxContext context);
+ID3D12CommandQueue *gfxGetCommandQueue(GfxContext context);
 ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context);
 GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *command_list);
 GfxResult gfxResetCommandListState(GfxContext context); // call this function before returning to gfx after externally modifying the state on the command list
@@ -4075,6 +4076,11 @@ public:
     ID3D12Device *getDevice() const
     {
         return device_;
+    }
+
+    ID3D12CommandQueue *getCommandQueue() const
+    {
+        return command_queue_;
     }
 
     ID3D12GraphicsCommandList *getCommandList() const
@@ -9115,6 +9121,13 @@ ID3D12Device *gfxGetDevice(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getDevice();
+}
+
+ID3D12CommandQueue *gfxGetCommandQueue(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return nullptr; // invalid context
+    return gfx->getCommandQueue();
 }
 
 ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context)
