@@ -4939,8 +4939,9 @@ private:
                 {
                     freeDescriptor(parameter.descriptor_slot_);
                 }
-                for(auto &parameter : *sbt_record.parameters_)
-                    parameter.second.unset();   // release parameter resources
+                if(sbt_record.parameters_)
+                    for(auto &parameter : *sbt_record.parameters_)
+                        parameter.second.unset();   // release parameter resources
             }
         }
     }
