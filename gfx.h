@@ -9126,7 +9126,7 @@ ID3D12Device *gfxGetDevice(GfxContext context)
 ID3D12CommandQueue *gfxGetCommandQueue(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr; // invalid context
+    if(!gfx) return nullptr;    // invalid context
     return gfx->getCommandQueue();
 }
 
