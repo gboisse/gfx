@@ -25,19 +25,11 @@ SOFTWARE.
 
 int main()
 {
-    auto window = gfxCreateWindow(1280, 720, "gfx - Mesh shaders");
-    auto gfx = gfxCreateContext(window, kGfxCreateContextFlag_EnableDebugLayer);
+    GfxWindow window = gfxCreateWindow(1280, 720, "gfx - Mesh shaders");
+    GfxContext gfx = gfxCreateContext(window, kGfxCreateContextFlag_EnableDebugLayer);
 
-    float vertices[] = {  0.5f, -0.5f, 0.0f,
-                          0.0f,  0.7f, 0.0f,
-                         -0.5f, -0.5f, 0.0f };
-    auto vertex_buffer = gfxCreateBuffer(gfx, sizeof(vertices), vertices);
-
-    auto program = gfxCreateProgram(gfx, "triangle");
-    auto kernel = gfxCreateGraphicsKernel(gfx, program);
-
-    GfxProgram test_program = gfxCreateProgram(gfx, "mesh");
-    GfxKernel  test_kernel  = gfxCreateMeshKernel(gfx, test_program);
+    GfxProgram program = gfxCreateProgram(gfx, "mesh");
+    GfxKernel kernel  = gfxCreateMeshKernel(gfx, program);
 
     for(float time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
     {
@@ -48,14 +40,14 @@ int main()
                           1.0f };
         gfxProgramSetParameter(gfx, program, "Color", color);
 
-        gfxCommandBindKernel(gfx, test_kernel);
+        gfxCommandBindKernel(gfx, kernel);
         gfxCommandDrawMesh(gfx, 1, 1, 1);
-
-        //gfxCommandBindVertexBuffer(gfx, vertex_buffer);
-        //gfxCommandDraw(gfx, 3);
 
         gfxFrame(gfx);
     }
+
+    gfxDestroyKernel(gfx, kernel);
+    gfxDestroyProgram(gfx, program);
 
     gfxDestroyContext(gfx);
     gfxDestroyWindow(window);

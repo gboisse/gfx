@@ -8065,11 +8065,12 @@ private:
             compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
             createRootSignature(kernel);
             result = createMeshPipelineState(kernel, kernel.draw_state_);
-            // TODO: where should we query group size!? (gboisse)
-            if(kernel.ms_reflection_ == nullptr)
-                for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
-            else
+            if(kernel.as_reflection_ != nullptr)
+                kernel.as_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
+            else if(kernel.ms_reflection_ != nullptr)
                 kernel.ms_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
+            else
+                for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
         }
         else if(kernel.isCompute())
         {
@@ -8077,10 +8078,10 @@ private:
             compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
             createRootSignature(kernel);
             createComputePipelineState(kernel);
-            if(kernel.cs_reflection_ == nullptr)
-                for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
-            else
+            if(kernel.cs_reflection_ != nullptr)
                 kernel.cs_reflection_->GetThreadGroupSize(&kernel.num_threads_[0], &kernel.num_threads_[1], &kernel.num_threads_[2]);
+            else
+                for(uint32_t i = 0; i < 3; ++i) kernel.num_threads_[i] = 1;
         }
         else if(kernel.isGraphics())
         {

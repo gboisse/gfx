@@ -22,7 +22,9 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
 
+float3 Color;
+
 float4 main() : SV_Target
 {
-    return float4(1.0f, 1.0f, 0.0f, 1.0f);
+    return float4(Color, 1.0f);
 }
