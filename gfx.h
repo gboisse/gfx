@@ -5633,20 +5633,20 @@ private:
         if(kernel.root_signature_ == nullptr) return kGfxResult_NoError;
         struct D3D12_MESH_PIPELINE_STATE_DESC
         {
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE;        ID3D12RootSignature           *pRootSignature;       } RootSignature;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS;                    D3D12_SHADER_BYTECODE         AS;                    } AS;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS;                    D3D12_SHADER_BYTECODE         MS;                    } MS;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;                    D3D12_SHADER_BYTECODE         PS;                    } PS;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND;                 D3D12_BLEND_DESC              BlendState;            } BlendState;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK;           UINT                          SampleMask;            } SampleMask;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER;            D3D12_RASTERIZER_DESC         RasterizerState;       } RasterizerState;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL;         D3D12_DEPTH_STENCIL_DESC      DepthStencilState;     } DepthStencilState;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY;    D3D12_PRIMITIVE_TOPOLOGY_TYPE PrimitiveTopologyType; } PrimitiveTopologyType;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS; D3D12_RT_FORMAT_ARRAY         RTVFormats;            } RTVFormats;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT;  DXGI_FORMAT                   DSVFormat;             } DSVFormat;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC;           DXGI_SAMPLE_DESC              SampleDesc;            } SampleDesc;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_NODE_MASK;             UINT                          NodeMask;              } NodeMask;
-            struct { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_FLAGS;                 D3D12_PIPELINE_STATE_FLAGS    Flags;                 } Flags;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_ROOT_SIGNATURE;        ID3D12RootSignature           *pRootSignature;       } RootSignature;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_AS;                    D3D12_SHADER_BYTECODE         AS;                    } AS;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_MS;                    D3D12_SHADER_BYTECODE         MS;                    } MS;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PS;                    D3D12_SHADER_BYTECODE         PS;                    } PS;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_BLEND;                 D3D12_BLEND_DESC              BlendState;            } BlendState;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_MASK;           UINT                          SampleMask;            } SampleMask;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RASTERIZER;            D3D12_RASTERIZER_DESC         RasterizerState;       } RasterizerState;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL;         D3D12_DEPTH_STENCIL_DESC      DepthStencilState;     } DepthStencilState;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_PRIMITIVE_TOPOLOGY;    D3D12_PRIMITIVE_TOPOLOGY_TYPE PrimitiveTopologyType; } PrimitiveTopologyType;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_RENDER_TARGET_FORMATS; D3D12_RT_FORMAT_ARRAY         RTVFormats;            } RTVFormats;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_DEPTH_STENCIL_FORMAT;  DXGI_FORMAT                   DSVFormat;             } DSVFormat;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_SAMPLE_DESC;           DXGI_SAMPLE_DESC              SampleDesc;            } SampleDesc;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_NODE_MASK;             UINT                          NodeMask;              } NodeMask;
+            struct alignas(void *) { const D3D12_PIPELINE_STATE_SUBOBJECT_TYPE Type = D3D12_PIPELINE_STATE_SUBOBJECT_TYPE_FLAGS;                 D3D12_PIPELINE_STATE_FLAGS    Flags;                 } Flags;
         };
         D3D12_MESH_PIPELINE_STATE_DESC
         pso_desc                                                       = {};
