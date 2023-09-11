@@ -49,9 +49,10 @@ int main()
         gfxProgramSetParameter(gfx, program, "Color", color);
 
         gfxCommandBindKernel(gfx, test_kernel);
-        gfxCommandBindVertexBuffer(gfx, vertex_buffer);
+        gfxCommandDrawMesh(gfx, 1, 1, 1);
 
-        gfxCommandDraw(gfx, 3);
+        //gfxCommandBindVertexBuffer(gfx, vertex_buffer);
+        //gfxCommandDraw(gfx, 3);
 
         gfxFrame(gfx);
     }
