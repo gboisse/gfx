@@ -23,7 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 #include "gfx_window.h"
 
-int main()
+int32_t main()
 {
     GfxWindow window = gfxCreateWindow(1280, 720, "gfx - Mesh shaders");
     GfxContext gfx = gfxCreateContext(window);
