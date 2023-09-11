@@ -6431,7 +6431,7 @@ private:
         {
             destroyBuffer(raytracing_scratch_buffer_);
             scratch_data_size = GFX_ALIGN(scratch_data_size, 65536);
-            raytracing_scratch_buffer_ = createBuffer(scratch_data_size, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+            raytracing_scratch_buffer_ = createBuffer(scratch_data_size, nullptr, kGfxCpuAccess_None);
             if(!raytracing_scratch_buffer_)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create raytracing scratch buffer");
             strcpy(raytracing_scratch_buffer_.name, "gfx_RaytracingScratchBuffer");
