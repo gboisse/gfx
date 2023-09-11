@@ -4655,6 +4655,7 @@ private:
     static inline D3D12_GRAPHICS_PIPELINE_STATE_DESC GetDefaultPSODesc()
     {
         D3D12_GRAPHICS_PIPELINE_STATE_DESC pso_desc = {};
+        static_assert(kGfxConstant_MaxRenderTarget <= ARRAYSIZE(pso_desc.BlendState.RenderTarget), "Exceeded maximum number of render targets");
         for(uint32_t i = 0; i < ARRAYSIZE(pso_desc.BlendState.RenderTarget); ++i)
             pso_desc.BlendState.RenderTarget[i] = GetDefaultBlendState();
         pso_desc.SampleMask                            = UINT_MAX;

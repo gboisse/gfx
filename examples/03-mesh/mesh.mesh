@@ -29,7 +29,7 @@ struct Vertex
 
 [outputtopology("triangle")]
 [numthreads(1, 1, 1)]
-void main(in uint local_id : SV_GroupThreadID, out vertices Vertex verts[3], out indices uint3 triangles[1])
+void main(out vertices Vertex verts[3], out indices uint3 triangles[1])
 {
     SetMeshOutputCounts(3, 1);
 
