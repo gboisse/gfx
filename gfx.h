@@ -2723,6 +2723,11 @@ public:
     GfxKernel createMeshKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count)
     {
         GfxKernel mesh_kernel = {};
+        if(dxr_device_ == nullptr)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Mesh shaders aren't supported on the selected device; cannot create mesh kernel");
+            return mesh_kernel; // invalid operation
+        }
         if(!program_handles_.has_handle(program.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a mesh kernel using an invalid program object");
