@@ -6061,11 +6061,11 @@ private:
                 for(auto &shader_record : sbt->shader_records_[i])
                 {
                     Sbt::ShaderRecord &sbt_record = shader_record.second;
-                    if (sbt_record.id_ == sbt_record.commited_id_ && !invalidate_sbt_descriptors && !invalidate_sbt_parameters) continue;
+                    if(sbt_record.id_ == sbt_record.commited_id_ && !invalidate_sbt_descriptors && !invalidate_sbt_parameters) continue;
                     auto local_root_signature_association = kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
                     if(local_root_signature_association != kernel.local_root_signature_associations_.end())
                     {
-                        if (invalidate_sbt_parameters)
+                        if(invalidate_sbt_parameters)
                         {
                             for(auto &bound_parameter : sbt_record.bound_parameters_)
                             {
@@ -6210,7 +6210,7 @@ private:
                                 uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu
                                                                 ? parameter.descriptor_slot_
                                                                 : dummy_descriptors_[parameter.type_]);
-                                if (parameter.descriptor_slot_ != 0xFFFFFFFFu)
+                                if(parameter.descriptor_slot_ != 0xFFFFFFFFu)
                                     initDescriptorParameter(program, invalidate_sbt_descriptors, parameter, descriptor_slot);
                                 for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                                 {
