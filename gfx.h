@@ -33,8 +33,8 @@ SOFTWARE.
 //!
 
 class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]; uint32_t vendor_id; public:
-                   inline bool operator ==(GfxContext const &other) const  { return handle == other.handle; }
-                   inline bool operator !=(GfxContext const &other) const  { return handle != other.handle; }
+                   inline bool operator ==(GfxContext const &other) const { return handle == other.handle; }
+                   inline bool operator !=(GfxContext const &other) const { return handle != other.handle; }
                    inline GfxContext() { memset(this, 0, sizeof(*this)); }
                    inline uint32_t getVendorId() const { return vendor_id; }
                    inline char const *getName() const { return name; }
