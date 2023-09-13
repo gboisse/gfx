@@ -7,8 +7,6 @@ set_target_properties(00-hellotriangle PROPERTIES FOLDER "examples")
 set_target_properties(00-hellotriangle PROPERTIES VS_DEBUGGER_WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 
 file(GLOB SHADER_FILES CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.comp
-    ${CMAKE_CURRENT_SOURCE_DIR}/*.geom
     ${CMAKE_CURRENT_SOURCE_DIR}/*.frag
     ${CMAKE_CURRENT_SOURCE_DIR}/*.vert)
 
