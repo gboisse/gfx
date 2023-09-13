@@ -41,7 +41,8 @@ class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; pu
 enum GfxCreateWindowFlag
 {
     kGfxCreateWindowFlag_MaximizeWindow = 1 << 0,
-    kGfxCreateWindowFlag_HideWindow     = 1 << 1
+    kGfxCreateWindowFlag_NoResizeWindow = 1 << 1,
+    kGfxCreateWindowFlag_HideWindow     = 1 << 2
 };
 typedef uint32_t GfxCreateWindowFlags;
 
@@ -104,7 +105,8 @@ public:
 
         RECT window_rect = { 0, 0, (LONG)window_width, (LONG)window_height };
 
-        DWORD const window_style = WS_OVERLAPPEDWINDOW;
+        DWORD const window_style = WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
+            WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0);
 
         AdjustWindowRect(&window_rect, window_style, FALSE);
 

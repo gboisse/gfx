@@ -28,7 +28,6 @@ SOFTWARE.
 #include <cstdarg>      // va_list, etc.
 #include <cstdint>      // uint32_t, etc.
 #include <algorithm>    // std::min(), std::max()
-#include <memory>       // std::unique_ptr
 #include <string>       // std::string
 #include <utility>      // std::swap(), std::move()
 #include <vector>       // std::vector
