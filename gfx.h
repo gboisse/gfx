@@ -9072,7 +9072,7 @@ GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const
 GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const mesh_kernel = {};
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return mesh_kernel;    // invalid context
     return gfx->createMeshKernel(program, draw_state, entry_point, defines, define_count);
 }
