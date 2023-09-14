@@ -24,6 +24,7 @@ SOFTWARE.
 #ifndef GFX_INCLUDE_GFX_H
 #define GFX_INCLUDE_GFX_H
 
+#define NOMINMAX
 #include "d3d12.h"
 #include "dxgi1_4.h"
 #include "gfx_core.h"
