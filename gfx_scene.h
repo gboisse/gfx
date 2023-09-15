@@ -2207,7 +2207,6 @@ private:
             if(it0 == animated_nodes.end())
                 continue;
             auto const &animations = propagated_node_animations[gltf_scene.nodes[j]];
-            GFX_ASSERT(animations.size() > 0);
             for(auto const &animation : animations)
             {
                 GltfAnimation &animation_object = gltf_animations_[GetObjectIndex(animation)];
