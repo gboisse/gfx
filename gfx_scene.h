@@ -1141,10 +1141,6 @@ private:
                 break;
         return true;
     }
-    
-    static inline void TransformGltfSkin(GfxSkin &skin, glm::dmat4 const &transform)
-    {
-    }
 
     static inline void TransformGltfCamera(GfxCamera &camera, glm::dmat4 const &transform)
     {
