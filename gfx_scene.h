@@ -2276,9 +2276,10 @@ private:
         ktx_uint64_t faceLodSize, void *pixels, void *userdata)
     {
         GfxRef<GfxImage> *image_ref = (GfxRef<GfxImage> *)userdata;
-        uint8_t *back = &*((*image_ref)->data.end());
         uint64_t current_pos = (*image_ref)->data.size();
-        (*image_ref)->data.resize((*image_ref)->data.size() + faceLodSize);
+        size_t const size = (*image_ref)->data.size();
+        (*image_ref)->data.resize(size + faceLodSize);
+        uint8_t *back = &((*image_ref)->data[size]);
         memcpy(back, pixels, faceLodSize);
         return KTX_SUCCESS;
     }

@@ -18,17 +18,15 @@
 ///                 RgpPIXBeginEventOnContextCpu, RgpPIXEndEventOnContextCpu and
 ///                 RgpPIXSetMarkerOnContextCpu). Also check the RGP user
 ///                 documentation for a complete user guide.
-///
-/// \warning Only supports the unicode character set (does not support multi-byte)
 //==============================================================================
 #ifndef _AMD_PIX3_H_
 #define _AMD_PIX3_H_
 
-#include <stdio.h>
 #include <stdarg.h>
+#include <stdio.h>
+
 #include "AmdExtD3D.h"
 #include "AmdExtD3DDeviceApi.h"
-
 
 #define MAX_MARKER_STRING_LENGTH 1024
 
@@ -83,7 +81,9 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
                 {
                     // use the extension factory object to create a device extension object that contains the marker API
                     pAmdExtObject->CreateInterface(pDevice, __uuidof(IAmdExtD3DDevice1), reinterpret_cast<void**>(&tls_pAmdExtDeviceObject));
+                    pAmdExtObject->Release();
                 }
+                pDevice->Release();
             }
         }
     }
@@ -94,62 +94,44 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
     }
 }
 
-inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatStringInChar, ...)
-{
-    InitializeAmdExtDeviceObject(pCommandList);
-
-    if (nullptr != tls_pAmdExtDeviceObject)
-    {
-        // create a new marker string that includes all the variadic args
-        char    markerString[MAX_MARKER_STRING_LENGTH];
-        va_list args;
-        va_start(args, formatStringInChar);
-        vsprintf_s(markerString, formatStringInChar, args);
-        va_end(args);
-
-        // set the rgp marker
-        tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerString);
-    }
-}
-
 inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCWSTR formatString, ...)
 {
     InitializeAmdExtDeviceObject(pCommandList);
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
-        // convert from wchar_t to char string
-        char   formatStringInChar[MAX_MARKER_STRING_LENGTH];
-        size_t retValue = 0;
-        wcstombs_s(&retValue, formatStringInChar, MAX_MARKER_STRING_LENGTH, formatString, MAX_MARKER_STRING_LENGTH);
-
         // create a new marker string that includes all the variadic args
-        char    markerString[MAX_MARKER_STRING_LENGTH];
+        wchar_t markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
         va_start(args, formatString);
-        vsprintf_s(markerString, formatStringInChar, args);
+        vswprintf_s(markerString, formatString, args);
         va_end(args);
 
+        // convert from wchar_t to char string
+        char   markerStringInChar[MAX_MARKER_STRING_LENGTH];
+        size_t retValue = 0;
+        wcstombs_s(&retValue, markerStringInChar, MAX_MARKER_STRING_LENGTH, markerString, MAX_MARKER_STRING_LENGTH);
+
         // set the rgp marker
-        tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerString);
+        tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerStringInChar);
     }
 }
 
-inline void RgpPushMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatStringInChar, ...)
+inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatString, ...)
 {
     InitializeAmdExtDeviceObject(pCommandList);
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
         // create a new marker string that includes all the variadic args
-        char    markerString[MAX_MARKER_STRING_LENGTH];
+        char markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
-        va_start(args, formatStringInChar);
-        vsprintf_s(markerString, formatStringInChar, args);
+        va_start(args, formatString);
+        vsprintf_s(markerString, formatString, args);
         va_end(args);
 
-        // push the rgp marker
-        tls_pAmdExtDeviceObject->PushMarker(pCommandList, markerString);
+        // set the rgp marker
+        tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerString);
     }
 }
 
@@ -159,16 +141,34 @@ inline void RgpPushMarker(ID3D12GraphicsCommandList* pCommandList, PCWSTR format
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
-        // convert from wchar_t to char string
-        char   formatStringInChar[MAX_MARKER_STRING_LENGTH];
-        size_t retValue = 0;
-        wcstombs_s(&retValue, formatStringInChar, MAX_MARKER_STRING_LENGTH, formatString, MAX_MARKER_STRING_LENGTH);
-
         // create a new marker string that includes all the variadic args
-        char    markerString[MAX_MARKER_STRING_LENGTH];
+        wchar_t markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
         va_start(args, formatString);
-        vsprintf_s(markerString, formatStringInChar, args);
+        vswprintf_s(markerString, formatString, args);
+        va_end(args);
+
+        // convert from wchar_t to char string
+        char   markerStringInChar[MAX_MARKER_STRING_LENGTH];
+        size_t retValue = 0;
+        wcstombs_s(&retValue, markerStringInChar, MAX_MARKER_STRING_LENGTH, markerString, MAX_MARKER_STRING_LENGTH);
+
+        // push the rgp marker
+        tls_pAmdExtDeviceObject->PushMarker(pCommandList, markerStringInChar);
+    }
+}
+
+inline void RgpPushMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatString, ...)
+{
+    InitializeAmdExtDeviceObject(pCommandList);
+
+    if (nullptr != tls_pAmdExtDeviceObject)
+    {
+        // create a new marker string that includes all the variadic args
+        char markerString[MAX_MARKER_STRING_LENGTH];
+        va_list args;
+        va_start(args, formatString);
+        vsprintf_s(markerString, formatString, args);
         va_end(args);
 
         // push the rgp marker
@@ -186,12 +186,17 @@ inline void RgpPopMarker(ID3D12GraphicsCommandList* pCommandList)
     }
 }
 
+inline void RgpSetMarker(ID3D12CommandQueue*, PCWSTR, ...)
+{
+    // there is no queue-based marker yet
+}
+
 inline void RgpSetMarker(ID3D12CommandQueue*, PCSTR, ...)
 {
     // there is no queue-based marker yet
 }
 
-inline void RgpSetMarker(ID3D12CommandQueue*, PCWSTR, ...)
+inline void RgpPushMarker(ID3D12CommandQueue*, PCWSTR, ...)
 {
     // there is no queue-based marker yet
 }
@@ -201,10 +206,6 @@ inline void RgpPushMarker(ID3D12CommandQueue*, PCSTR, ...)
     // there is no queue-based marker yet
 }
 
-inline void RgpPushMarker(ID3D12CommandQueue*, PCWSTR, ...)
-{
-    // there is no queue-based marker yet
-}
 
 inline void RgpPopMarker(ID3D12CommandQueue*)
 {
@@ -221,8 +222,7 @@ inline void RgpPopMarker(ID3D12CommandQueue*)
     PIXEndEventOnContextCpu(context);
 
 #define RgpPIXSetMarkerOnContextCpu(context, color, formatString, ...) \
-    RgpSetMarker(context, formatString, args...);               \
+    RgpSetMarker(context, formatString, args...);                      \
     PIXSetMarkerOnContextCpu(context, color, formatString, args...);
-
 
 #endif  //_AMD_PIX3_H_
