@@ -485,6 +485,9 @@ template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene scene, uint64_t 
 #include <vulkan/vulkan.h>
 #include <glm/gtx/quaternion.hpp>
 
+#pragma warning(push)
+#pragma warning(disable:4996)   // this function or variable may be unsafe
+
 class GfxSceneInternal
 {
     GFX_NON_COPYABLE(GfxSceneInternal);
@@ -2298,6 +2301,8 @@ private:
         return kGfxResult_NoError;
     }
 };
+
+#pragma warning(pop)
 
 GfxArray<GfxScene> GfxSceneInternal::scenes_;
 GfxHandles         GfxSceneInternal::scene_handles_("scene");
