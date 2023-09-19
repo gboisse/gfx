@@ -468,23 +468,22 @@ template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene scene, uint64_t 
 #include <map>
 #include <set>
 #include <functional>
+#include <ios>
+#include <fstream>
 #define CGLTF_IMPLEMENTATION
-#include "cgltf.h"              // glTF loader
 #pragma warning(push)
-#pragma warning(disable:4244)   // buffer will be overrun
-#include "tiny_obj_loader.cc"   // obj loader
+#pragma warning(disable:4789)   // buffer will be overrun
+#include <cgltf.h>              // glTF loader
 #pragma warning(pop)
+#include <tiny_obj_loader.h>   // obj loader
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#define TINYEXR_IMPLEMENTATION
-#define TINYEXR_USE_MINIZ    0
-#define TINYEXR_USE_STB_ZLIB 1
-#include "tinyexr.h"
+#include <stb_image.h>
+#include <tinyexr.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-#include "ktx.h"
-#include "vulkan/vulkan.h"
-#include "glm/gtx/quaternion.hpp"
+#include <stb_image_write.h>
+#include <ktx.h>
+#include <vulkan/vulkan.h>
+#include <glm/gtx/quaternion.hpp>
 
 class GfxSceneInternal
 {
