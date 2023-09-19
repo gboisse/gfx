@@ -688,8 +688,8 @@ class GfxSceneInternal
     template<> inline GfxHandles &object_handles_<GfxInstance>() { return instance_handles_; }
 
 public:
-    GfxSceneInternal(GfxScene &scene) : animation_handles_("animation"), skin_handles_("skin"), camera_handles_("camera"), image_handles_("image")
-                                      , material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
+    GfxSceneInternal(GfxScene &scene) : gltf_node_handles_("gltf_node"), animation_handles_("animation"), skin_handles_("skin"), camera_handles_("camera")
+                                      , image_handles_("image"), material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
                                       { scene.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxSceneInternal() { terminate(); }
 
@@ -739,6 +739,7 @@ public:
     GfxResult clear()
     {
         clearObjects<GfxAnimation>();
+        clearObjects<GfxSkin>();
         clearObjects<GfxCamera>();
         clearObjects<GfxLight>();
         clearObjects<GfxImage>();
