@@ -1,6 +1,6 @@
 add_executable(03-mesh ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
-target_link_libraries(03-mesh PUBLIC common)
+target_link_libraries(03-mesh PUBLIC gfx)
 
 set_target_properties(03-mesh PROPERTIES FOLDER "examples")
 
