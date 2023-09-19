@@ -37,7 +37,7 @@ target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3
 target_compile_features(gfx PUBLIC cxx_std_14)
 target_compile_options(gfx PRIVATE
     -DUSE_PIX
-    /W3 /WX
+    /W3 /WX /external:anglebrackets /external:W0 /analyze:external-
     -D_HAS_EXCEPTIONS=0
 )
 
@@ -142,9 +142,12 @@ if(GFX_ENABLE_SCENE)
     target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr)
     target_link_libraries(gfx PUBLIC glm::glm)
-    target_link_libraries(gfx PRIVATE tinyobjloader ktx)
+    target_link_libraries(gfx PRIVATE tinyobjloader ktx tinyexr)
 
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE)
+	
+    #tinyexr cmake is currently broken when not using miniz
+    target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
 
     # Organize third party projects
     set_target_properties(tinyobjloader PROPERTIES FOLDER "third_party")

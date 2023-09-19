@@ -1,6 +1,6 @@
 add_executable(01-rtao ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
-target_link_libraries(01-rtao PUBLIC common)
+target_link_libraries(01-rtao PUBLIC gfx)
 
 set_target_properties(01-rtao PROPERTIES FOLDER "examples")
 
