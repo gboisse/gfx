@@ -4126,9 +4126,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create scratch memory for sort");
         }
         GfxKernel const bound_kernel = bound_kernel_;
-        if(count == nullptr)
-            setProgramConstants(sort_kernels.sort_program_, "g_Count", &num_keys, sizeof(num_keys));
-        else
+        setProgramConstants(sort_kernels.sort_program_, "g_Count", &num_keys, sizeof(num_keys));
+        if(count != nullptr)
         {
             setProgramBuffer(sort_kernels.sort_program_, "g_CountBuffer", *count);
             setProgramBuffer(sort_kernels.sort_program_, "g_ArgsBuffer", args_buffer);
@@ -7063,11 +7062,11 @@ private:
             "#define KEYS_PER_THREAD     4\r\n"
             "#define KEYS_PER_GROUP      (GROUP_SIZE * KEYS_PER_THREAD)\r\n"
             "\r\n"
-            "uint g_Bitshift;\r\n";
+            "uint g_Count;\r\n"
+            "uint g_Bitshift;\r\n"
+            "\r\n";
         if(count != nullptr)
-            sort_program_source += "\r\nRWStructuredBuffer<uint> g_CountBuffer;\r\n";
-        else
-            sort_program_source += "uint g_Count;\r\n\r\n";
+            sort_program_source += "RWStructuredBuffer<uint> g_CountBuffer;\r\n";
         sort_program_source +=
             "RWStructuredBuffer<uint> g_InputKeys;\r\n"
             "RWStructuredBuffer<uint> g_OutputKeys;\r\n"
@@ -7091,7 +7090,7 @@ private:
             "uint GetCount()\r\n"
             "{\r\n";
         if(count != nullptr)
-            sort_program_source += "    return g_CountBuffer[0];\r\n";
+            sort_program_source += "    return min(g_CountBuffer[0], g_Count);\r\n";
         else
             sort_program_source += "    return g_Count;\r\n";
         sort_program_source +=
@@ -7152,7 +7151,7 @@ private:
             "        {\r\n"
             "            uint bin_index = ((key >> g_Bitshift) >> shift) & 0x3;\r\n"
             "\r\n"
-            "            uint local_histogram = 1 << (bin_index * 8);\r\n"
+            "            uint local_histogram = 1u << (bin_index * 8);\r\n"
             "            uint local_histogram_scanned = GroupScan(local_histogram, lidx);\r\n"
             "            if(lidx == (GROUP_SIZE - 1))\r\n"
             "                lds_scratch[0] = local_histogram_scanned + local_histogram;\r\n"
