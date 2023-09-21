@@ -387,7 +387,7 @@ struct GfxMesh
 
     std::vector<GfxVertex> vertices;
     std::vector<uint32_t>  indices;
-    
+
     std::vector<GfxJoint>  joints;    // should contain list of per-vertex joint indices and weights values for skinning on the GPU (see `GfxJoint' structure)
 };
 
@@ -602,7 +602,7 @@ class GfxSceneInternal
     GfxArray<uint64_t> animation_refs_;
     GfxArray<GfxMetadata> animation_metadata_;
     GfxHandles animation_handles_;
-    
+
     GfxArray<GfxSkin> skins_;
     GfxArray<uint64_t> skin_refs_;
     GfxArray<GfxMetadata> skin_metadata_;
@@ -651,7 +651,7 @@ class GfxSceneInternal
     template<> inline GfxArray<uint64_t> &object_refs_<GfxAnimation>() { return animation_refs_; }
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxAnimation>() { return animation_metadata_; }
     template<> inline GfxHandles &object_handles_<GfxAnimation>() { return animation_handles_; }
-    
+
     template<> inline GfxArray<GfxSkin> &objects_<GfxSkin>() { return skins_; }
     template<> inline GfxArray<uint64_t> &object_refs_<GfxSkin>() { return skin_refs_; }
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxSkin>() { return skin_metadata_; }
