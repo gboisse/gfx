@@ -184,6 +184,7 @@ GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context);
 GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStructure acceleration_structure); // automatically releases all raytracing primitives
 
 GfxResult gfxAccelerationStructureUpdate(GfxContext context, GfxAccelerationStructure acceleration_structure);
+uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAccelerationStructure acceleration_structure);  // in bytes
 uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context, GfxAccelerationStructure acceleration_structure);
 GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure);
 
@@ -208,6 +209,7 @@ GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPr
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
 GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
+uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);    // in bytes
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
@@ -850,6 +852,7 @@ class GfxInternal
         bool needs_update_ = false;
         bool needs_rebuild_ = false;
         GfxBuffer bvh_buffer_ = {};
+        uint64_t bvh_data_size_ = 0;
         std::vector<GfxRaytracingPrimitive> raytracing_primitives_;
     };
     GfxArray<AccelerationStructure> acceleration_structures_;
@@ -864,6 +867,7 @@ class GfxInternal
         uint32_t instance_contribution_to_hit_group_index_ = 0;
         uint8_t instance_mask_ = 0xFFu;
         GfxBuffer bvh_buffer_ = {};
+        uint64_t bvh_data_size_ = 0;
         uint32_t index_stride_ = 0;
         GfxBuffer index_buffer_ = {};
         uint32_t vertex_stride_ = 0;
@@ -2306,6 +2310,7 @@ public:
             if(!gfx_acceleration_structure.bvh_buffer_)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create acceleration structure buffer");
         }
+        gfx_acceleration_structure.bvh_data_size_ = (uint64_t)tlas_info.ResultDataMaxSizeInBytes;
         GFX_ASSERT(buffer_handles_.has_handle(gfx_acceleration_structure.bvh_buffer_.handle));
         GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
         Buffer &gfx_buffer = buffers_[gfx_acceleration_structure.bvh_buffer_];
@@ -2322,6 +2327,18 @@ public:
         GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
         dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
         return kGfxResult_NoError;
+    }
+
+    uint64_t getAccelerationStructureDataSize(GfxAccelerationStructure const &acceleration_structure)
+    {
+        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid acceleration structure object");
+            return 0;
+        }
+        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+        return gfx_acceleration_structure.bvh_data_size_;
     }
 
     uint32_t getAccelerationStructureRaytracingPrimitiveCount(GfxAccelerationStructure const &acceleration_structure)
@@ -2488,6 +2505,18 @@ public:
         GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
         gfx_raytracing_primitive.instance_contribution_to_hit_group_index_ = instance_contribution_to_hit_group_index;
         return kGfxResult_NoError;
+    }
+
+    uint64_t getRaytracingPrimitiveDataSize(GfxRaytracingPrimitive const &raytracing_primitive)
+    {
+        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid raytracing primitive object");
+            return 0;
+        }
+        RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        return gfx_raytracing_primitive.bvh_data_size_;
     }
 
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
@@ -6544,6 +6573,7 @@ private:
             if(!gfx_raytracing_primitive.bvh_buffer_)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create raytracing primitive buffer");
         }
+        gfx_raytracing_primitive.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
         GFX_ASSERT(buffer_handles_.has_handle(gfx_raytracing_primitive.bvh_buffer_.handle));
         GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
         Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.bvh_buffer_];
@@ -8850,6 +8880,13 @@ GfxResult gfxAccelerationStructureUpdate(GfxContext context, GfxAccelerationStru
     return gfx->updateAccelerationStructure(acceleration_structure);
 }
 
+uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAccelerationStructure acceleration_structure)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0;  // invalid context
+    return gfx->getAccelerationStructureDataSize(acceleration_structure);
+}
+
 uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context, GfxAccelerationStructure acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -8919,6 +8956,13 @@ GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContex
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setRaytracingPrimitiveInstanceContributionToHitGroupIndex(raytracing_primitive, instance_contribution_to_hit_group_index);
+}
+
+uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0;  // invalid context
+    return gfx->getRaytracingPrimitiveDataSize(raytracing_primitive);
 }
 
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
