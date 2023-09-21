@@ -6280,7 +6280,7 @@ private:
             }
             state_object_properties->Release();
         }
-        if(!is_compute)
+        if(kernel.isGraphics())
         {
             if(indexed && (force_install_index_buffer_ || bound_index_buffer_.handle != installed_index_buffer_.handle))
             {

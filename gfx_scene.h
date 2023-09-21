@@ -26,7 +26,6 @@ SOFTWARE.
 
 #include "gfx.h"
 #include "glm/glm.hpp"
-#include "glm/gtc/type_ptr.hpp"
 
 template<typename TYPE> class GfxRef;
 template<typename TYPE> class GfxConstRef;
@@ -525,6 +524,7 @@ template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene scene, uint64_t 
 #include "ktx.h"
 #include "vulkan/vulkan.h"
 #include "glm/gtx/quaternion.hpp"
+#include "glm/gtc/type_ptr.hpp"
 
 class GfxSceneInternal
 {
