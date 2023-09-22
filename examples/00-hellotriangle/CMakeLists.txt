@@ -1,6 +1,6 @@
 add_executable(00-hellotriangle ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
-target_link_libraries(00-hellotriangle PUBLIC common)
+target_link_libraries(00-hellotriangle PUBLIC gfx)
 
 set_target_properties(00-hellotriangle PROPERTIES FOLDER "examples")
 

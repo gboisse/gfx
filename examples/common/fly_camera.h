@@ -23,7 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 #pragma once
 
-#include "gfx_scene.h"
+#include "glm/glm.hpp"
 #include "gfx_window.h"
 
 struct FlyCamera

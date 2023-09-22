@@ -68,8 +68,10 @@ bool gfxWindowIsMaximized(GfxWindow window);
 
 #pragma once
 
+#    ifdef GFX_ENABLE_GUI
 #include "gfx_imgui.h"  // for (optional) ImGui integration
 #include "backends/imgui_impl_win32.h"
+#   endif
 
 class GfxWindowInternal
 {
@@ -136,8 +138,10 @@ public:
     {
         if(window_)
             DestroyWindow(window_);
+#    ifdef GFX_ENABLE_GUI
         if(ImGui_ImplWin32_GetBackendData() != nullptr)
             ImGui_ImplWin32_Shutdown();
+#   endif
 
         return kGfxResult_NoError;
     }
@@ -215,8 +219,10 @@ private:
         GfxWindowInternal *gfx_window = (GfxWindowInternal *)GetWindowLongPtrA(window, GWLP_USERDATA);
         if(gfx_window != nullptr)
         {
+#    ifdef GFX_ENABLE_GUI
             if(ImGui_ImplWin32_GetBackendData() == nullptr && gfxImGuiIsInitialized())
                 ImGui_ImplWin32_Init(gfx_window->window_);
+#   endif
             switch(message)
             {
             case WM_SIZE:
@@ -249,8 +255,10 @@ private:
             case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
                 if(w_param < ARRAYSIZE(is_key_down_))
                     gfx_window->updateKeyBinding(message, (uint32_t)w_param);
+#    ifdef GFX_ENABLE_GUI
                 if(ImGui_ImplWin32_GetBackendData() != nullptr)
                     ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
+#   endif
                 break;
             default:
                 break;

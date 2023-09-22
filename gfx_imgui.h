@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#ifndef GFX_INCLUDE_GFX_IMGUI_H
+#if !defined(GFX_INCLUDE_GFX_IMGUI_H) && defined(GFX_ENABLE_GUI)
 #define GFX_INCLUDE_GFX_IMGUI_H
 
 // Required to support unicode values above 0x10000: https://github.com/gboisse/gfx/pull/71

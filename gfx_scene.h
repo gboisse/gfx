@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#ifndef GFX_INCLUDE_GFX_SCENE_H
+#if !defined(GFX_INCLUDE_GFX_SCENE_H) && defined(GFX_ENABLE_SCENE)
 #define GFX_INCLUDE_GFX_SCENE_H
 
 #include "gfx.h"
@@ -504,27 +504,26 @@ template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene scene, uint64_t 
 #include <map>
 #include <set>
 #include <functional>
+#include <ios>
+#include <fstream>
+#define CGLTF_IMPLEMENTATION
 #pragma warning(push)
 #pragma warning(disable:4789)   // buffer will be overrun
-#define CGLTF_IMPLEMENTATION
-#include "cgltf.h"              // glTF loader
-#include "tiny_obj_loader.cc"   // obj loader
+#include <cgltf.h>              // glTF loader
 #pragma warning(pop)
+#include <tiny_obj_loader.h>   // obj loader
 #define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
-#pragma warning(push)
-#pragma warning(disable : 4018)
-#define TINYEXR_IMPLEMENTATION
-#define TINYEXR_USE_MINIZ    0
-#define TINYEXR_USE_STB_ZLIB 1
-#include "tinyexr.h"
+#include <stb_image.h>
+#include <tinyexr.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
-#pragma warning(pop)
-#include "ktx.h"
-#include "vulkan/vulkan.h"
-#include "glm/gtx/quaternion.hpp"
-#include "glm/gtc/type_ptr.hpp"
+#include <stb_image_write.h>
+#include <ktx.h>
+#include <vulkan/vulkan.h>
+#include <glm/gtx/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
+
+#pragma warning(push)
+#pragma warning(disable:4996)   // this function or variable may be unsafe
 
 class GfxSceneInternal
 {
@@ -2551,6 +2550,8 @@ private:
         return kGfxResult_NoError;
     }
 };
+
+#pragma warning(pop)
 
 GfxArray<GfxScene> GfxSceneInternal::scenes_;
 GfxHandles         GfxSceneInternal::scene_handles_("scene");

@@ -23,4 +23,6 @@ SOFTWARE.
 ****************************************************************************/
 #define GFX_IMPLEMENTATION_DEFINE
 #include "gfx_window.h"
+#ifdef GFX_ENABLE_SCENE
 #include "gfx_scene.h"
+#endif
