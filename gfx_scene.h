@@ -2195,23 +2195,32 @@ private:
                     + gltf_skin.inverse_bind_matrices->buffer_view->offset,
                 gltf_skin.inverse_bind_matrices->buffer_view->size);
         }
-        for(std::set<uint64_t>::const_iterator it = unparented_nodes.begin(); it != unparented_nodes.end(); ++it)
-        {
-            gltf_node_handles_.free_handle(*it);
-            gltf_nodes_.erase(GetObjectIndex(*it));
-            gltf_animated_nodes_.erase(GetObjectIndex(*it));
-        }
         for(size_t j = 0; j < gltf_scene.nodes_count; ++j)
         {
             auto it0 = animated_nodes.find(gltf_scene.nodes[j]);
             if(it0 == animated_nodes.end())
                 continue;
             auto const &animations = propagated_node_animations[gltf_scene.nodes[j]];
-            for(auto const &animation : animations)
+            if(animations.empty())
             {
-                GltfAnimation &animation_object = gltf_animations_[GetObjectIndex(animation)];
-                animation_object.nodes_.push_back((*it0).second);
+                // Cleanup unreferred nodes
+                unparented_nodes.insert(it0->second);
             }
+            else
+            {
+                for(auto const &animation : animations)
+                {
+                    GltfAnimation &animation_object = gltf_animations_[GetObjectIndex(animation)];
+                    animation_object.nodes_.push_back((*it0).second);
+                }
+            }
+        }
+        for(std::set<uint64_t>::const_iterator it = unparented_nodes.begin(); it != unparented_nodes.end(); ++it)
+        {
+            gltf_node_handles_.free_handle(*it);
+            gltf_nodes_.erase(GetObjectIndex(*it));
+            if(gltf_animated_nodes_.has(GetObjectIndex(*it)))
+                gltf_animated_nodes_.erase(GetObjectIndex(*it));
         }
         cgltf_free(gltf_model);
         return kGfxResult_NoError;
