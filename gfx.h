@@ -1090,7 +1090,7 @@ class GfxInternal
 
     struct Kernel
     {
-        inline bool isCompute() const { return (num_threads_ != nullptr && *num_threads_ > 0); }
+        inline bool isCompute() const { return num_threads_[0] > 0; }
         inline bool isRaytracing() const { return (lib_bytecode_ != nullptr); }
 
         struct Parameter
@@ -1163,7 +1163,6 @@ class GfxInternal
         std::vector<String> subobjects_;
         std::map<std::wstring, LocalRootSignatureAssociation> local_root_signature_associations_;
         uint64_t descriptor_heap_id_ = 0;
-        uint32_t *num_threads_ = nullptr;
         IDxcBlob *cs_bytecode_ = nullptr;
         IDxcBlob *vs_bytecode_ = nullptr;
         IDxcBlob *gs_bytecode_ = nullptr;
@@ -1180,6 +1179,7 @@ class GfxInternal
         ID3D12PipelineState *pipeline_state_ = nullptr;
         ID3D12StateObject *state_object_ = nullptr;
         Parameter *parameters_ = nullptr;
+        uint32_t num_threads_[3] = { 0 };
         uint32_t parameter_count_ = 0;
         uint32_t vertex_stride_ = 0;
     };
@@ -2896,7 +2896,7 @@ public:
         gfx_kernel.entry_point_ = entry_point;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
+        for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
         createKernel(gfx_program, gfx_kernel);  // create compute kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {
@@ -2935,7 +2935,6 @@ public:
         gfx_kernel.entry_point_ = entry_point;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         result = createKernel(gfx_program, gfx_kernel); // create graphics kernel
         if(result != kGfxResult_NoError)
         {
@@ -2988,7 +2987,6 @@ public:
             mbstowcs(wgroup_name, local_root_signature_associations[i].shader_group_name, ARRAYSIZE(wgroup_name));
             gfx_kernel.local_root_signature_associations_[wgroup_name] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
         }
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         gfx_kernel.lib_bytecode_ = (IDxcBlob *)~0ull;
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i) gfx_kernel.sbt_record_stride_[i] = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
         createKernel(gfx_program, gfx_kernel);  // create raytracing kernel
@@ -3098,7 +3096,6 @@ public:
         if(!kernel_handles_.has_handle(kernel.handle))
             return nullptr; // invalid kernel object
         Kernel const &gfx_kernel = kernels_[kernel];
-        GFX_ASSERT(gfx_kernel.num_threads_ != nullptr);
         return gfx_kernel.num_threads_;
     }
 
@@ -5133,7 +5130,6 @@ private:
 
     void collect(Kernel const &kernel)
     {
-        free(kernel.num_threads_);
         collect(kernel.cs_bytecode_);
         collect(kernel.vs_bytecode_);
         collect(kernel.gs_bytecode_);
@@ -7899,7 +7895,6 @@ private:
         char buffer[2048];
         char const *kernel_type = nullptr;
         GfxResult result = kGfxResult_NoError;
-        GFX_ASSERT(kernel.num_threads_ != nullptr);
         GFX_ASSERT(kernel.cs_bytecode_ == nullptr && kernel.cs_reflection_ == nullptr);
         GFX_ASSERT(kernel.vs_bytecode_ == nullptr && kernel.vs_reflection_ == nullptr);
         GFX_ASSERT(kernel.gs_bytecode_ == nullptr && kernel.gs_reflection_ == nullptr);
