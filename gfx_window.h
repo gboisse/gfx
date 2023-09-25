@@ -41,7 +41,8 @@ class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; pu
 enum GfxCreateWindowFlag
 {
     kGfxCreateWindowFlag_MaximizeWindow = 1 << 0,
-    kGfxCreateWindowFlag_HideWindow     = 1 << 1
+    kGfxCreateWindowFlag_NoResizeWindow = 1 << 1,
+    kGfxCreateWindowFlag_HideWindow     = 1 << 2
 };
 typedef uint32_t GfxCreateWindowFlags;
 
@@ -67,8 +68,10 @@ bool gfxWindowIsMaximized(GfxWindow window);
 
 #pragma once
 
+#    ifdef GFX_ENABLE_GUI
 #include "gfx_imgui.h"  // for (optional) ImGui integration
 #include "backends/imgui_impl_win32.h"
+#   endif
 
 class GfxWindowInternal
 {
@@ -102,7 +105,8 @@ public:
 
         RECT window_rect = { 0, 0, (LONG)window_width, (LONG)window_height };
 
-        DWORD const window_style = WS_OVERLAPPEDWINDOW;
+        DWORD const window_style = WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
+            WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0);
 
         AdjustWindowRect(&window_rect, window_style, FALSE);
 
@@ -134,8 +138,10 @@ public:
     {
         if(window_)
             DestroyWindow(window_);
+#    ifdef GFX_ENABLE_GUI
         if(ImGui_ImplWin32_GetBackendData() != nullptr)
             ImGui_ImplWin32_Shutdown();
+#   endif
 
         return kGfxResult_NoError;
     }
@@ -213,8 +219,10 @@ private:
         GfxWindowInternal *gfx_window = (GfxWindowInternal *)GetWindowLongPtrA(window, GWLP_USERDATA);
         if(gfx_window != nullptr)
         {
+#    ifdef GFX_ENABLE_GUI
             if(ImGui_ImplWin32_GetBackendData() == nullptr && gfxImGuiIsInitialized())
                 ImGui_ImplWin32_Init(gfx_window->window_);
+#   endif
             switch(message)
             {
             case WM_SIZE:
@@ -247,8 +255,10 @@ private:
             case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
                 if(w_param < ARRAYSIZE(is_key_down_))
                     gfx_window->updateKeyBinding(message, (uint32_t)w_param);
+#    ifdef GFX_ENABLE_GUI
                 if(ImGui_ImplWin32_GetBackendData() != nullptr)
                     ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
+#   endif
                 break;
             default:
                 break;

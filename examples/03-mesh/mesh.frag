@@ -21,25 +21,10 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#pragma once
 
-#include "glm/glm.hpp"
-#include "gfx_window.h"
+float3 Color;
 
-struct FlyCamera
+float4 main() : SV_Target
 {
-    glm::vec3 eye;
-    glm::vec3 center;
-    glm::vec3 up;
-
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::mat4 view_proj;
-
-    glm::mat4 prev_view;
-    glm::mat4 prev_proj;
-    glm::mat4 prev_view_proj;
-};
-
-FlyCamera CreateFlyCamera(GfxContext gfx, glm::vec3 const &eye, glm::vec3 const &center);
-void UpdateFlyCamera(GfxContext gfx, GfxWindow window, FlyCamera &fly_camera);
+    return float4(Color, 1.0f);
+}

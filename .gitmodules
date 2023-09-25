@@ -1,25 +1,3 @@
-[submodule "third_party/tinyobjloader"]
-	path = third_party/tinyobjloader
-	url = https://github.com/tinyobjloader/tinyobjloader.git
-[submodule "third_party/imgui"]
-	path = third_party/imgui
-	url = https://github.com/ocornut/imgui.git
 [submodule "third_party/D3D12MemoryAllocator"]
 	path = third_party/D3D12MemoryAllocator
 	url = https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-[submodule "third_party/glm"]
-	path = third_party/glm
-	url = https://github.com/g-truc/glm.git
-[submodule "third_party/cgltf"]
-	path = third_party/cgltf
-	url = https://github.com/jkuhlmann/cgltf.git
-[submodule "third_party/KTX-Software"]
-	path = third_party/KTX-Software
-	url = https://github.com/KhronosGroup/KTX-Software.git
-[submodule "third_party/Vulkan-Headers"]
-	path = third_party/Vulkan-Headers
-	url = https://github.com/KhronosGroup/Vulkan-Headers.git
-[submodule "third_party/stb"]
-	path = third_party/stb
-	url = https://github.com/nothings/stb.git
-	branch = master

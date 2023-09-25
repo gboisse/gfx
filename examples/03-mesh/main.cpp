@@ -21,25 +21,36 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#pragma once
-
-#include "glm/glm.hpp"
 #include "gfx_window.h"
 
-struct FlyCamera
+int32_t main()
 {
-    glm::vec3 eye;
-    glm::vec3 center;
-    glm::vec3 up;
+    GfxWindow window = gfxCreateWindow(1280, 720, "gfx - Mesh shaders");
+    GfxContext gfx = gfxCreateContext(window);
 
-    glm::mat4 view;
-    glm::mat4 proj;
-    glm::mat4 view_proj;
+    GfxProgram program = gfxCreateProgram(gfx, "mesh");
+    GfxKernel kernel  = gfxCreateMeshKernel(gfx, program);
 
-    glm::mat4 prev_view;
-    glm::mat4 prev_proj;
-    glm::mat4 prev_view_proj;
-};
+    for(float time = 0.0f; !gfxWindowIsCloseRequested(window); time += 0.1f)
+    {
+        gfxWindowPumpEvents(window);
 
-FlyCamera CreateFlyCamera(GfxContext gfx, glm::vec3 const &eye, glm::vec3 const &center);
-void UpdateFlyCamera(GfxContext gfx, GfxWindow window, FlyCamera &fly_camera);
+        float color[] = { 0.5f * cosf(time) + 0.5f,
+                          0.5f * sinf(time) + 0.5f,
+                          1.0f };
+        gfxProgramSetParameter(gfx, program, "Color", color);
+
+        gfxCommandBindKernel(gfx, kernel);
+        gfxCommandDrawMesh(gfx, 1, 1, 1);
+
+        gfxFrame(gfx);
+    }
+
+    gfxDestroyKernel(gfx, kernel);
+    gfxDestroyProgram(gfx, program);
+
+    gfxDestroyContext(gfx);
+    gfxDestroyWindow(window);
+
+    return 0;
+}
