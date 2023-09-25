@@ -83,6 +83,10 @@ GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data = 
 GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t byte_offset, uint64_t size = 0);  // fast path for (sub-)allocating during a frame
 GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer);
 
+
+bool gfxBufferMeetsParameters(GfxContext context, GfxBuffer buffer, uint64_t size, GfxCpuAccess cpu_access);
+bool gfxBufferRangeMeetsParameters(GfxContext context, GfxBuffer buffer_range, GfxBuffer buffer, uint64_t byte_offset, uint64_t size);
+
 void *gfxBufferGetData(GfxContext context, GfxBuffer buffer);
 
 //!
@@ -316,6 +320,16 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     char const **defines = nullptr, uint32_t define_count = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
+bool gfxComputeKernelMeetsParameters(GfxContext context, GfxKernel kernel, GfxProgram program,
+    char const *entry_point, char const **defines, uint32_t define_count);
+bool gfxGraphicsKernelMeetsParameters(GfxContext context, GfxKernel kernel, GfxProgram program,
+    GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count);
+bool gfxRaytracingKernelMeetsParameters(GfxContext context, GfxKernel kernel, GfxProgram program,
+    GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
+    char const **exports, uint32_t export_count,
+    char const **subobjects, uint32_t subobject_count,
+    char const **defines, uint32_t define_count);
+
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
 GfxResult gfxKernelReloadAll(GfxContext context);   // hot-reloads all kernel objects
 
@@ -323,6 +337,8 @@ class GfxSbt { GFX_INTERNAL_HANDLE(GfxSbt); public: };
 
 GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count]);
 GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt);
+
+bool gfxSbtMeetsParameters(GfxContext context, GfxSbt sbt, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count]);
 
 GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name);
 GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size);
@@ -722,6 +738,15 @@ class GfxInternal
             GfxTexture texture_ = {};
             uint32_t mip_level = 0;
             uint32_t slice = 0;
+
+            bool operator==(RenderTarget const& r) const
+            {
+                return (texture_ == r.texture_) && (mip_level == r.mip_level) && (slice == r.slice);
+            }
+            bool operator!=(RenderTarget const& r) const
+            {
+                return !(*this == r);
+            }
         };
 
         struct Data
@@ -747,6 +772,28 @@ class GfxInternal
                 D3D12_CULL_MODE cull_mode_ = D3D12_CULL_MODE_BACK;
                 D3D12_FILL_MODE fill_mode_ = D3D12_FILL_MODE_SOLID;
             } raster_state_;
+
+            bool operator==(Data const& d) const
+            {
+                if ((blend_state_.src_blend_ != d.blend_state_.src_blend_) ||
+                    (blend_state_.dst_blend_ != d.blend_state_.dst_blend_) ||
+                    (blend_state_.blend_op_ != d.blend_state_.blend_op_) ||
+                    (blend_state_.src_blend_alpha_ != d.blend_state_.src_blend_alpha_) ||
+                    (blend_state_.dst_blend_alpha_ != d.blend_state_.dst_blend_alpha_) ||
+                    (blend_state_.blend_op_alpha_ != d.blend_state_.blend_op_alpha_) ||
+                    (raster_state_.cull_mode_ != d.raster_state_.cull_mode_) ||
+                    (raster_state_.fill_mode_ != d.raster_state_.fill_mode_) ||
+                    (depth_stencil_target_ != d.depth_stencil_target_))
+                    return false;
+                for (uint32_t i = 0; i < kGfxConstant_MaxRenderTarget; ++i)
+                    if (color_targets_[i] != d.color_targets_[i])
+                        return false;
+                return true;
+            }
+            bool operator!=(Data const& d) const
+            {
+                return !(*this == d);
+            }
         };
 
         DrawState() : reference_count_(0) {}
@@ -1851,6 +1898,34 @@ public:
         return kGfxResult_NoError;
     }
 
+    bool bufferMeetsParameters(GfxBuffer const& buffer, uint64_t size, GfxCpuAccess cpu_access)
+    {
+        if(!buffer)
+            return false;
+        if(!buffer_handles_.has_handle(buffer.handle))
+            return false;
+        Buffer const& gfx_buffer = buffers_[buffer];
+        return (buffer.getSize() == size) && (buffer.getCpuAccess() == cpu_access) && (gfx_buffer.data_offset_ == 0);
+    }
+
+    bool bufferRangeMeetsParameters(GfxBuffer const& buffer_range, GfxBuffer const &buffer, uint64_t byte_offset, uint64_t size)
+    {
+        if(!buffer_range)
+            return false;
+        if(!buffer_handles_.has_handle(buffer_range.handle))
+            return false;
+        if(!buffer_handles_.has_handle(buffer.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Invalid buffer object");
+            return false;
+        }
+        Buffer const& gfx_buffer_range = buffers_[buffer_range];
+        Buffer const& gfx_buffer = buffers_[buffer];
+        return (gfx_buffer_range.data_ == gfx_buffer.data_) &&
+            (gfx_buffer_range.data_offset_ == gfx_buffer.data_offset_) &&
+            (gfx_buffer_range.resource_ == gfx_buffer.resource_);
+    }
+
     void *getBufferData(GfxBuffer const &buffer)
     {
         if(!buffer_handles_.has_handle(buffer.handle))
@@ -2500,6 +2575,31 @@ public:
         return kGfxResult_NoError;
     }
 
+    bool sbtMeetsParameters(GfxSbt const& sbt, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+    {
+        if(!sbt)
+            return false;
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return false;
+        Sbt const &gfx_sbt = sbts_[sbt];
+        size_t sbt_max_record_stride[kGfxShaderGroupType_Count] = { };
+        for(uint32_t i = 0; i < kernel_count; ++i)
+        {
+            Kernel const &kernel = kernels_[kernels[i]];
+            for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
+            {
+                sbt_max_record_stride[j] = GFX_MAX(sbt_max_record_stride[j], kernel.sbt_record_stride_[j]);
+            }
+        }
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+        {
+            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + sbt_max_record_stride[i] * entry_count[i];
+            if (sbt_buffer_size != gfx_sbt.sbt_buffers_[i].getSize())
+                return false;
+        }
+        return true;
+    }
+
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model)
     {
         GfxProgram program = {};
@@ -2912,6 +3012,85 @@ public:
         kernels_.erase(kernel); // destroy kernel
         kernel_handles_.free_handle(kernel.handle);
         return kGfxResult_NoError;
+    }
+
+    bool computeKernelMeetsParameters(GfxKernel const &kernel, GfxProgram const &program,
+        char const *entry_point, char const **defines, uint32_t define_count)
+    {
+        if(!kernel)
+            return false;
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return false;
+        Kernel& gfx_kernel = kernels_[kernel];
+        if ((gfx_kernel.program_ != program) || (strcmp(gfx_kernel.entry_point_.c_str(), entry_point) != 0) ||
+            (gfx_kernel.defines_.size() != define_count))
+            return false;
+        for (uint32_t i = 0; i < define_count; ++i)
+        {
+            if (strcmp(gfx_kernel.defines_[i].c_str(), defines[i]) != 0)
+                return false;
+        }
+        return true;
+    }
+
+    bool graphicsKernelMeetsParameters(GfxKernel const &kernel, GfxProgram const &program, GfxDrawState const &draw_state,
+        char const *entry_point, char const **defines, uint32_t define_count)
+    {
+        if(!computeKernelMeetsParameters(kernel, program, entry_point, defines, define_count))
+            return false;
+
+        Kernel& gfx_kernel = kernels_[kernel];
+        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
+        DrawState const *gfx_draw_state = draw_states_.at(draw_state_index);
+        if (!gfx_draw_state)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Invalid draw state object");
+            return false;
+        }
+        return gfx_kernel.draw_state_ == gfx_draw_state->draw_state_;
+    }
+
+    bool raytracingKernelMeetsParameters(GfxKernel const &kernel, GfxProgram const &program,
+        GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
+        char const **exports, uint32_t export_count,
+        char const **subobjects, uint32_t subobject_count,
+        char const **defines, uint32_t define_count)
+    {
+        if(!kernel)
+            return false;
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return false;
+        Kernel& gfx_kernel = kernels_[kernel];
+        if ((gfx_kernel.program_ != program) || (gfx_kernel.defines_.size() != define_count) ||
+            (gfx_kernel.local_root_signature_associations_.size() != local_root_signature_association_count) ||
+            (gfx_kernel.exports_.size() != export_count) || (gfx_kernel.subobjects_.size() != subobject_count))
+            return false;
+        for (uint32_t i = 0; i < local_root_signature_association_count; ++i)
+        {
+            WCHAR wgroup_name[1024];
+            mbstowcs(wgroup_name, local_root_signature_associations[i].shader_group_name, ARRAYSIZE(wgroup_name));
+            auto a = gfx_kernel.local_root_signature_associations_.find(wgroup_name);
+            if ((a == gfx_kernel.local_root_signature_associations_.end()) ||
+                (a->second.local_root_signature_space != local_root_signature_associations[i].local_root_signature_space) ||
+                (a->second.shader_group_type != local_root_signature_associations[i].shader_group_type))
+                return false;
+        }
+        for (uint32_t i = 0; i < export_count; ++i)
+        {
+            if (strcmp(gfx_kernel.exports_[i].c_str(), exports[i]) != 0)
+                return false;
+        }
+        for (uint32_t i = 0; i < subobject_count; ++i)
+        {
+            if (strcmp(gfx_kernel.subobjects_[i].c_str(), subobjects[i]) != 0)
+                return false;
+        }
+        for (uint32_t i = 0; i < define_count; ++i)
+        {
+            if (strcmp(gfx_kernel.defines_[i].c_str(), defines[i]) != 0)
+                return false;
+        }
+        return true;
     }
 
     uint32_t const *getKernelNumThreads(GfxKernel const &kernel)
@@ -8325,6 +8504,20 @@ GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer)
     return gfx->destroyBuffer(buffer);
 }
 
+bool gfxBufferMeetsParameters(GfxContext context, GfxBuffer buffer, uint64_t size, GfxCpuAccess cpu_access)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false; // invalid context
+    return gfx->bufferMeetsParameters(buffer, size, cpu_access);
+}
+
+bool gfxBufferRangeMeetsParameters(GfxContext context, GfxBuffer buffer_range, GfxBuffer buffer, uint64_t byte_offset, uint64_t size)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;   // invalid context
+    return gfx->bufferRangeMeetsParameters(buffer_range, buffer, byte_offset, size);
+}
+
 void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -8522,6 +8715,14 @@ GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroySbt(sbt);
+}
+
+bool gfxSbtMeetsParameters(GfxContext context, GfxSbt sbt,
+    GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;
+    return gfx->sbtMeetsParameters(sbt, kernels, kernel_count, entry_count);
 }
 
 GfxDrawState::GfxDrawState()
@@ -8728,6 +8929,35 @@ GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyKernel(kernel);
+}
+
+bool gfxComputeKernelMeetsParameters(GfxContext context, GfxKernel kernel, GfxProgram program,
+    char const *entry_point, char const **defines, uint32_t define_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;    // invalid context
+    return gfx->computeKernelMeetsParameters(kernel, program, entry_point, defines, define_count);
+}
+
+bool gfxGraphicsKernelMeetsParameters(GfxContext context, GfxKernel kernel, GfxProgram program,
+    GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;    // invalid context
+    return gfx->graphicsKernelMeetsParameters(kernel, program, draw_state, entry_point, defines, define_count);
+}
+
+bool gfxRaytracingKernelMeetsParameters(GfxContext context, GfxKernel kernel, GfxProgram program,
+    GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
+    char const **exports, uint32_t export_count,
+    char const **subobjects, uint32_t subobject_count,
+    char const **defines, uint32_t define_count)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;    // invalid context
+    return gfx->raytracingKernelMeetsParameters(kernel, program,
+        local_root_signature_associations, local_root_signature_association_count,
+        exports, export_count, subobjects, subobject_count, defines, define_count);
 }
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel)
