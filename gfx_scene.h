@@ -143,7 +143,7 @@ bool gfxSceneSetAnimationMetadata(GfxScene scene, uint64_t animation_handle, Gfx
 
 struct GfxSkin
 {
-    std::vector<glm::mat4> joint_matrices;   // should contain list of `inverse(meshGlobalTransform) * jointGlobalTransform * inverseBindMatrix' matrices for each joint
+    std::vector<glm::mat4> joint_matrices;  // contains a list of `inverse(meshGlobalTransform) * jointGlobalTransform * inverseBindMatrix' matrices for each joint
 };
 
 GfxRef<GfxSkin> gfxSceneCreateSkin(GfxScene scene);
@@ -386,8 +386,7 @@ struct GfxMesh
 
     std::vector<GfxVertex> vertices;
     std::vector<uint32_t>  indices;
-
-    std::vector<GfxJoint>  joints;    // should contain list of per-vertex joint indices and weights values for skinning on the GPU (see `GfxJoint' structure)
+    std::vector<GfxJoint>  joints;  // contains a list of per-vertex joint index and weight values for skinning on the GPU (see `GfxJoint' structure)
 };
 
 GfxRef<GfxMesh> gfxSceneCreateMesh(GfxScene scene);
@@ -537,10 +536,10 @@ class GfxSceneInternal
         glm::dquat rotate_;
         glm::dvec3 scale_;
 
+        uint64_t parent_ = 0;
         GfxRef<GfxSkin> skin_;
-        GfxRef<GfxCamera> camera_;
         GfxRef<GfxLight> light_;
-        uint64_t parent_;
+        GfxRef<GfxCamera> camera_;
         std::vector<uint64_t> children_;
         std::vector<GfxRef<GfxInstance>> instances_;
     };
@@ -806,7 +805,7 @@ public:
                 glm::dmat4 transform;
                 GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
                 GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(node_handle));
-                if (animated_node == nullptr)
+                if(animated_node == nullptr)
                 {
                     glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), node.translate_);
                     glm::dmat4 const rotate    = glm::toMat4(node.rotate_);
@@ -824,12 +823,12 @@ public:
                 GltfNode const *parent_node        = gltf_node_handles_.has_handle(parent_node_handle)
                                                        ? &gltf_nodes_[GetObjectIndex(parent_node_handle)]
                                                        : nullptr;
-                while (parent_node)
+                while(parent_node)
                 {
                     glm::dmat4        parent_transform;
                     GltfAnimatedNode *parent_animated_node =
                         gltf_animated_nodes_.at(GetObjectIndex(parent_node_handle));
-                    if (parent_animated_node == nullptr)
+                    if(parent_animated_node == nullptr)
                     {
                         glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), parent_node->translate_);
                         glm::dmat4 const rotate    = glm::toMat4(parent_node->rotate_);
@@ -885,11 +884,11 @@ public:
             {
                 if(!gltf_node_handles_.has_handle(node_handle)) return;
                 GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
-                if (node.skin_)
+                if(node.skin_)
                 {
                     glm::dmat4 inverse_transform = glm::inverse(GetNodeMatrix(node_handle));
                     GltfSkin const *skin = gltf_skins_.at(GetObjectIndex(node.skin_));
-                    for (size_t i = 0; i < node.skin_->joint_matrices.size(); ++i)
+                    for(size_t i = 0; i < node.skin_->joint_matrices.size(); ++i)
                     {
                         node.skin_->joint_matrices[i] = GetNodeMatrix(skin->joints[i])
                                                       * glm::dmat4(skin->inverse_bind_matrices[i])
@@ -1847,7 +1846,7 @@ private:
                                     uv_buffer->normalized, (float *)&vertex.uv, sizeof(glm::vec2));
                         }
                     }
-                    if (skinned_mesh)
+                    if(skinned_mesh)
                     {
                         GfxJoint joint = {};
 
@@ -2026,15 +2025,15 @@ private:
                 return {};   // out of bounds
             glm::vec3 T(0.0), S(1.0);
             glm::quat R(1.0, 0.0, 0.0, 0.0);
-            if (gltf_node->has_translation) T = glm::make_vec3(gltf_node->translation);
-            if (gltf_node->has_scale) S = glm::make_vec3(gltf_node->scale);
-            if (gltf_node->has_rotation) R = glm::make_quat(gltf_node->rotation);
+            if(gltf_node->has_translation) T = glm::make_vec3(gltf_node->translation);
+            if(gltf_node->has_scale) S = glm::make_vec3(gltf_node->scale);
+            if(gltf_node->has_rotation) R = glm::make_quat(gltf_node->rotation);
             glm::mat4 local_transform(1.0); // default to identity
             cgltf_node_transform_local(gltf_node, (float*)&local_transform);
             std::vector<GfxRef<GfxInstance>> instances;
             glm::mat4 const transform = parent_transform * local_transform;
             GfxRef<GfxSkin> skin;
-            if (gltf_node->skin != nullptr)
+            if(gltf_node->skin != nullptr)
             {
                 std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(gltf_node->skin);
                 if(it != skins.end())
@@ -2104,9 +2103,9 @@ private:
                     auto parent_node = &gltf_nodes_.insert(GetObjectIndex(parent_node_handle));
                     glm::vec3 T(0.0), S(1.0);
                     glm::quat R(1.0, 0.0, 0.0, 0.0);
-                    if (gltf_node->parent->has_translation) T = glm::make_vec3(gltf_node->parent->translation);
-                    if (gltf_node->parent->has_scale) S = glm::make_vec3(gltf_node->parent->scale);
-                    if (gltf_node->parent->has_rotation) R = glm::make_quat(gltf_node->parent->rotation);
+                    if(gltf_node->parent->has_translation) T = glm::make_vec3(gltf_node->parent->translation);
+                    if(gltf_node->parent->has_scale)       S = glm::make_vec3(gltf_node->parent->scale);
+                    if(gltf_node->parent->has_rotation)    R = glm::make_quat(gltf_node->parent->rotation);
                     glm::mat4 local_transform(1.0); // default to identity
                     cgltf_node_transform_local(gltf_node->parent, (float *)&local_transform);
                     parent_node->scale_               = S;
@@ -2116,7 +2115,7 @@ private:
                     animated_nodes[gltf_node->parent] = parent_node_handle;
                 }
             }
-            for (size_t i = 0; i < gltf_node->children_count; ++i)
+            for(size_t i = 0; i < gltf_node->children_count; ++i)
             {
                 auto child_animations =
                     VisitNode(gltf_node->children[i], transform, propogate_parent_animations);
