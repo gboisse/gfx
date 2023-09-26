@@ -2026,8 +2026,8 @@ private:
             glm::vec3 T(0.0), S(1.0);
             glm::quat R(1.0, 0.0, 0.0, 0.0);
             if(gltf_node->has_translation) T = glm::make_vec3(gltf_node->translation);
-            if(gltf_node->has_scale) S = glm::make_vec3(gltf_node->scale);
-            if(gltf_node->has_rotation) R = glm::make_quat(gltf_node->rotation);
+            if(gltf_node->has_scale)       S = glm::make_vec3(gltf_node->scale);
+            if(gltf_node->has_rotation)    R = glm::make_quat(gltf_node->rotation);
             glm::mat4 local_transform(1.0); // default to identity
             cgltf_node_transform_local(gltf_node, (float*)&local_transform);
             std::vector<GfxRef<GfxInstance>> instances;
