@@ -6483,7 +6483,7 @@ private:
             }
             state_object_properties->Release();
         }
-        if(kernel.vertex_stride_ > 0)
+        if(kernel.isGraphics())
         {
             if(indexed && (force_install_index_buffer_ || bound_index_buffer_.handle != installed_index_buffer_.handle))
             {
@@ -6508,7 +6508,7 @@ private:
                 installed_index_buffer_ = bound_index_buffer_;
                 force_install_index_buffer_ = false;
             }
-            if(force_install_vertex_buffer_ || bound_vertex_buffer_.handle != installed_vertex_buffer_.handle)
+            if(kernel.vertex_stride_ > 0 && (force_install_vertex_buffer_ || bound_vertex_buffer_ != installed_vertex_buffer_))
             {
                 D3D12_VERTEX_BUFFER_VIEW vbv_desc = {};
                 if(!buffer_handles_.has_handle(bound_vertex_buffer_.handle))
