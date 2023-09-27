@@ -2925,7 +2925,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Mesh;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
+        for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         createKernel(gfx_program, gfx_kernel);  // create mesh kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {

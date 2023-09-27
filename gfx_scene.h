@@ -373,7 +373,7 @@ struct GfxVertex
 
 struct GfxJoint
 {
-    glm::uvec4 joints  = glm::uvec4(-1);
+    glm::uvec4 joints  = glm::uvec4((uint32_t)-1);
     glm::vec4  weights = glm::vec4(0.0f);
 };
 
