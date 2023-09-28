@@ -379,8 +379,6 @@ struct GfxJoint
 
 struct GfxMesh
 {
-    GfxConstRef<GfxMaterial> material;
-
     glm::vec3 bounds_min = glm::vec3(0.0f);
     glm::vec3 bounds_max = glm::vec3(0.0f);
 
@@ -406,8 +404,9 @@ bool gfxSceneSetMeshMetadata(GfxScene scene, uint64_t mesh_handle, GfxMetadata c
 
 struct GfxInstance
 {
-    GfxConstRef<GfxMesh> mesh;
-    GfxConstRef<GfxSkin> skin;
+    GfxConstRef<GfxMesh>     mesh;
+    GfxConstRef<GfxMaterial> material;
+    GfxConstRef<GfxSkin>     skin;
 
     glm::mat4 transform = glm::mat4(1.0f);
 };
@@ -1350,8 +1349,6 @@ private:
                     mesh_metadata.object_name += ".";
                     mesh_metadata.object_name += std::to_string(mesh_id);
                 }
-                if((*it).first < materials.size())
-                    mesh_ref->material = materials[(*it).first];
                 glm::vec3 bounds_min(FLT_MAX), bounds_max(-FLT_MAX);
                 for(VertexMap::const_iterator it2 = vertices.begin(); it2 != vertices.end(); ++it2)
                 {
@@ -1365,6 +1362,8 @@ private:
                 mesh_ref->bounds_max = bounds_max;
                 GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
                 instance_ref->mesh = mesh_ref;  // .obj does not support instancing, so simply create one instance per mesh
+                if((*it).first < materials.size())
+                    instance_ref->material = materials[(*it).first];
                 GfxMetadata &instance_metadata = instance_metadata_[instance_ref];
                 instance_metadata.asset_file = asset_file;  // set up metadata
                 instance_metadata.object_name = obj_shape.name;
@@ -1738,204 +1737,218 @@ private:
             if(it != images.end()) material.ao_map = (*it).second;
             materials[&gltf_material] = material_ref;
         }
-        std::map<cgltf_mesh const *, std::vector<GfxConstRef<GfxMesh>>> meshes;
+        typedef std::pair<GfxConstRef<GfxMesh>, GfxConstRef<GfxMaterial>> instance_pair;
+        std::map<cgltf_mesh const *, std::vector<instance_pair>>          meshes;
+        std::map<cgltf_accessor const *, GfxConstRef<GfxMesh>>            meshInstances;
         for(size_t i = 0; i < gltf_model->meshes_count; ++i)
         {
             cgltf_mesh const &gltf_mesh = gltf_model->meshes[i];
-            std::vector<GfxConstRef<GfxMesh>> &mesh_list = meshes[&gltf_mesh];
+            std::vector<instance_pair> &mesh_list = meshes[&gltf_mesh];
             for(size_t j = 0; j < gltf_mesh.primitives_count; ++j)
             {
                 cgltf_primitive const &gltf_primitive = gltf_mesh.primitives[j];
                 if(gltf_primitive.targets_count > 0) continue;   // morph targets aren't supported
                 if(gltf_primitive.type != cgltf_primitive_type_triangles) continue;    // only support triangle meshes
-                cgltf_accessor const *index_buffer = gltf_primitive.indices;
+                GfxConstRef<GfxMesh> current_mesh;
                 cgltf_attribute *gltf_primitive_attributes_end = gltf_primitive.attributes + gltf_primitive.attributes_count;
                 cgltf_attribute const *it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
                     [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_position; });  // locate position stream
                 cgltf_accessor const *position_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
-                it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
-                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_normal; });  // locate normal stream
-                cgltf_accessor const *normal_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
-                it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
-                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });  // locate uv stream
-                cgltf_accessor const *uv_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
-                it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
-                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_joints; });  // joints stream
-                cgltf_accessor const *joints_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
-                it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
-                    [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_weights; });  // weights stream
-                cgltf_accessor const *weights_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
                 if(position_buffer == nullptr) continue; // invalid mesh primitive
-                std::vector<cgltf_float> sparse_position_buffer;
-                std::vector<cgltf_float> sparse_normal_buffer;
-                std::vector<cgltf_float> sparse_uv_buffer;
-                std::vector<cgltf_float> sparse_joints_buffer;
-                std::vector<cgltf_float> sparse_weights_buffer;
-                std::vector<cgltf_float> sparse_index_buffer;
-                auto unpack_sparse = [](cgltf_accessor const *buffer,
-                                        std::vector<cgltf_float> &sparse_buffer) -> bool {
-                    if(buffer != nullptr && buffer->is_sparse)
-                    {
-                        cgltf_size buffer_size = cgltf_num_components(buffer->type) * buffer->count;
-                        sparse_buffer.resize(buffer_size);
-                        if(cgltf_accessor_unpack_floats(buffer, &sparse_buffer[0], buffer_size) < buffer_size)
-                        {
-                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to unpack sparse accessor");
-                            return false;
-                        }
-                    }
-                    return true;
-                };
-                bool failed_unpack = !unpack_sparse(position_buffer, sparse_position_buffer);
-                failed_unpack      = failed_unpack || !unpack_sparse(normal_buffer, sparse_normal_buffer);
-                failed_unpack      = failed_unpack || !unpack_sparse(uv_buffer, sparse_uv_buffer);
-                failed_unpack      = failed_unpack || !unpack_sparse(joints_buffer, sparse_joints_buffer);
-                failed_unpack      = failed_unpack || !unpack_sparse(weights_buffer, sparse_weights_buffer);
-                failed_unpack      = failed_unpack || !unpack_sparse(index_buffer, sparse_index_buffer);
-                if(failed_unpack)
+                std::map<cgltf_accessor const *, GfxConstRef<GfxMesh>>::const_iterator mesh_it = meshInstances.find(position_buffer);//Note: assumes primitives with same position buffer will always have same attributes
+                if(mesh_it == meshInstances.end())
                 {
-                    continue;
-                }
-                bool skinned_mesh = joints_buffer != nullptr;
-                GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
-                mesh_list.push_back(mesh_ref);
-                GfxMesh &mesh = *mesh_ref;
-                auto unpack_vertex = [&](size_t const gltf_index) {
-                    GfxVertex vertex = {};
-                    if(sparse_position_buffer.empty())
+                    cgltf_accessor const *index_buffer = gltf_primitive.indices;
+                    it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                        [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_normal; });  // locate normal stream
+                    cgltf_accessor const *normal_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                    it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                        [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });  // locate uv stream
+                    cgltf_accessor const *uv_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                    it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                        [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_joints; });  // joints stream
+                    cgltf_accessor const *joints_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                    it = std::find_if(gltf_primitive.attributes, gltf_primitive_attributes_end,
+                        [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_weights; });  // weights stream
+                    cgltf_accessor const *weights_buffer = it != gltf_primitive_attributes_end ? it->data : nullptr;
+                    std::vector<cgltf_float> sparse_position_buffer;
+                    std::vector<cgltf_float> sparse_normal_buffer;
+                    std::vector<cgltf_float> sparse_uv_buffer;
+                    std::vector<cgltf_float> sparse_joints_buffer;
+                    std::vector<cgltf_float> sparse_weights_buffer;
+                    std::vector<cgltf_float> sparse_index_buffer;
+                    auto unpack_sparse = [](cgltf_accessor const *buffer,
+                                            std::vector<cgltf_float> &sparse_buffer) -> bool {
+                        if(buffer != nullptr && buffer->is_sparse)
+                        {
+                            cgltf_size buffer_size = cgltf_num_components(buffer->type) * buffer->count;
+                            sparse_buffer.resize(buffer_size);
+                            if(cgltf_accessor_unpack_floats(buffer, &sparse_buffer[0], buffer_size) < buffer_size)
+                            {
+                                GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to unpack sparse accessor");
+                                return false;
+                            }
+                        }
+                        return true;
+                    };
+                    bool failed_unpack = !unpack_sparse(position_buffer, sparse_position_buffer);
+                    failed_unpack      = failed_unpack || !unpack_sparse(normal_buffer, sparse_normal_buffer);
+                    failed_unpack      = failed_unpack || !unpack_sparse(uv_buffer, sparse_uv_buffer);
+                    failed_unpack      = failed_unpack || !unpack_sparse(joints_buffer, sparse_joints_buffer);
+                    failed_unpack      = failed_unpack || !unpack_sparse(weights_buffer, sparse_weights_buffer);
+                    failed_unpack      = failed_unpack || !unpack_sparse(index_buffer, sparse_index_buffer);
+                    if(failed_unpack)
                     {
-                        cgltf_accessor_read_float(
-                            position_buffer, gltf_index, (float *)&vertex.position, sizeof(glm::vec3));
+                        continue;
                     }
-                    else
-                    {
-                        uint8_t *element = (uint8_t *)sparse_position_buffer.data();
-                        element += position_buffer->offset + position_buffer->stride * gltf_index;
-                        cgltf_element_read_float(element, position_buffer->type,
-                                position_buffer->component_type, position_buffer->normalized,
-                                (float *)&vertex.position, sizeof(glm::vec3));
-                    }
-                    if(normal_buffer != nullptr)
-                    {
-                        if(sparse_normal_buffer.empty())
+                    bool skinned_mesh = joints_buffer != nullptr;
+                    GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
+                    GfxMesh &mesh = *mesh_ref;
+                    auto unpack_vertex = [&](size_t const gltf_index) {
+                        GfxVertex vertex = {};
+                        if(sparse_position_buffer.empty())
                         {
                             cgltf_accessor_read_float(
-                                normal_buffer, gltf_index, (float *)&vertex.normal, sizeof(glm::vec3));
+                                position_buffer, gltf_index, (float *)&vertex.position, sizeof(glm::vec3));
                         }
                         else
                         {
-                            uint8_t *element = (uint8_t *)sparse_normal_buffer.data();
-                            element += normal_buffer->offset + normal_buffer->stride * gltf_index;
-                            cgltf_element_read_float(element, normal_buffer->type,
-                                    normal_buffer->component_type, normal_buffer->normalized,
-                                    (float *)&vertex.normal, sizeof(glm::vec3));
+                            uint8_t *element = (uint8_t *)sparse_position_buffer.data();
+                            element += position_buffer->offset + position_buffer->stride * gltf_index;
+                            cgltf_element_read_float(element, position_buffer->type,
+                                    position_buffer->component_type, position_buffer->normalized,
+                                    (float *)&vertex.position, sizeof(glm::vec3));
                         }
-                    }
-                    if(uv_buffer != nullptr)
-                    {
-                        if(sparse_uv_buffer.empty())
+                        if(normal_buffer != nullptr)
                         {
-                            cgltf_accessor_read_float(
-                                uv_buffer, gltf_index, (float *)&vertex.uv, sizeof(glm::vec2));
-                        }
-                        else
-                        {
-                            uint8_t *element = (uint8_t *)sparse_uv_buffer.data();
-                            element += uv_buffer->offset + uv_buffer->stride * gltf_index;
-                            cgltf_element_read_float(element, uv_buffer->type, uv_buffer->component_type,
-                                    uv_buffer->normalized, (float *)&vertex.uv, sizeof(glm::vec2));
-                        }
-                    }
-                    if(skinned_mesh)
-                    {
-                        GfxJoint joint = {};
-
-                        if(joints_buffer != nullptr)
-                        {
-                            if(sparse_joints_buffer.empty())
-                            {
-                                cgltf_accessor_read_uint(
-                                    joints_buffer, gltf_index, (std::uint32_t *)&joint.joints, sizeof(glm::uvec4));
-                            }
-                            else
-                            {
-                                uint8_t *element = (uint8_t *)sparse_joints_buffer.data();
-                                element += joints_buffer->offset + joints_buffer->stride * gltf_index;
-                                cgltf_element_read_uint(element, joints_buffer->type, joints_buffer->component_type,
-                                    (std::uint32_t *)&joint.joints, sizeof(glm::uvec4));
-                            }
-                        }
-
-                        if(weights_buffer != nullptr)
-                        {
-                            if(sparse_weights_buffer.empty())
+                            if(sparse_normal_buffer.empty())
                             {
                                 cgltf_accessor_read_float(
-                                    weights_buffer, gltf_index, (float *)&joint.weights, sizeof(glm::vec4));
+                                    normal_buffer, gltf_index, (float *)&vertex.normal, sizeof(glm::vec3));
                             }
                             else
                             {
-                                uint8_t *element = (uint8_t *)sparse_weights_buffer.data();
-                                element += weights_buffer->offset + weights_buffer->stride * gltf_index;
-                                cgltf_element_read_float(element, weights_buffer->type, weights_buffer->component_type,
-                                    weights_buffer->normalized, (float *)&joint.weights, sizeof(glm::vec4));
+                                uint8_t *element = (uint8_t *)sparse_normal_buffer.data();
+                                element += normal_buffer->offset + normal_buffer->stride * gltf_index;
+                                cgltf_element_read_float(element, normal_buffer->type,
+                                        normal_buffer->component_type, normal_buffer->normalized,
+                                        (float *)&vertex.normal, sizeof(glm::vec3));
                             }
                         }
+                        if(uv_buffer != nullptr)
+                        {
+                            if(sparse_uv_buffer.empty())
+                            {
+                                cgltf_accessor_read_float(
+                                    uv_buffer, gltf_index, (float *)&vertex.uv, sizeof(glm::vec2));
+                            }
+                            else
+                            {
+                                uint8_t *element = (uint8_t *)sparse_uv_buffer.data();
+                                element += uv_buffer->offset + uv_buffer->stride * gltf_index;
+                                cgltf_element_read_float(element, uv_buffer->type, uv_buffer->component_type,
+                                        uv_buffer->normalized, (float *)&vertex.uv, sizeof(glm::vec2));
+                            }
+                        }
+                        if(skinned_mesh)
+                        {
+                            GfxJoint joint = {};
 
-                        mesh.joints.push_back(joint);
-                    }
-                    uint32_t const index = (uint32_t)mesh.vertices.size();
-                    if(index == 0)
+                            if(joints_buffer != nullptr)
+                            {
+                                if(sparse_joints_buffer.empty())
+                                {
+                                    cgltf_accessor_read_uint(
+                                        joints_buffer, gltf_index, (std::uint32_t *)&joint.joints, sizeof(glm::uvec4));
+                                }
+                                else
+                                {
+                                    uint8_t *element = (uint8_t *)sparse_joints_buffer.data();
+                                    element += joints_buffer->offset + joints_buffer->stride * gltf_index;
+                                    cgltf_element_read_uint(element, joints_buffer->type, joints_buffer->component_type,
+                                        (std::uint32_t *)&joint.joints, sizeof(glm::uvec4));
+                                }
+                            }
+
+                            if(weights_buffer != nullptr)
+                            {
+                                if(sparse_weights_buffer.empty())
+                                {
+                                    cgltf_accessor_read_float(
+                                        weights_buffer, gltf_index, (float *)&joint.weights, sizeof(glm::vec4));
+                                }
+                                else
+                                {
+                                    uint8_t *element = (uint8_t *)sparse_weights_buffer.data();
+                                    element += weights_buffer->offset + weights_buffer->stride * gltf_index;
+                                    cgltf_element_read_float(element, weights_buffer->type, weights_buffer->component_type,
+                                        weights_buffer->normalized, (float *)&joint.weights, sizeof(glm::vec4));
+                                }
+                            }
+
+                            mesh.joints.push_back(joint);
+                        }
+                        uint32_t const index = (uint32_t)mesh.vertices.size();
+                        if(index == 0)
+                        {
+                            mesh.bounds_min = vertex.position;
+                            mesh.bounds_max = vertex.position;
+                        }
+                        else
+                        {
+                            mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
+                            mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
+                        }
+                        mesh.vertices.push_back(vertex);
+                        mesh.indices.push_back(index);
+                    };
+                    if(index_buffer != nullptr)
                     {
-                        mesh.bounds_min = vertex.position;
-                        mesh.bounds_max = vertex.position;
+                        std::map<size_t, uint32_t> indices;
+                        for(size_t k = 0; k < index_buffer->count; ++k)
+                        {
+                            size_t const gltf_index = cgltf_accessor_read_index(index_buffer, k);
+                            std::map<size_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
+                            if(it2 != indices.end())
+                                mesh.indices.push_back((*it2).second);
+                            else
+                            {
+                                unpack_vertex(gltf_index);
+                                indices[gltf_index] = mesh.indices.back();
+                            }
+                        }
                     }
                     else
                     {
-                        mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position);
-                        mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position);
-                    }
-                    mesh.vertices.push_back(vertex);
-                    mesh.indices.push_back(index);
-                };
-                if(index_buffer != nullptr)
-                {
-                    std::map<size_t, uint32_t> indices;
-                    for(size_t k = 0; k < index_buffer->count; ++k)
-                    {
-                        size_t const gltf_index = cgltf_accessor_read_index(index_buffer, k);
-                        std::map<size_t, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
-                        if(it2 != indices.end())
-                            mesh.indices.push_back((*it2).second);
-                        else
+                        size_t const count = position_buffer->count / 3 * 3;
+                        for(size_t k = 0; k < count; ++k)
                         {
-                            unpack_vertex(gltf_index);
-                            indices[gltf_index] = mesh.indices.back();
+                            unpack_vertex(k);
                         }
                     }
+                    GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
+                    mesh_metadata.asset_file = asset_file;  // set up metadata
+                    mesh_metadata.object_name = (gltf_mesh.name != nullptr) ? gltf_mesh.name : "Mesh" + std::to_string(i);
+                    if(j > 0)
+                    {
+                        mesh_metadata.object_name += ".";
+                        mesh_metadata.object_name += std::to_string(j);
+                    }
+                    current_mesh                = mesh_ref;
+                    meshInstances[index_buffer] = mesh_ref;
                 }
                 else
                 {
-                    size_t const count = position_buffer->count / 3 * 3;
-                    for(size_t k = 0; k < count; ++k)
-                    {
-                        unpack_vertex(k);
-                    }
+                    current_mesh = mesh_it->second;
                 }
-                GfxMetadata &mesh_metadata = mesh_metadata_[mesh_ref];
-                mesh_metadata.asset_file = asset_file;  // set up metadata
-                mesh_metadata.object_name = (gltf_mesh.name != nullptr) ? gltf_mesh.name : "Mesh" + std::to_string(i);
-                if(j > 0)
-                {
-                    mesh_metadata.object_name += ".";
-                    mesh_metadata.object_name += std::to_string(j);
-                }
+                GfxConstRef<GfxMaterial> material;
                 if(gltf_primitive.material != nullptr)
                 {
                     std::map<cgltf_material const *, GfxConstRef<GfxMaterial>>::const_iterator const it2 =
                         materials.find(gltf_primitive.material);
-                    if(it2 != materials.end()) mesh.material = (*it2).second;
+                    if(it2 != materials.end()) material = (*it2).second;
                 }
+                mesh_list.push_back(std::make_pair(current_mesh, material));
             }
         }
         std::set<uint64_t> unparented_nodes;
@@ -2043,17 +2056,18 @@ private:
             }
             if(gltf_node->mesh != nullptr)
             {
-                std::map<cgltf_mesh const *, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node->mesh);
+                std::map<cgltf_mesh const *, std::vector<instance_pair>>::const_iterator const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
                     for(size_t i = 0; i < (*it).second.size(); ++i)
                     {
                         GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
                         instances.push_back(instance_ref);
-                        instance_ref->mesh = (*it).second[i];
-                        instance_ref->skin = skin;
+                        instance_ref->mesh      = it->second[i].first;
+                        instance_ref->material  = it->second[i].second;
+                        instance_ref->skin      = skin;
                         instance_ref->transform = glm::mat4(transform);
                         GfxMetadata &instance_metadata = instance_metadata_[instance_ref];
-                        GfxMetadata const *mesh_metadata = mesh_metadata_.at((*it).second[i]);
+                        GfxMetadata const *mesh_metadata = mesh_metadata_.at(it->second[i].first);
                         if(mesh_metadata != nullptr)
                             instance_metadata = *mesh_metadata; // set up metadata
                         else

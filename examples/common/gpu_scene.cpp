@@ -36,6 +36,7 @@ struct Material
 struct Instance
 {
     uint32_t mesh_id;
+    uint32_t material_id;
 };
 
 struct Vertex
@@ -90,7 +91,6 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
         mesh.count       = (uint32_t)mesh_ref->indices.size();
         mesh.first_index = first_index;
         mesh.base_vertex = base_vertex;
-        mesh.padding     = (uint32_t)mesh_ref->material;
 
         uint32_t const mesh_id = (uint32_t)mesh_ref;
 
@@ -147,8 +147,9 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
     {
         GfxConstRef<GfxInstance> const instance_ref = gfxSceneGetInstanceHandle(scene, i);
 
-        Instance instance = {};
-        instance.mesh_id = (uint32_t)instance_ref->mesh;
+        Instance instance    = {};
+        instance.mesh_id     = (uint32_t)instance_ref->mesh;
+        instance.material_id = (uint32_t)instance_ref->material;
 
         uint32_t const instance_id = (uint32_t)instance_ref;
 
