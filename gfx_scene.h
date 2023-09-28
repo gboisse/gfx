@@ -1581,7 +1581,7 @@ private:
                             metallicity_map_ref->format = ConvertImageFormatLinear(metallicity_map_ref->format);
                         }
                     }
-                    if(!metallicity_map_ref)
+                    if(!roughness_map_ref)
                     {
                         std::ifstream f(roughness_map_file.c_str(), std::ios_base::in);
                         if(f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
