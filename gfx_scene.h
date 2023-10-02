@@ -1934,8 +1934,8 @@ private:
                         mesh_metadata.object_name += ".";
                         mesh_metadata.object_name += std::to_string(j);
                     }
-                    current_mesh                = mesh_ref;
-                    meshInstances[index_buffer] = mesh_ref;
+                    current_mesh                   = mesh_ref;
+                    meshInstances[position_buffer] = mesh_ref;
                 }
                 else
                 {
