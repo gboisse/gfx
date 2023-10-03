@@ -225,8 +225,8 @@ int32_t main()
         {
             GfxInstance const &instance = gfxSceneGetInstances(scene)[i];
 
-            if(instance.mesh->material)
-                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[instance.mesh->material]);
+            if(instance.material)
+                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[instance.material]);
             else
                 gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", GfxTexture());    // will return black
 
