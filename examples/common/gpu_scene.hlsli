@@ -36,6 +36,7 @@ struct Mesh
     uint count;
     uint first_index;
     uint base_vertex;
+    uint padding;
 };
 
 struct Instance
