@@ -201,6 +201,7 @@ typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
@@ -2391,6 +2392,31 @@ public:
         gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
         gfx_acceleration_structure.needs_rebuild_ = true;
         return raytracing_primitive;
+    }
+
+    GfxRaytracingPrimitive createRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
+    {
+        GfxRaytracingPrimitive cloned_raytracing_primitive = {};
+        if(dxr_device_ == nullptr)
+            return cloned_raytracing_primitive; // avoid spamming console output
+        if(raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a raytracing primitive using an invalid raytracing primitive object");
+            return cloned_raytracing_primitive;
+        }
+        RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        if(isInterop(gfx_raytracing_primitive.acceleration_structure_))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a raytracing primitive using an interop acceleration structure object");
+            return cloned_raytracing_primitive;
+        }
+        if(!acceleration_structure_handles_.has_handle(gfx_raytracing_primitive.acceleration_structure_.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
+            return cloned_raytracing_primitive;
+        }
+        // TODO: ... (gboisse)
+        return cloned_raytracing_primitive;
     }
 
     GfxResult destroyRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
@@ -8906,6 +8932,14 @@ GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccel
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_primitive;   // invalid context
     return gfx->createRaytracingPrimitive(acceleration_structure);
+}
+
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+{
+    GfxRaytracingPrimitive const cloned_raytracing_primitive = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return cloned_raytracing_primitive;    // invalid context
+    return gfx->createRaytracingPrimitive(raytracing_primitive);
 }
 
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
