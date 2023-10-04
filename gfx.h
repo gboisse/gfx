@@ -24,8 +24,8 @@ SOFTWARE.
 #ifndef GFX_INCLUDE_GFX_H
 #define GFX_INCLUDE_GFX_H
 
-#include "d3d12.h"
-#include "dxgi1_4.h"
+#include <d3d12.h>
+#include <dxgi1_4.h>
 #include "gfx_core.h"
 
 //!
@@ -485,17 +485,17 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
 #include <map>                  // std::map
 #include <deque>                // std::deque
 #include <memory>               // std::unique_ptr
-#include "direct.h"             // _mkdir()
-#include "inc/dxcapi.h"         // shader compiler
-#include "inc/d3d12shader.h"    // shader reflection
+#include <direct.h>             // _mkdir()
+#include <inc/dxcapi.h>         // shader compiler
+#include <inc/d3d12shader.h>    // shader reflection
 
 #pragma warning(push)
 #pragma warning(disable:4100)   // unreferenced formal parameter
 #pragma warning(disable:4127)   // conditional expression is constant
 #pragma warning(disable:4189)   // local variable is initialized but not referenced
 #pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
-#include "D3D12MemAlloc.cpp"    // D3D12MemoryAllocator
-#include "WinPixEventRuntime/pix3.h"
+#include <D3D12MemAlloc.cpp>    // D3D12MemoryAllocator
+#include <WinPixEventRuntime/pix3.h>
 #pragma warning(pop)
 
 #pragma warning(push)

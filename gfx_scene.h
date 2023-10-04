@@ -25,7 +25,7 @@ SOFTWARE.
 #define GFX_INCLUDE_GFX_SCENE_H
 
 #include "gfx.h"
-#include "glm/glm.hpp"
+#include <glm/glm.hpp>
 
 template<typename TYPE> class GfxRef;
 template<typename TYPE> class GfxConstRef;
