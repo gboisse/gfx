@@ -124,15 +124,15 @@ public:
                                  GetModuleHandle(nullptr),
                                  nullptr);
 
-        if (flags & kGfxCreateWindowFlag_FullscreenWindow)
+        if((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0)
         {
             WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
             DWORD           dwStyle  = GetWindowLong(window_, GWL_STYLE);
 
-            if (dwStyle & WS_OVERLAPPEDWINDOW)
+            if((dwStyle & WS_OVERLAPPEDWINDOW) != 0)
             {
                 MONITORINFO mi = { sizeof(mi) };
-                if (GetWindowPlacement(window_, &g_wpPrev) && 
+                if(GetWindowPlacement(window_, &g_wpPrev) &&
                     GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
                 {
                     SetWindowLong(window_, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
