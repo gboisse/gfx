@@ -40,9 +40,10 @@ class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; pu
 
 enum GfxCreateWindowFlag
 {
-    kGfxCreateWindowFlag_MaximizeWindow = 1 << 0,
-    kGfxCreateWindowFlag_NoResizeWindow = 1 << 1,
-    kGfxCreateWindowFlag_HideWindow     = 1 << 2
+    kGfxCreateWindowFlag_MaximizeWindow   = 1 << 0,
+    kGfxCreateWindowFlag_NoResizeWindow   = 1 << 1,
+    kGfxCreateWindowFlag_HideWindow       = 1 << 2,
+    kGfxCreateWindowFlag_FullscreenWindow = 1 << 3
 };
 typedef uint32_t GfxCreateWindowFlags;
 
@@ -122,6 +123,32 @@ public:
                                  nullptr,
                                  GetModuleHandle(nullptr),
                                  nullptr);
+
+        if (flags & kGfxCreateWindowFlag_FullscreenWindow)
+        {
+            WINDOWPLACEMENT g_wpPrev = { sizeof(g_wpPrev) };
+            DWORD           dwStyle  = GetWindowLong(window_, GWL_STYLE);
+
+            if (dwStyle & WS_OVERLAPPEDWINDOW)
+            {
+                MONITORINFO mi = { sizeof(mi) };
+                if (GetWindowPlacement(window_, &g_wpPrev) && 
+                    GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
+                {
+                    SetWindowLong(window_, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
+                    SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                                 mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                }
+            }
+            else
+            {
+                SetWindowLong(window_, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
+                SetWindowPlacement(window_, &g_wpPrev);
+                SetWindowPos(window_, NULL, 0, 0, 0, 0,
+                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+            }
+        }
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
 
