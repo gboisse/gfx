@@ -4602,10 +4602,10 @@ public:
             gfx_buffer.allocation_ = allocation;
             gfx_buffer.flags_ &= ~Object::kFlag_Named;
             gfx_buffer.flags_ |= Object::kFlag_Shared;
-            gfx_buffer.reference_count_ = (uint32_t*)malloc(sizeof(uint32_t));
+            gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
             GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
             *gfx_buffer.reference_count_ = 1;   // retain
-            gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES*)malloc(sizeof(D3D12_RESOURCE_STATES));
+            gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
             GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
             *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
