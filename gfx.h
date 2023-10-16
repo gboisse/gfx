@@ -4499,7 +4499,7 @@ public:
 
     HANDLE createBufferSharedHandle(GfxBuffer const &buffer)
     {
-        HANDLE handle = nullptr;
+        HANDLE handle = {};
         if(!buffer_handles_.has_handle(buffer.handle))
         {
             if(!!buffer)
@@ -4584,10 +4584,7 @@ public:
         WCHAR wname[ARRAYSIZE(buffer.name)] = {};
         mbstowcs(wname, buffer.name, ARRAYSIZE(buffer.name));
         if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
-        {
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared hanle from buffer object");
-            return handle;  // failed to create shared handle
-        }
         FreeSid(*ppSID);
         LocalFree(*ppACL);
         free(security_descriptor);
