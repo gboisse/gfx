@@ -460,6 +460,8 @@ ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext context, GfxAccel
 D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer buffer);
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
 
+HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
+
 //!
 //! Template helpers.
 //!
@@ -486,6 +488,8 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
 #include <deque>                // std::deque
 #include <memory>               // std::unique_ptr
 #include <direct.h>             // _mkdir()
+#include <aclapi.h>             // SetEntriesInAcl()
+#include <accctrl.h>            // EXPLICIT_ACCESS
 #include <inc/dxcapi.h>         // shader compiler
 #include <inc/d3d12shader.h>    // shader reflection
 
@@ -798,7 +802,8 @@ class GfxInternal
     {
         enum Flag
         {
-            kFlag_Named = 1 << 0
+            kFlag_Named  = 1 << 0,
+            kFlag_Shared = 1 << 1
         };
         uint32_t flags_ = 0;
     };
@@ -4490,6 +4495,103 @@ public:
             return D3D12_RESOURCE_STATE_COMMON; // invalid texture object
         Texture const &gfx_texture = textures_[texture];
         return gfx_texture.resource_state_;
+    }
+
+    HANDLE createBufferSharedHandle(GfxBuffer const &buffer)
+    {
+        HANDLE handle = nullptr;
+        if(!buffer_handles_.has_handle(buffer.handle))
+        {
+            if(!!buffer)
+                GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create shared handle from invalid buffer object");
+            return handle;  // invalid buffer object
+        }
+        if(buffer.cpu_access != kGfxCpuAccess_None)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from buffer object with CPU access");
+            return handle;  // invalid CPU access mode
+        }
+        Buffer &gfx_buffer = buffers_[buffer];
+        if(gfx_buffer.isInterop())
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from interop buffer object");
+            return handle;  // invalid buffer object type
+        }
+        if(!((gfx_buffer.flags_ & Object::kFlag_Shared) != 0))
+        {
+            ID3D12Resource *resource = nullptr;
+            D3D12MA::Allocation *allocation = nullptr;
+            D3D12MA::ALLOCATION_DESC allocation_desc = {};
+            allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+            allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
+            D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            {
+                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared buffer object");
+                return handle;  // out of memory
+            }
+            if(*gfx_buffer.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)
+            {
+                D3D12_RESOURCE_BARRIER resource_barrier = {};
+                resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                resource_barrier.Transition.pResource = gfx_buffer.resource_;
+                resource_barrier.Transition.StateBefore = *gfx_buffer.resource_state_;
+                resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
+                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                command_list_->ResourceBarrier(1, &resource_barrier);
+            }
+            if(*gfx_buffer.reference_count_ > 1)
+            {
+                free(gfx_buffer.reference_count_);
+                free(gfx_buffer.resource_state_);
+            }
+            collect(gfx_buffer);    // release previous buffer
+            command_list_->CopyResource(resource, gfx_buffer.resource_);
+            gfx_buffer.resource_ = resource;
+            gfx_buffer.allocation_ = allocation;
+            gfx_buffer.flags_ &= ~Object::kFlag_Named;
+            gfx_buffer.flags_ |= Object::kFlag_Shared;
+            gfx_buffer.reference_count_ = (uint32_t*)malloc(sizeof(uint32_t));
+            GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
+            *gfx_buffer.reference_count_ = 1;   // retain
+            gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES*)malloc(sizeof(D3D12_RESOURCE_STATES));
+            GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
+            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+        }
+        PSECURITY_DESCRIPTOR security_descriptor = {};
+        security_descriptor = (PSECURITY_DESCRIPTOR)malloc(SECURITY_DESCRIPTOR_MIN_LENGTH + 2 * sizeof(void **));
+        GFX_ASSERT(security_descriptor != nullptr);
+        PSID *ppSID = (PSID *)((PBYTE)security_descriptor + SECURITY_DESCRIPTOR_MIN_LENGTH);
+        PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
+        InitializeSecurityDescriptor(security_descriptor, SECURITY_DESCRIPTOR_REVISION);
+        SID_IDENTIFIER_AUTHORITY identifier_authority = SECURITY_WORLD_SID_AUTHORITY;
+        AllocateAndInitializeSid(&identifier_authority, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, ppSID);
+        EXPLICIT_ACCESS
+        explicit_access                      = {};
+        explicit_access.grfAccessPermissions = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
+        explicit_access.grfAccessMode        = SET_ACCESS;
+        explicit_access.grfInheritance       = INHERIT_ONLY;
+        explicit_access.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+        explicit_access.Trustee.TrusteeType  = TRUSTEE_IS_WELL_KNOWN_GROUP;
+        explicit_access.Trustee.ptstrName    = (LPTSTR)*ppSID;
+        SetEntriesInAcl(1, &explicit_access, nullptr, ppACL);
+        SetSecurityDescriptorDacl(security_descriptor, TRUE, *ppACL, FALSE);
+        SECURITY_ATTRIBUTES
+        security_attributes                      = {};
+        security_attributes.nLength              = sizeof(security_attributes);
+        security_attributes.lpSecurityDescriptor = security_descriptor;
+        security_attributes.bInheritHandle       = TRUE;
+        WCHAR wname[ARRAYSIZE(buffer.name)] = {};
+        mbstowcs(wname, buffer.name, ARRAYSIZE(buffer.name));
+        if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared hanle from buffer object");
+            return handle;  // failed to create shared handle
+        }
+        FreeSid(*ppSID);
+        LocalFree(*ppACL);
+        free(security_descriptor);
+        return handle;
     }
 
     void resetState()
@@ -9651,6 +9753,13 @@ D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture 
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return D3D12_RESOURCE_STATE_COMMON;    // invalid context
     return gfx->getTextureResourceState(texture);
+}
+
+HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;    // invalid context
+    return gfx->createBufferSharedHandle(buffer);
 }
 
 #endif //! GFX_IMPLEMENTATION_DEFINE
