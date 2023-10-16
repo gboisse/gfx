@@ -4613,7 +4613,7 @@ public:
         WindowsSecurityAttributes security_attributes;
         mbstowcs(wname, buffer.name, ARRAYSIZE(buffer.name));
         if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
-            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared hanle from buffer object");
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object");
         return handle;
     }
 
