@@ -4561,9 +4561,9 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from interop buffer object");
             return handle;  // invalid buffer object type
         }
-        if(gfx_buffer.data_offset_ != 0)
+        if(*gfx_buffer.reference_count_ != 1)
         {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from buffer range");
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from ranged buffer");
             return handle;  // invalid buffer range
         }
         if(!((gfx_buffer.flags_ & Object::kFlag_Shared) != 0))
@@ -4590,14 +4590,8 @@ public:
                 resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                 command_list_->ResourceBarrier(1, &resource_barrier);
             }
-            command_list_->CopyResource(resource, gfx_buffer.resource_);
-            bool const should_free = (*gfx_buffer.reference_count_ > 1);
             collect(gfx_buffer);    // release previous buffer
-            if(should_free)
-            {
-                free(gfx_buffer.reference_count_);
-                free(gfx_buffer.resource_state_);
-            }
+            command_list_->CopyResource(resource, gfx_buffer.resource_);
             gfx_buffer.resource_ = resource;
             gfx_buffer.allocation_ = allocation;
             gfx_buffer.flags_ &= ~Object::kFlag_Named;
