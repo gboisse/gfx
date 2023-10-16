@@ -1281,6 +1281,50 @@ class GfxInternal
     GfxArray<Sbt> sbts_;
     GfxHandles sbt_handles_;
 
+    struct WindowsSecurityAttributes
+    {
+        SECURITY_ATTRIBUTES security_attributes_ = {};
+        PSECURITY_DESCRIPTOR security_descriptor_ = {};
+
+        inline SECURITY_ATTRIBUTES *operator &()
+        {
+            return &security_attributes_;
+        }
+
+        inline WindowsSecurityAttributes()
+        {
+            security_descriptor_ = (PSECURITY_DESCRIPTOR)malloc(SECURITY_DESCRIPTOR_MIN_LENGTH + 2 * sizeof(void**));
+            GFX_ASSERT(security_descriptor_ != nullptr);
+            PSID *ppSID = (PSID *)((PBYTE)security_descriptor_ + SECURITY_DESCRIPTOR_MIN_LENGTH);
+            PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
+            InitializeSecurityDescriptor(security_descriptor_, SECURITY_DESCRIPTOR_REVISION);
+            SID_IDENTIFIER_AUTHORITY identifier_authority = SECURITY_WORLD_SID_AUTHORITY;
+            AllocateAndInitializeSid(&identifier_authority, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, ppSID);
+            EXPLICIT_ACCESS
+            explicit_access                      = {};
+            explicit_access.grfAccessPermissions = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
+            explicit_access.grfAccessMode        = SET_ACCESS;
+            explicit_access.grfInheritance       = INHERIT_ONLY;
+            explicit_access.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+            explicit_access.Trustee.TrusteeType  = TRUSTEE_IS_WELL_KNOWN_GROUP;
+            explicit_access.Trustee.ptstrName    = (LPTSTR)*ppSID;
+            SetEntriesInAcl(1, &explicit_access, nullptr, ppACL);
+            SetSecurityDescriptorDacl(security_descriptor_, TRUE, *ppACL, FALSE);
+            security_attributes_.nLength              = sizeof(security_attributes_);
+            security_attributes_.lpSecurityDescriptor = security_descriptor_;
+            security_attributes_.bInheritHandle       = TRUE;
+        }
+
+        inline ~WindowsSecurityAttributes()
+        {
+            PSID *ppSID = (PSID *)((PBYTE)security_descriptor_ + SECURITY_DESCRIPTOR_MIN_LENGTH);
+            PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
+            FreeSid(*ppSID);
+            LocalFree(*ppACL);
+            free(security_descriptor_);
+        }
+    };
+
 public:
     GfxInternal(GfxContext &gfx) : buffer_handles_("buffer"), texture_handles_("texture"), sampler_state_handles_("sampler state")
                                  , acceleration_structure_handles_("acceleration structure"), raytracing_primitive_handles_("raytracing primitive")
@@ -4565,36 +4609,11 @@ public:
             GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
             *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
-        PSECURITY_DESCRIPTOR security_descriptor = {};
-        security_descriptor = (PSECURITY_DESCRIPTOR)malloc(SECURITY_DESCRIPTOR_MIN_LENGTH + 2 * sizeof(void **));
-        GFX_ASSERT(security_descriptor != nullptr);
-        PSID *ppSID = (PSID *)((PBYTE)security_descriptor + SECURITY_DESCRIPTOR_MIN_LENGTH);
-        PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
-        InitializeSecurityDescriptor(security_descriptor, SECURITY_DESCRIPTOR_REVISION);
-        SID_IDENTIFIER_AUTHORITY identifier_authority = SECURITY_WORLD_SID_AUTHORITY;
-        AllocateAndInitializeSid(&identifier_authority, 1, SECURITY_WORLD_RID, 0, 0, 0, 0, 0, 0, 0, ppSID);
-        EXPLICIT_ACCESS
-        explicit_access                      = {};
-        explicit_access.grfAccessPermissions = STANDARD_RIGHTS_ALL | SPECIFIC_RIGHTS_ALL;
-        explicit_access.grfAccessMode        = SET_ACCESS;
-        explicit_access.grfInheritance       = INHERIT_ONLY;
-        explicit_access.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
-        explicit_access.Trustee.TrusteeType  = TRUSTEE_IS_WELL_KNOWN_GROUP;
-        explicit_access.Trustee.ptstrName    = (LPTSTR)*ppSID;
-        SetEntriesInAcl(1, &explicit_access, nullptr, ppACL);
-        SetSecurityDescriptorDacl(security_descriptor, TRUE, *ppACL, FALSE);
-        SECURITY_ATTRIBUTES
-        security_attributes                      = {};
-        security_attributes.nLength              = sizeof(security_attributes);
-        security_attributes.lpSecurityDescriptor = security_descriptor;
-        security_attributes.bInheritHandle       = TRUE;
         WCHAR wname[ARRAYSIZE(buffer.name)] = {};
+        WindowsSecurityAttributes security_attributes;
         mbstowcs(wname, buffer.name, ARRAYSIZE(buffer.name));
         if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared hanle from buffer object");
-        FreeSid(*ppSID);
-        LocalFree(*ppACL);
-        free(security_descriptor);
         return handle;
     }
 
