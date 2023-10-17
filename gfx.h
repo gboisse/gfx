@@ -4563,7 +4563,7 @@ public:
         }
         if(*gfx_buffer.reference_count_ != 1)
         {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from ranged buffer");
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from ranged buffer object");
             return handle;  // invalid buffer range
         }
         if(!((gfx_buffer.flags_ & Object::kFlag_Shared) != 0))
