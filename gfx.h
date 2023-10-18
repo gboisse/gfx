@@ -3016,6 +3016,7 @@ public:
 
     GfxResult reloadAllKernels()
     {
+        clearPipelines();   // clear shader cache
         for(uint32_t i = 0; i < kernels_.size(); ++i)
             reloadKernel(kernels_.data()[i]);
         return kGfxResult_NoError;
