@@ -1054,6 +1054,7 @@ class GfxInternal
             return (*it).second;    // ^ assert on hashing conflicts
         }
 
+        uint64_t id_ = 0;
         String cs_;
         String as_;
         String ms_;
@@ -1275,6 +1276,25 @@ class GfxInternal
     };
     GfxArray<Sbt> sbts_;
     GfxHandles sbt_handles_;
+
+    struct Pipeline
+    {
+        IDxcBlob *cs_bytecode_ = nullptr;
+        IDxcBlob *as_bytecode_ = nullptr;
+        IDxcBlob *ms_bytecode_ = nullptr;
+        IDxcBlob *vs_bytecode_ = nullptr;
+        IDxcBlob *gs_bytecode_ = nullptr;
+        IDxcBlob *ps_bytecode_ = nullptr;
+        IDxcBlob *lib_bytecode_ = nullptr;
+        ID3D12ShaderReflection *cs_reflection_ = nullptr;
+        ID3D12ShaderReflection *as_reflection_ = nullptr;
+        ID3D12ShaderReflection *ms_reflection_ = nullptr;
+        ID3D12ShaderReflection *vs_reflection_ = nullptr;
+        ID3D12ShaderReflection *gs_reflection_ = nullptr;
+        ID3D12ShaderReflection *ps_reflection_ = nullptr;
+        ID3D12LibraryReflection *lib_reflection_ = nullptr;
+    };
+    std::map<uint64_t, Pipeline> pipelines_;
 
 public:
     GfxInternal(GfxContext &gfx) : buffer_handles_("buffer"), texture_handles_("texture"), sampler_state_handles_("sampler state")
@@ -1715,6 +1735,7 @@ public:
             }
         free(timestamp_query_heaps_);
 
+        clearPipelines();
         forceGarbageCollection();
         freelist_descriptors_.clear();
         freelist_dsv_descriptors_.clear();
@@ -2613,6 +2634,8 @@ public:
         shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_5" : "6_0");
         program.handle = program_handles_.allocate_handle();
         Program &gfx_program = programs_.insert(program);
+        HashCombine(gfx_program.id_, Hash(file_name));
+        HashCombine(gfx_program.id_, Hash(file_path));
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_name_ = file_name;
         gfx_program.file_path_ = file_path;
@@ -2629,6 +2652,13 @@ public:
             GFX_SNPRINTF(program.name, sizeof(program.name), "gfx_Program%llu", program.handle);
         shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_5" : "6_0");
         Program &gfx_program = programs_.insert(program);
+        HashCombine(gfx_program.id_, Hash(program_desc.cs));
+        HashCombine(gfx_program.id_, Hash(program_desc.as));
+        HashCombine(gfx_program.id_, Hash(program_desc.ms));
+        HashCombine(gfx_program.id_, Hash(program_desc.vs));
+        HashCombine(gfx_program.id_, Hash(program_desc.gs));
+        HashCombine(gfx_program.id_, Hash(program_desc.ps));
+        HashCombine(gfx_program.id_, Hash(program_desc.lib));
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_path_ = program.name;
         gfx_program.cs_ = program_desc.cs;
@@ -4645,7 +4675,6 @@ private:
     static uint64_t Hash(char const *value)
     {
         uint64_t hash = 0;
-        GFX_ASSERT(value != nullptr);
         if(value == nullptr) return hash;
         while(*value)
         {
@@ -4653,6 +4682,13 @@ private:
             ++value;
         }
         return hash;
+    }
+
+    // https://stackoverflow.com/a/2595226
+    template<typename TYPE>
+    static void HashCombine(uint64_t &seed, TYPE const &value)
+    {
+        seed ^= std::hash<TYPE>{}(value) + 0x9e3779b9 + (seed << 6) + (seed >> 2);
     }
 
     template<typename TYPE>
@@ -8124,6 +8160,121 @@ private:
             }
     }
 
+    static inline uint64_t GetPipelineKey(Program const &program, Kernel const &kernel)
+    {
+        uint64_t key = 0;
+        HashCombine(key, program.id_);
+        HashCombine(key, kernel.type_);
+        for(String const &define : kernel.defines_)
+            HashCombine(key, Hash(define.c_str()));
+        HashCombine(key, Hash(kernel.entry_point_.c_str()));
+        return key;
+    }
+
+    bool loadPipeline(Program const &program, Kernel &kernel)
+    {
+        std::map<uint64_t, Pipeline>::const_iterator const it = pipelines_.find(GetPipelineKey(program, kernel));
+        if(it == pipelines_.end()) return false;    // no pipeline found
+        kernel.cs_bytecode_ = (*it).second.cs_bytecode_;
+        kernel.as_bytecode_ = (*it).second.as_bytecode_;
+        kernel.ms_bytecode_ = (*it).second.ms_bytecode_;
+        kernel.vs_bytecode_ = (*it).second.vs_bytecode_;
+        kernel.gs_bytecode_ = (*it).second.gs_bytecode_;
+        kernel.ps_bytecode_ = (*it).second.ps_bytecode_;
+        kernel.lib_bytecode_ = (*it).second.lib_bytecode_;
+        kernel.cs_reflection_ = (*it).second.cs_reflection_;
+        kernel.as_reflection_ = (*it).second.as_reflection_;
+        kernel.ms_reflection_ = (*it).second.ms_reflection_;
+        kernel.vs_reflection_ = (*it).second.vs_reflection_;
+        kernel.gs_reflection_ = (*it).second.gs_reflection_;
+        kernel.ps_reflection_ = (*it).second.ps_reflection_;
+        kernel.lib_reflection_ = (*it).second.lib_reflection_;
+        if(kernel.cs_bytecode_ != nullptr) kernel.cs_bytecode_->AddRef();
+        if(kernel.as_bytecode_ != nullptr) kernel.as_bytecode_->AddRef();
+        if(kernel.ms_bytecode_ != nullptr) kernel.ms_bytecode_->AddRef();
+        if(kernel.vs_bytecode_ != nullptr) kernel.vs_bytecode_->AddRef();
+        if(kernel.gs_bytecode_ != nullptr) kernel.gs_bytecode_->AddRef();
+        if(kernel.ps_bytecode_ != nullptr) kernel.ps_bytecode_->AddRef();
+        if(kernel.lib_bytecode_ != nullptr) kernel.lib_bytecode_->AddRef();
+        if(kernel.cs_reflection_ != nullptr) kernel.cs_reflection_->AddRef();
+        if(kernel.as_reflection_ != nullptr) kernel.as_reflection_->AddRef();
+        if(kernel.ms_reflection_ != nullptr) kernel.ms_reflection_->AddRef();
+        if(kernel.vs_reflection_ != nullptr) kernel.vs_reflection_->AddRef();
+        if(kernel.gs_reflection_ != nullptr) kernel.gs_reflection_->AddRef();
+        if(kernel.ps_reflection_ != nullptr) kernel.ps_reflection_->AddRef();
+        if(kernel.lib_reflection_ != nullptr) kernel.lib_reflection_->AddRef();
+        return true;
+    }
+
+    void storePipeline(Program const &program, Kernel const &kernel)
+    {
+        Pipeline &pipeline = pipelines_[GetPipelineKey(program, kernel)];
+        if(pipeline.cs_bytecode_ != nullptr) pipeline.cs_bytecode_->Release();
+        if(pipeline.as_bytecode_ != nullptr) pipeline.as_bytecode_->Release();
+        if(pipeline.ms_bytecode_ != nullptr) pipeline.ms_bytecode_->Release();
+        if(pipeline.vs_bytecode_ != nullptr) pipeline.vs_bytecode_->Release();
+        if(pipeline.gs_bytecode_ != nullptr) pipeline.gs_bytecode_->Release();
+        if(pipeline.ps_bytecode_ != nullptr) pipeline.ps_bytecode_->Release();
+        if(pipeline.lib_bytecode_ != nullptr) pipeline.lib_bytecode_->Release();
+        if(pipeline.cs_reflection_ != nullptr) pipeline.cs_reflection_->Release();
+        if(pipeline.as_reflection_ != nullptr) pipeline.as_reflection_->Release();
+        if(pipeline.ms_reflection_ != nullptr) pipeline.ms_reflection_->Release();
+        if(pipeline.vs_reflection_ != nullptr) pipeline.vs_reflection_->Release();
+        if(pipeline.gs_reflection_ != nullptr) pipeline.gs_reflection_->Release();
+        if(pipeline.ps_reflection_ != nullptr) pipeline.ps_reflection_->Release();
+        if(pipeline.lib_reflection_ != nullptr) pipeline.lib_reflection_->Release();
+        pipeline.cs_bytecode_ = kernel.cs_bytecode_;
+        pipeline.as_bytecode_ = kernel.as_bytecode_;
+        pipeline.ms_bytecode_ = kernel.ms_bytecode_;
+        pipeline.vs_bytecode_ = kernel.vs_bytecode_;
+        pipeline.gs_bytecode_ = kernel.gs_bytecode_;
+        pipeline.ps_bytecode_ = kernel.ps_bytecode_;
+        pipeline.lib_bytecode_ = kernel.lib_bytecode_;
+        pipeline.cs_reflection_ = kernel.cs_reflection_;
+        pipeline.as_reflection_ = kernel.as_reflection_;
+        pipeline.ms_reflection_ = kernel.ms_reflection_;
+        pipeline.vs_reflection_ = kernel.vs_reflection_;
+        pipeline.gs_reflection_ = kernel.gs_reflection_;
+        pipeline.ps_reflection_ = kernel.ps_reflection_;
+        pipeline.lib_reflection_ = kernel.lib_reflection_;
+        if(pipeline.cs_bytecode_ != nullptr) pipeline.cs_bytecode_->AddRef();
+        if(pipeline.as_bytecode_ != nullptr) pipeline.as_bytecode_->AddRef();
+        if(pipeline.ms_bytecode_ != nullptr) pipeline.ms_bytecode_->AddRef();
+        if(pipeline.vs_bytecode_ != nullptr) pipeline.vs_bytecode_->AddRef();
+        if(pipeline.gs_bytecode_ != nullptr) pipeline.gs_bytecode_->AddRef();
+        if(pipeline.ps_bytecode_ != nullptr) pipeline.ps_bytecode_->AddRef();
+        if(pipeline.lib_bytecode_ != nullptr) pipeline.lib_bytecode_->AddRef();
+        if(pipeline.cs_reflection_ != nullptr) pipeline.cs_reflection_->AddRef();
+        if(pipeline.as_reflection_ != nullptr) pipeline.as_reflection_->AddRef();
+        if(pipeline.ms_reflection_ != nullptr) pipeline.ms_reflection_->AddRef();
+        if(pipeline.vs_reflection_ != nullptr) pipeline.vs_reflection_->AddRef();
+        if(pipeline.gs_reflection_ != nullptr) pipeline.gs_reflection_->AddRef();
+        if(pipeline.ps_reflection_ != nullptr) pipeline.ps_reflection_->AddRef();
+        if(pipeline.lib_reflection_ != nullptr) pipeline.lib_reflection_->AddRef();
+    }
+
+    void clearPipelines()
+    {
+        for(std::map<uint64_t, Pipeline>::iterator it = pipelines_.begin(); it != pipelines_.end(); ++it)
+        {
+            if((*it).second.cs_bytecode_ != nullptr) (*it).second.cs_bytecode_->Release();
+            if((*it).second.as_bytecode_ != nullptr) (*it).second.as_bytecode_->Release();
+            if((*it).second.ms_bytecode_ != nullptr) (*it).second.ms_bytecode_->Release();
+            if((*it).second.vs_bytecode_ != nullptr) (*it).second.vs_bytecode_->Release();
+            if((*it).second.gs_bytecode_ != nullptr) (*it).second.gs_bytecode_->Release();
+            if((*it).second.ps_bytecode_ != nullptr) (*it).second.ps_bytecode_->Release();
+            if((*it).second.lib_bytecode_ != nullptr) (*it).second.lib_bytecode_->Release();
+            if((*it).second.cs_reflection_ != nullptr) (*it).second.cs_reflection_->Release();
+            if((*it).second.as_reflection_ != nullptr) (*it).second.as_reflection_->Release();
+            if((*it).second.ms_reflection_ != nullptr) (*it).second.ms_reflection_->Release();
+            if((*it).second.vs_reflection_ != nullptr) (*it).second.vs_reflection_->Release();
+            if((*it).second.gs_reflection_ != nullptr) (*it).second.gs_reflection_->Release();
+            if((*it).second.ps_reflection_ != nullptr) (*it).second.ps_reflection_->Release();
+            if((*it).second.lib_reflection_ != nullptr) (*it).second.lib_reflection_->Release();
+        }
+        pipelines_.clear();
+    }
+
     GfxResult createKernel(Program const &program, Kernel &kernel)
     {
         char buffer[2048];
@@ -8137,15 +8288,19 @@ private:
         GFX_ASSERT(kernel.gs_bytecode_ == nullptr && kernel.gs_reflection_ == nullptr);
         GFX_ASSERT(kernel.ps_bytecode_ == nullptr && kernel.ps_reflection_ == nullptr);
         GFX_ASSERT(kernel.lib_bytecode_ == nullptr && kernel.lib_reflection_ == nullptr);
+        bool const compile_shaders = !loadPipeline(program, kernel);
         GFX_ASSERT(kernel.root_signature_ == nullptr);
         GFX_ASSERT(kernel.pipeline_state_ == nullptr);
         GFX_ASSERT(kernel.parameters_ == nullptr);
         if(kernel.isMesh())
         {
             kernel_type = "Mesh";
-            compileShader(program, kernel, kShaderType_AS, kernel.as_bytecode_, kernel.as_reflection_);
-            compileShader(program, kernel, kShaderType_MS, kernel.ms_bytecode_, kernel.ms_reflection_);
-            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            if(compile_shaders)
+            {
+                compileShader(program, kernel, kShaderType_AS, kernel.as_bytecode_, kernel.as_reflection_);
+                compileShader(program, kernel, kShaderType_MS, kernel.ms_bytecode_, kernel.ms_reflection_);
+                compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            }
             createRootSignature(kernel);
             result = createMeshPipelineState(kernel, kernel.draw_state_);
             if(kernel.as_reflection_ != nullptr)
@@ -8158,7 +8313,8 @@ private:
         else if(kernel.isCompute())
         {
             kernel_type = "Compute";
-            compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
+            if(compile_shaders)
+                compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
             createRootSignature(kernel);
             createComputePipelineState(kernel);
             if(kernel.cs_reflection_ != nullptr)
@@ -8169,21 +8325,26 @@ private:
         else if(kernel.isGraphics())
         {
             kernel_type = "Graphics";
-            compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_);
-            compileShader(program, kernel, kShaderType_GS, kernel.gs_bytecode_, kernel.gs_reflection_);
-            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            if(compile_shaders)
+            {
+                compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_);
+                compileShader(program, kernel, kShaderType_GS, kernel.gs_bytecode_, kernel.gs_reflection_);
+                compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            }
             createRootSignature(kernel);
             result = createGraphicsPipelineState(kernel, kernel.draw_state_);
         }
         else if(kernel.isRaytracing())
         {
             kernel_type = "Raytracing";
-            compileShader(program, kernel, kShaderType_LIB, kernel.lib_bytecode_, kernel.lib_reflection_);
+            if(compile_shaders)
+                compileShader(program, kernel, kShaderType_LIB, kernel.lib_bytecode_, kernel.lib_reflection_);
             createRootSignature(kernel);
             createRaytracingPipelineState(kernel);
         }
         else
             return GFX_SET_ERROR(kGfxResult_InternalError, "Cannot create unsupported kernel type");
+        storePipeline(program, kernel); // cache compilation artefacts
         if(kernel.root_signature_ != nullptr)
         {
             GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
