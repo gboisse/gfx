@@ -8256,7 +8256,7 @@ private:
 
     void clearPipelines()
     {
-        for(std::map<uint64_t, Pipeline>::iterator it = pipelines_.begin(); it != pipelines_.end(); ++it)
+        for(std::map<uint64_t, Pipeline>::const_iterator it = pipelines_.begin(); it != pipelines_.end(); ++it)
         {
             if((*it).second.cs_bytecode_ != nullptr) (*it).second.cs_bytecode_->Release();
             if((*it).second.as_bytecode_ != nullptr) (*it).second.as_bytecode_->Release();
