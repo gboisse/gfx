@@ -4263,17 +4263,17 @@ public:
         return kGfxResult_NoError;
     }
 
-    ID3D12Device *getDevice() const
+    inline ID3D12Device *getDevice() const
     {
         return device_;
     }
 
-    ID3D12CommandQueue *getCommandQueue() const
+    inline ID3D12CommandQueue *getCommandQueue() const
     {
         return command_queue_;
     }
 
-    ID3D12GraphicsCommandList *getCommandList() const
+    inline ID3D12GraphicsCommandList *getCommandList() const
     {
         return command_list_;
     }
