@@ -802,8 +802,7 @@ class GfxInternal
     {
         enum Flag
         {
-            kFlag_Named  = 1 << 0,
-            kFlag_Shared = 1 << 1
+            kFlag_Named = 1 << 0
         };
         uint32_t flags_ = 0;
     };
@@ -4566,7 +4565,13 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from ranged buffer object");
             return handle;  // invalid buffer range
         }
-        if(!((gfx_buffer.flags_ & Object::kFlag_Shared) != 0))
+        D3D12_HEAP_FLAGS heap_flags = D3D12_HEAP_FLAG_NONE;
+        if(!SUCCEEDED(gfx_buffer.resource_->GetHeapProperties(nullptr, &heap_flags)))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Cannot query heap information from buffer object");
+            return handle;  // internal error
+        }
+        if(!((heap_flags & D3D12_HEAP_FLAG_SHARED) != 0))
         {
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
@@ -4595,7 +4600,6 @@ public:
             gfx_buffer.resource_ = resource;
             gfx_buffer.allocation_ = allocation;
             gfx_buffer.flags_ &= ~Object::kFlag_Named;
-            gfx_buffer.flags_ |= Object::kFlag_Shared;
             gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
             GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
             *gfx_buffer.reference_count_ = 1;   // retain
