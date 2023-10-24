@@ -1424,8 +1424,9 @@ public:
         swap_chain_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
         swap_chain_desc.BufferCount      = max_frames_in_flight_;
         swap_chain_desc.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swap_chain_desc.SampleDesc.Count = 1;
+        swap_chain_desc.Flags            = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
         IDXGISwapChain1 *swap_chain = nullptr;
         if(!SUCCEEDED(factory->CreateSwapChainForHwnd(command_queue_, window_, &swap_chain_desc, nullptr, nullptr, &swap_chain)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create swap chain");
@@ -4205,7 +4206,7 @@ public:
             ID3D12CommandList *const command_lists[] = { command_list_ };
             command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
             command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
-            swap_chain_->Present(vsync ? 1 : 0, 0); // toggle vsync
+            swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING); // toggle vsync
             uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
             uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
             fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
