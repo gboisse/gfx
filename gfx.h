@@ -4206,7 +4206,7 @@ public:
             ID3D12CommandList *const command_lists[] = { command_list_ };
             command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
             command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
-            swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING); // toggle vsync
+            swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING);
             uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
             uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
             fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
@@ -8657,7 +8657,7 @@ private:
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i) { collect(back_buffers_[i]); back_buffers_[i] = nullptr; }
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i) { freeRTVDescriptor(back_buffer_rtvs_[i]); back_buffer_rtvs_[i] = 0xFFFFFFFFu; }
         sync(); // make sure the GPU is done with the previous swap chain before resizing
-        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         if(!SUCCEEDED(hr))
