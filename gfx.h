@@ -6007,10 +6007,14 @@ private:
             uint32_t render_width = 0xFFFFFFFFu, render_height = 0xFFFFFFFFu;
             D3D12_CPU_DESCRIPTOR_HANDLE color_targets[kGfxConstant_MaxRenderTarget] = {};
             for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_targets_); ++i)
-                if(!bound_color_targets_[i] || kernel.draw_state_.color_targets_[i].texture_format_ == DXGI_FORMAT_UNKNOWN)
-                    continue;   // no valid bound color target at index or no color target needed
-                else
+                if(!bound_color_targets_[i])
                 {
+                    if (kernel.draw_state_.color_targets_[i].texture_format_ != DXGI_FORMAT_UNKNOWN)
+                        return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at color target %u", i);
+                }
+                else if (kernel.draw_state_.color_targets_[i].texture_format_ != DXGI_FORMAT_UNKNOWN)
+                {
+                     // valid bound color target and draw state requires one
                     GfxTexture const &texture = bound_color_targets_[i];
                     if(!texture_handles_.has_handle(texture.handle))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at color target %u", i);
@@ -6025,7 +6029,12 @@ private:
                     transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
                     color_target_count = i + 1;
                 }
-            if(bound_depth_stencil_target_ && kernel.draw_state_.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
+            if(!bound_depth_stencil_target_)
+            {
+                if(kernel.draw_state_.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
+                    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at depth/stencil target");
+            }
+            else if(kernel.draw_state_.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
             {
                 GfxTexture const &texture = bound_depth_stencil_target_;
                 if(!texture_handles_.has_handle(texture.handle))
