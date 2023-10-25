@@ -1402,6 +1402,31 @@ public:
         device_->QueryInterface(IID_PPV_ARGS(&mesh_device_));
         SetDebugName(device_, "gfx_Device");
 
+        if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
+        {
+            ID3D12InfoQueue1 *debugCallback;
+            if(SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&debugCallback))))
+            {
+                D3D12MessageFunc callback = [](D3D12_MESSAGE_CATEGORY  Category,
+                                                D3D12_MESSAGE_SEVERITY Severity, D3D12_MESSAGE_ID ID,
+                                                LPCSTR pDescription, void *pContext) {
+                    if(Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
+                    {
+                        GFX_PRINTLN("D3D12 Error: %s", pDescription);
+                        GFX_ASSERT(false);
+                    }
+                    else if(Severity == D3D12_MESSAGE_SEVERITY_WARNING)
+                    {
+                        GFX_PRINTLN("D3D12 Warning: %s", pDescription);
+                    }
+                };
+                DWORD cookie;
+                debugCallback->RegisterMessageCallback(
+                    callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, this, &cookie);
+                debugCallback->Release();
+            }
+        }
+
         D3D12_COMMAND_QUEUE_DESC
         queue_desc      = {};
         queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
