@@ -1411,14 +1411,9 @@ public:
                                                 D3D12_MESSAGE_SEVERITY Severity, D3D12_MESSAGE_ID ID,
                                                 LPCSTR pDescription, void *pContext) {
                     if(Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
-                    {
-                        GFX_PRINTLN("D3D12 Error: %s", pDescription);
-                        GFX_ASSERT(false);
-                    }
+                        GFX_ASSERTMSG(0, "D3D12 Error: %s", pDescription);
                     else if(Severity == D3D12_MESSAGE_SEVERITY_WARNING)
-                    {
                         GFX_PRINTLN("D3D12 Warning: %s", pDescription);
-                    }
                 };
                 DWORD cookie;
                 debugCallback->RegisterMessageCallback(
