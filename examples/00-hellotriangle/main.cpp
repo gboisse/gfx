@@ -26,7 +26,11 @@ SOFTWARE.
 int main()
 {
     auto window = gfxCreateWindow(1280, 720, "gfx - Hello, triangle!");
-    auto gfx = gfxCreateContext(window);
+#if _DEBUG
+    auto gfx    = gfxCreateContext(window, kGfxCreateContextFlag_EnableDebugLayer);
+#else
+    auto gfx    = gfxCreateContext(window);
+#endif
 
     float vertices[] = {  0.5f, -0.5f, 0.0f,
                           0.0f,  0.7f, 0.0f,

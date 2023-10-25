@@ -39,7 +39,11 @@ char const *scene_path           = "data/SciFiHelmet/glTF/SciFiHelmet.gltf";
 int main()
 {
     GfxWindow  window = gfxCreateWindow(1280, 720, "gfx - PBR");
+#if _DEBUG
+    GfxContext gfx    = gfxCreateContext(window, kGfxCreateContextFlag_EnableDebugLayer);
+#else
     GfxContext gfx    = gfxCreateContext(window);
+#endif
     GfxScene   scene  = gfxCreateScene();
     gfxImGuiInitialize(gfx);
 
