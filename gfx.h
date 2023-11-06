@@ -128,7 +128,9 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32
                    inline uint32_t getMipLevels() const { return mip_levels; } };
 
 GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr);  // creates auto-resize window-sized texture
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, uint32_t mip_levels); // creates auto-resize window-sized texture with mips
+GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format,
+    uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
@@ -1945,6 +1947,11 @@ public:
     GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
     {
         return createTexture2D(window_width_, window_height_, format, 1, clear_value, Texture::kFlag_AutoResize);
+    }
+
+    GfxTexture createTexture2D(DXGI_FORMAT format, uint32_t mip_levels)
+    {
+        return createTexture2D(window_width_, window_height_, format, mip_levels, nullptr, Texture::kFlag_AutoResize);
     }
 
     GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, uint32_t flags = 0)
@@ -8629,6 +8636,8 @@ private:
             resource_desc        = texture.resource_->GetDesc();
             resource_desc.Width  = window_width;
             resource_desc.Height = window_height;
+            if (resource_desc.MipLevels > 1)
+                resource_desc.MipLevels = gfxCalculateMipCount(window_width, window_height);
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
             if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
@@ -8794,6 +8803,14 @@ GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float cons
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
     return gfx->createTexture2D(format, clear_value);
+}
+
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, uint32_t mip_levels)
+{
+    GfxTexture const texture = {};
+    GfxInternal     *gfx     = GfxInternal::GetGfx(context);
+    if (!gfx) return texture; // invalid context
+    return gfx->createTexture2D(format, mip_levels);
 }
 
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
