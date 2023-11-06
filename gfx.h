@@ -8634,10 +8634,16 @@ private:
             D3D12MA::Allocation *allocation = nullptr;
             D3D12_RESOURCE_DESC
             resource_desc        = texture.resource_->GetDesc();
+            if(resource_desc.MipLevels > 1)
+            {
+                uint32_t max_mips = gfxCalculateMipCount(window_width, window_height);
+                if(resource_desc.MipLevels == (UINT16)gfxCalculateMipCount((uint32_t)resource_desc.Width, (uint32_t)resource_desc.Height))
+                    resource_desc.MipLevels = max_mips;
+                else
+                    resource_desc.MipLevels = GFX_MIN((uint32_t)resource_desc.MipLevels, max_mips);
+            }
             resource_desc.Width  = window_width;
             resource_desc.Height = window_height;
-            if (resource_desc.MipLevels > 1)
-                resource_desc.MipLevels = gfxCalculateMipCount(window_width, window_height);
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
             if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
