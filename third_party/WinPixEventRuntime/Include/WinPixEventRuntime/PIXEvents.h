@@ -1,5 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-
 /*==========================================================================;
  *
  *  Copyright (C) Microsoft Corporation.  All Rights Reserved.
@@ -29,52 +27,13 @@
 # endif
 #endif
 
-// Xbox does not support CPU events for retail scenarios
+ // Xbox does not support CPU events for retail scenarios
 #if defined(USE_PIX) || !defined(PIX_XBOX)
 #define PIX_CONTEXT_EMIT_CPU_EVENTS
 #endif
 
 namespace PIXEventsDetail
 {
-    template<typename... ARGS>
-    struct PIXEventTypeInferer
-    {
-        static constexpr PIXEventType Begin() { return PIXEvent_BeginEvent_VarArgs; }
-        static constexpr PIXEventType SetMarker() { return PIXEvent_SetMarker_VarArgs; }
-        static constexpr PIXEventType BeginOnContext() { return PIXEvent_BeginEvent_OnContext_VarArgs; }
-        static constexpr PIXEventType SetMarkerOnContext() { return PIXEvent_SetMarker_OnContext_VarArgs; }
-
-        // Xbox and Windows store different types of events for context events.
-        // On Xbox these include a context argument, while on Windows they do
-        // not. It is important not to change the event types used on the
-        // Windows version as there are OS components (eg debug layer & DRED)
-        // that decode event structs.
-#ifdef PIX_XBOX
-        static constexpr PIXEventType GpuBeginOnContext() { return PIXEvent_BeginEvent_OnContext_VarArgs; }
-        static constexpr PIXEventType GpuSetMarkerOnContext() { return PIXEvent_SetMarker_OnContext_VarArgs; }
-#else
-        static constexpr PIXEventType GpuBeginOnContext() { return PIXEvent_BeginEvent_VarArgs; }
-        static constexpr PIXEventType GpuSetMarkerOnContext() { return PIXEvent_SetMarker_VarArgs; }
-#endif
-    };
-
-    template<>
-    struct PIXEventTypeInferer<>
-    {
-        static constexpr PIXEventType Begin() { return PIXEvent_BeginEvent_NoArgs; }
-        static constexpr PIXEventType SetMarker() { return PIXEvent_SetMarker_NoArgs; }
-        static constexpr PIXEventType BeginOnContext() { return PIXEvent_BeginEvent_OnContext_NoArgs; }
-        static constexpr PIXEventType SetMarkerOnContext() { return PIXEvent_SetMarker_OnContext_NoArgs; }
-
-#ifdef PIX_XBOX
-        static constexpr PIXEventType GpuBeginOnContext() { return PIXEvent_BeginEvent_OnContext_NoArgs; }
-        static constexpr PIXEventType GpuSetMarkerOnContext() { return PIXEvent_SetMarker_OnContext_NoArgs; }
-#else
-        static constexpr PIXEventType GpuBeginOnContext() { return PIXEvent_BeginEvent_NoArgs; }
-        static constexpr PIXEventType GpuSetMarkerOnContext() { return PIXEvent_SetMarker_NoArgs; }
-#endif
-    };
-
     inline void PIXCopyEventArguments(_Out_writes_to_ptr_(limit) UINT64*& destination, _In_ const UINT64* limit)
     {
         // nothing
@@ -89,14 +48,56 @@ namespace PIXEventsDetail
         PIXCopyEventArguments(destination, limit, args...);
     }
 
+    template<typename ARG, typename... ARGS>
+    void PIXCopyStringArguments(_Out_writes_to_ptr_(limit) UINT64*& destination, _In_ const UINT64* limit, ARG const& arg, ARGS const&... args)
+    {
+        PIXCopyStringArgument(destination, limit, arg);
+        PIXCopyEventArguments(destination, limit, args...);
+    }
+
+    template<typename ARG, typename... ARGS>
+    void PIXCopyStringArgumentsWithContext(_Out_writes_to_ptr_(limit) UINT64*& destination, _In_ const UINT64* limit, void* context, ARG const& arg, ARGS const&... args)
+    {
+#ifdef PIX_XBOX
+        UNREFERENCED_PARAMETER(context);
+        PIXCopyStringArgument(destination, limit, arg);
+        PIXCopyEventArguments(destination, limit, args...);
+#else
+        PIXCopyEventArgument(destination, limit, context);
+        PIXCopyStringArgument(destination, limit, arg);
+        PIXCopyEventArguments(destination, limit, args...);
+#endif
+    }
+
+    inline UINT8 PIXGetEventSize(const UINT64* end, const UINT64* start)
+    {
+        const UINT64 actualEventSize = end - start;
+
+        return static_cast<UINT8>(actualEventSize > PIXEventsSizeMax ? PIXEventsSizeMax : actualEventSize);
+    }
+
+    template<typename STR>
+    inline UINT8 PIXEncodeStringIsAnsi()
+    {
+        return PIX_EVENT_METADATA_NONE;
+    }
+
+    template<>
+    inline UINT8 PIXEncodeStringIsAnsi<char*>()
+    {
+        return PIX_EVENT_METADATA_STRING_IS_ANSI;
+    }
+
+    template<>
+    inline UINT8 PIXEncodeStringIsAnsi<const char*>()
+    {
+        return PIX_EVENT_METADATA_STRING_IS_ANSI;
+    }
+
     template<typename STR, typename... ARGS>
     __declspec(noinline) void PIXBeginEventAllocate(PIXEventsThreadInfo* threadInfo, UINT64 color, STR formatString, ARGS... args)
     {
-#ifdef PIX_XBOX
-        UINT64 time = PIXEventsReplaceBlock(false);
-#else
         UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
-#endif
         if (!time)
             return;
 
@@ -106,12 +107,18 @@ namespace PIXEventsDetail
             return;
 
         limit += PIXEventsSafeFastCopySpaceQwords;
-        *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::Begin());
+        UINT64* eventDestination = destination++;
         *destination++ = color;
 
-        PIXCopyEventArguments(destination, limit, formatString, args...);
-
+        PIXCopyStringArguments(destination, limit, formatString, args...);
         *destination = PIXEventsBlockEndMarker;
+
+        const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIX_EVENT_METADATA_HAS_COLOR |
+            PIXEncodeStringIsAnsi<STR>();
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
         threadInfo->destination = destination;
     }
 
@@ -127,12 +134,77 @@ namespace PIXEventsDetail
             {
                 limit += PIXEventsSafeFastCopySpaceQwords;
                 UINT64 time = PIXGetTimestampCounter();
-                *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::Begin());
+                UINT64* eventDestination = destination++;
                 *destination++ = color;
 
-                PIXCopyEventArguments(destination, limit, formatString, args...);
-
+                PIXCopyStringArguments(destination, limit, formatString, args...);
                 *destination = PIXEventsBlockEndMarker;
+
+                const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+                const UINT8 eventMetadata =
+                    PIX_EVENT_METADATA_HAS_COLOR |
+                    PIXEncodeStringIsAnsi<STR>();
+                *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
+                threadInfo->destination = destination;
+            }
+            else
+            {
+                PIXBeginEventAllocate(threadInfo, color, formatString, args...);
+            }
+        }
+    }
+
+    template<typename STR, typename... ARGS>
+    __declspec(noinline) void PIXBeginEventAllocate(PIXEventsThreadInfo* threadInfo, UINT8 color, STR formatString, ARGS... args)
+    {
+        UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
+        if (!time)
+            return;
+
+        UINT64* destination = threadInfo->destination;
+        UINT64* limit = threadInfo->biasedLimit;
+        if (destination >= limit)
+            return;
+
+        limit += PIXEventsSafeFastCopySpaceQwords;
+        UINT64* eventDestination = destination++;
+
+        PIXCopyStringArguments(destination, limit, formatString, args...);
+        *destination = PIXEventsBlockEndMarker;
+
+        const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIXEncodeStringIsAnsi<STR>() |
+            PIXEncodeIndexColor(color);
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
+        threadInfo->destination = destination;
+    }
+
+    template<typename STR, typename... ARGS>
+    void PIXBeginEvent(UINT8 color, STR formatString, ARGS... args)
+    {
+        PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
+        UINT64* limit = threadInfo->biasedLimit;
+        if (limit != nullptr)
+        {
+            UINT64* destination = threadInfo->destination;
+            if (destination < limit)
+            {
+                limit += PIXEventsSafeFastCopySpaceQwords;
+                UINT64 time = PIXGetTimestampCounter();
+                UINT64* eventDestination = destination++;
+
+                PIXCopyStringArguments(destination, limit, formatString, args...);
+                *destination = PIXEventsBlockEndMarker;
+
+                const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+                const UINT8 eventMetadata =
+                    PIXEncodeStringIsAnsi<STR>() |
+                    PIXEncodeIndexColor(color);
+                *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
                 threadInfo->destination = destination;
             }
             else
@@ -145,11 +217,7 @@ namespace PIXEventsDetail
     template<typename STR, typename... ARGS>
     __declspec(noinline) void PIXSetMarkerAllocate(PIXEventsThreadInfo* threadInfo, UINT64 color, STR formatString, ARGS... args)
     {
-#ifdef PIX_XBOX
-        UINT64 time = PIXEventsReplaceBlock(false);
-#else
         UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
-#endif
         if (!time)
             return;
 
@@ -160,12 +228,18 @@ namespace PIXEventsDetail
             return;
 
         limit += PIXEventsSafeFastCopySpaceQwords;
-        *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::SetMarker());
+        UINT64* eventDestination = destination++;
         *destination++ = color;
 
-        PIXCopyEventArguments(destination, limit, formatString, args...);
-
+        PIXCopyStringArguments(destination, limit, formatString, args...);
         *destination = PIXEventsBlockEndMarker;
+
+        const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIXEncodeStringIsAnsi<STR>() |
+            PIX_EVENT_METADATA_HAS_COLOR;
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
         threadInfo->destination = destination;
     }
 
@@ -181,12 +255,18 @@ namespace PIXEventsDetail
             {
                 limit += PIXEventsSafeFastCopySpaceQwords;
                 UINT64 time = PIXGetTimestampCounter();
-                *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::SetMarker());
+                UINT64* eventDestination = destination++;
                 *destination++ = color;
 
-                PIXCopyEventArguments(destination, limit, formatString, args...);
-
+                PIXCopyStringArguments(destination, limit, formatString, args...);
                 *destination = PIXEventsBlockEndMarker;
+
+                const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+                const UINT8 eventMetadata =
+                    PIXEncodeStringIsAnsi<STR>() |
+                    PIX_EVENT_METADATA_HAS_COLOR;
+                *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
                 threadInfo->destination = destination;
             }
             else
@@ -197,13 +277,9 @@ namespace PIXEventsDetail
     }
 
     template<typename STR, typename... ARGS>
-    __declspec(noinline) void PIXBeginEventOnContextCpuAllocate(PIXEventsThreadInfo* threadInfo, void* context, UINT64 color, STR formatString, ARGS... args)
+    __declspec(noinline) void PIXSetMarkerAllocate(PIXEventsThreadInfo* threadInfo, UINT8 color, STR formatString, ARGS... args)
     {
-#ifdef PIX_XBOX
-        UINT64 time = PIXEventsReplaceBlock(false);
-#else
         UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
-#endif
         if (!time)
             return;
 
@@ -214,22 +290,22 @@ namespace PIXEventsDetail
             return;
 
         limit += PIXEventsSafeFastCopySpaceQwords;
-        *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::BeginOnContext());
-        *destination++ = color;
+        UINT64* eventDestination = destination++;
 
-#ifdef PIX_XBOX
-        UNREFERENCED_PARAMETER(context);
-        PIXCopyEventArguments(destination, limit, formatString, args...);
-#else
-        PIXCopyEventArguments(destination, limit, context, formatString, args...);
-#endif
-
+        PIXCopyStringArguments(destination, limit, formatString, args...);
         *destination = PIXEventsBlockEndMarker;
+
+        const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIXEncodeStringIsAnsi<STR>() |
+            PIXEncodeIndexColor(color);
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
         threadInfo->destination = destination;
     }
 
     template<typename STR, typename... ARGS>
-    void PIXBeginEventOnContextCpu(void* context, UINT64 color, STR formatString, ARGS... args)
+    void PIXSetMarker(UINT8 color, STR formatString, ARGS... args)
     {
         PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
         UINT64* limit = threadInfo->biasedLimit;
@@ -240,138 +316,492 @@ namespace PIXEventsDetail
             {
                 limit += PIXEventsSafeFastCopySpaceQwords;
                 UINT64 time = PIXGetTimestampCounter();
-                *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::BeginOnContext());
-                *destination++ = color;
+                UINT64* eventDestination = destination++;
 
-#ifdef PIX_XBOX
-                PIXCopyEventArguments(destination, limit, formatString, args...);
-#else
-                PIXCopyEventArguments(destination, limit, context, formatString, args...);
-#endif
-
+                PIXCopyStringArguments(destination, limit, formatString, args...);
                 *destination = PIXEventsBlockEndMarker;
+
+                const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+                const UINT8 eventMetadata =
+                    PIXEncodeStringIsAnsi<STR>() |
+                    PIXEncodeIndexColor(color);
+                *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
                 threadInfo->destination = destination;
             }
             else
             {
-                PIXBeginEventOnContextCpuAllocate(threadInfo, context, color, formatString, args...);
+                PIXSetMarkerAllocate(threadInfo, color, formatString, args...);
             }
+        }
+    }
+
+    template<typename STR, typename... ARGS>
+    __declspec(noinline) void PIXBeginEventOnContextCpuAllocate(UINT64*& eventDestination, UINT8& eventSize, PIXEventsThreadInfo* threadInfo, void* context, UINT64 color, STR formatString, ARGS... args)
+    {
+        UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
+        if (!time)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        UINT64* destination = threadInfo->destination;
+        UINT64* limit = threadInfo->biasedLimit;
+
+        if (destination >= limit)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        limit += PIXEventsSafeFastCopySpaceQwords;
+        eventDestination = destination++;
+        *destination++ = color;
+
+        PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+        *destination = PIXEventsBlockEndMarker;
+
+        eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIX_EVENT_METADATA_ON_CONTEXT |
+            PIXEncodeStringIsAnsi<STR>() |
+            PIX_EVENT_METADATA_HAS_COLOR;
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
+        threadInfo->destination = destination;
+    }
+
+    template<typename STR, typename... ARGS>
+    void PIXBeginEventOnContextCpu(UINT64*& eventDestination, UINT8& eventSize, void* context, UINT64 color, STR formatString, ARGS... args)
+    {
+        PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
+        UINT64* limit = threadInfo->biasedLimit;
+        if (limit == nullptr)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        UINT64* destination = threadInfo->destination;
+        if (destination < limit)
+        {
+            limit += PIXEventsSafeFastCopySpaceQwords;
+            UINT64 time = PIXGetTimestampCounter();
+            eventDestination = destination++;
+            *destination++ = color;
+
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = PIXEventsBlockEndMarker;
+
+            eventSize = PIXGetEventSize(destination, threadInfo->destination);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIX_EVENT_METADATA_HAS_COLOR;
+            *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
+            threadInfo->destination = destination;
+        }
+        else
+        {
+            PIXBeginEventOnContextCpuAllocate(eventDestination, eventSize, threadInfo, context, color, formatString, args...);
         }
     }
 
     template<typename CONTEXT, typename STR, typename... ARGS>
     void PIXBeginEvent(CONTEXT* context, UINT64 color, STR formatString, ARGS... args)
     {
+        UINT64* destination = nullptr;
+        UINT8 eventSize = 0u;
+
 #ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
-        //PIXBeginEventOnContextCpu(context, color, formatString, args...);
-        RgpPIXBeginEventOnContextCpu(context, color, formatString, args...);
+        PIXBeginEventOnContextCpu(destination, eventSize, context, color, formatString, args...);
 #endif
 
-        // TODO: we've already encoded this once for the CPU event - figure out way to avoid doing it again
-        UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
-        UINT64* destination = buffer;
-        UINT64* limit = buffer + PIXEventsGraphicsRecordSpaceQwords - PIXEventsReservedTailSpaceQwords;
+#ifdef PIX_USE_GPU_MARKERS_V2
+        if (destination != nullptr)
+        {
+            PIXInsertTimingMarkerOnContextForBeginEvent(context, PIXEvent_BeginEvent, static_cast<void*>(destination), eventSize * sizeof(UINT64));
+        }
+        else
+#endif
+        {
+            UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
 
-        *destination++ = PIXEncodeEventInfo(0, PIXEventTypeInferer<ARGS...>::GpuBeginOnContext());
-        *destination++ = color;
+#ifdef PIX_USE_GPU_MARKERS_V2
+            destination = buffer;
+            UINT64* limit = buffer + PIXEventsGraphicsRecordSpaceQwords - PIXEventsReservedTailSpaceQwords;
 
-        PIXCopyEventArguments(destination, limit, formatString, args...);
-        *destination = 0ull;
+            UINT64* eventDestination = destination++;
+            *destination++ = color;
 
-        PIXBeginGPUEventOnContext(context, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = 0ull;
+
+            eventSize = static_cast<const UINT8>(destination - buffer);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIX_EVENT_METADATA_HAS_COLOR;
+            *eventDestination = PIXEncodeEventInfo(0, PIXEvent_BeginEvent, eventSize, eventMetadata);
+            PIXInsertGPUMarkerOnContextForBeginEvent(context, PIXEvent_BeginEvent, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#else
+            destination = PixEventsLegacy::EncodeBeginEventForContext(buffer, color, formatString, args...);
+            PIXBeginGPUEventOnContext(context, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#endif
+        }
     }
 
     template<typename STR, typename... ARGS>
-    __declspec(noinline) void PIXSetMarkerOnContextCpuAllocate(PIXEventsThreadInfo* threadInfo, void* context, UINT64 color, STR formatString, ARGS... args)
+    __declspec(noinline) void PIXBeginEventOnContextCpuAllocate(UINT64*& eventDestination, UINT8& eventSize, PIXEventsThreadInfo* threadInfo, void* context, UINT8 color, STR formatString, ARGS... args)
     {
-#ifdef PIX_XBOX
-        UINT64 time = PIXEventsReplaceBlock(false);
-#else
         UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
-#endif
         if (!time)
+        {
+            eventDestination = nullptr;
             return;
+        }
 
         UINT64* destination = threadInfo->destination;
         UINT64* limit = threadInfo->biasedLimit;
 
         if (destination >= limit)
+        {
+            eventDestination = nullptr;
             return;
+        }
 
         limit += PIXEventsSafeFastCopySpaceQwords;
-        *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::SetMarkerOnContext());
-        *destination++ = color;
+        eventDestination = destination++;
 
-#ifdef PIX_XBOX
-        UNREFERENCED_PARAMETER(context);
-        PIXCopyEventArguments(destination, limit, formatString, args...);
-#else
-        PIXCopyEventArguments(destination, limit, context, formatString, args...);
-#endif
-
+        PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
         *destination = PIXEventsBlockEndMarker;
+
+        eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIX_EVENT_METADATA_ON_CONTEXT |
+            PIXEncodeStringIsAnsi<STR>() |
+            PIXEncodeIndexColor(color);
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
         threadInfo->destination = destination;
     }
 
     template<typename STR, typename... ARGS>
-    void PIXSetMarkerOnContextCpu(void* context, UINT64 color, STR formatString, ARGS... args)
+    void PIXBeginEventOnContextCpu(UINT64*& eventDestination, UINT8& eventSize, void* context, UINT8 color, STR formatString, ARGS... args)
     {
         PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
         UINT64* limit = threadInfo->biasedLimit;
-        if (limit != nullptr)
+        if (limit == nullptr)
         {
-            UINT64* destination = threadInfo->destination;
-            if (destination < limit)
-            {
-                limit += PIXEventsSafeFastCopySpaceQwords;
-                UINT64 time = PIXGetTimestampCounter();
-                *destination++ = PIXEncodeEventInfo(time, PIXEventTypeInferer<ARGS...>::SetMarkerOnContext());
-                *destination++ = color;
+            eventDestination = nullptr;
+            return;
+        }
 
-#ifdef PIX_XBOX
-                PIXCopyEventArguments(destination, limit, formatString, args...);
-#else
-                PIXCopyEventArguments(destination, limit, context, formatString, args...);
+        UINT64* destination = threadInfo->destination;
+        if (destination < limit)
+        {
+            limit += PIXEventsSafeFastCopySpaceQwords;
+            UINT64 time = PIXGetTimestampCounter();
+            eventDestination = destination++;
+
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = PIXEventsBlockEndMarker;
+
+            eventSize = PIXGetEventSize(destination, threadInfo->destination);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIXEncodeIndexColor(color);
+            *eventDestination = PIXEncodeEventInfo(time, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
+            threadInfo->destination = destination;
+        }
+        else
+        {
+            PIXBeginEventOnContextCpuAllocate(eventDestination, eventSize, threadInfo, context, color, formatString, args...);
+        }
+    }
+
+    template<typename CONTEXT, typename STR, typename... ARGS>
+    void PIXBeginEvent(CONTEXT* context, UINT8 color, STR formatString, ARGS... args)
+    {
+        UINT64* destination = nullptr;
+        UINT8 eventSize = 0u;
+
+#ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
+        PIXBeginEventOnContextCpu(destination, eventSize, context, color, formatString, args...);
 #endif
 
-                *destination = PIXEventsBlockEndMarker;
-                threadInfo->destination = destination;
-            }
-            else
-            {
-                PIXSetMarkerOnContextCpuAllocate(threadInfo, context, color, formatString, args...);
-            }
+#ifdef PIX_USE_GPU_MARKERS_V2
+        if (destination != nullptr)
+        {
+            PIXInsertTimingMarkerOnContextForBeginEvent(context, PIXEvent_BeginEvent, static_cast<void*>(destination), eventSize * sizeof(UINT64));
+        }
+        else
+#endif
+        {
+            UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
+
+#ifdef PIX_USE_GPU_MARKERS_V2
+            destination = buffer;
+            UINT64* limit = buffer + PIXEventsGraphicsRecordSpaceQwords - PIXEventsReservedTailSpaceQwords;
+
+            UINT64* eventDestination = destination++;
+
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = 0ull;
+
+            eventSize = static_cast<const UINT8>(destination - buffer);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIXEncodeIndexColor(color);
+            *eventDestination = PIXEncodeEventInfo(0, PIXEvent_BeginEvent, eventSize, eventMetadata);
+
+            PIXInsertGPUMarkerOnContextForBeginEvent(context, PIXEvent_BeginEvent, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#else
+            destination = PixEventsLegacy::EncodeBeginEventForContext(buffer, color, formatString, args...);
+            PIXBeginGPUEventOnContext(context, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#endif
+        }
+    }
+
+    template<typename STR, typename... ARGS>
+    __declspec(noinline) void PIXSetMarkerOnContextCpuAllocate(UINT64*& eventDestination, UINT8& eventSize, PIXEventsThreadInfo* threadInfo, void* context, UINT64 color, STR formatString, ARGS... args)
+    {
+        UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
+        if (!time)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        UINT64* destination = threadInfo->destination;
+        UINT64* limit = threadInfo->biasedLimit;
+
+        if (destination >= limit)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        limit += PIXEventsSafeFastCopySpaceQwords;
+        eventDestination = destination++;
+        *destination++ = color;
+
+        PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+        *destination = PIXEventsBlockEndMarker;
+
+        eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIX_EVENT_METADATA_ON_CONTEXT |
+            PIXEncodeStringIsAnsi<STR>() |
+            PIX_EVENT_METADATA_HAS_COLOR;
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
+        threadInfo->destination = destination;
+    }
+
+    template<typename STR, typename... ARGS>
+    void PIXSetMarkerOnContextCpu(UINT64*& eventDestination, UINT8& eventSize, void* context, UINT64 color, STR formatString, ARGS... args)
+    {
+        PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
+        UINT64* limit = threadInfo->biasedLimit;
+        if (limit == nullptr)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        UINT64* destination = threadInfo->destination;
+        if (destination < limit)
+        {
+            limit += PIXEventsSafeFastCopySpaceQwords;
+            UINT64 time = PIXGetTimestampCounter();
+            eventDestination = destination++;
+            *destination++ = color;
+
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = PIXEventsBlockEndMarker;
+
+            eventSize = PIXGetEventSize(destination, threadInfo->destination);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIX_EVENT_METADATA_HAS_COLOR;
+            *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
+            threadInfo->destination = destination;
+        }
+        else
+        {
+            PIXSetMarkerOnContextCpuAllocate(eventDestination, eventSize, threadInfo, context, color, formatString, args...);
         }
     }
 
     template<typename CONTEXT, typename STR, typename... ARGS>
     void PIXSetMarker(CONTEXT* context, UINT64 color, STR formatString, ARGS... args)
     {
+        UINT64* destination = nullptr;
+        UINT8 eventSize = 0u;
+
 #ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
-        //PIXSetMarkerOnContextCpu(context, color, formatString, args...);
-        RgpPIXSetMarkerOnContextCpu(context, color, formatString, args...);
+        PIXSetMarkerOnContextCpu(destination, eventSize, context, color, formatString, args...);
 #endif
 
-        UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
-        UINT64* destination = buffer;
-        UINT64* limit = buffer + PIXEventsGraphicsRecordSpaceQwords - PIXEventsReservedTailSpaceQwords;
+#ifdef PIX_USE_GPU_MARKERS_V2
+        if (destination != nullptr)
+        {
+            PIXInsertTimingMarkerOnContextForSetMarker(context, PIXEvent_SetMarker, static_cast<void*>(destination), eventSize * sizeof(UINT64));
+        }
+        else
+#endif
+        {
+            UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
 
-        *destination++ = PIXEncodeEventInfo(0, PIXEventTypeInferer<ARGS...>::GpuSetMarkerOnContext());
-        *destination++ = color;
+#ifdef PIX_USE_GPU_MARKERS_V2
+            destination = buffer;
+            UINT64* limit = buffer + PIXEventsGraphicsRecordSpaceQwords - PIXEventsReservedTailSpaceQwords;
 
-        PIXCopyEventArguments(destination, limit, formatString, args...);
-        *destination = 0ull;
+            UINT64* eventDestination = destination++;
+            *destination++ = color;
 
-        PIXSetGPUMarkerOnContext(context, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = 0ull;
+
+            eventSize = static_cast<const UINT8>(destination - buffer);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIX_EVENT_METADATA_HAS_COLOR;
+            *eventDestination = PIXEncodeEventInfo(0, PIXEvent_SetMarker, eventSize, eventMetadata);
+            PIXInsertGPUMarkerOnContextForSetMarker(context, PIXEvent_SetMarker, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#else
+            destination = PixEventsLegacy::EncodeSetMarkerForContext(buffer, color, formatString, args...);
+            PIXSetGPUMarkerOnContext(context, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#endif
+        }
+    }
+
+    template<typename STR, typename... ARGS>
+    __declspec(noinline) void PIXSetMarkerOnContextCpuAllocate(UINT64*& eventDestination, UINT8& eventSize, PIXEventsThreadInfo* threadInfo, void* context, UINT8 color, STR formatString, ARGS... args)
+    {
+        UINT64 time = PIXEventsReplaceBlock(threadInfo, false);
+        if (!time)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        UINT64* destination = threadInfo->destination;
+        UINT64* limit = threadInfo->biasedLimit;
+
+        if (destination >= limit)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        limit += PIXEventsSafeFastCopySpaceQwords;
+        eventDestination = destination++;
+
+        PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+        *destination = PIXEventsBlockEndMarker;
+
+        eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata =
+            PIX_EVENT_METADATA_ON_CONTEXT |
+            PIXEncodeStringIsAnsi<STR>() |
+            PIXEncodeIndexColor(color);
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
+        threadInfo->destination = destination;
+    }
+
+    template<typename STR, typename... ARGS>
+    void PIXSetMarkerOnContextCpu(UINT64*& eventDestination, UINT8& eventSize, void* context, UINT8 color, STR formatString, ARGS... args)
+    {
+        PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
+        UINT64* limit = threadInfo->biasedLimit;
+        if (limit == nullptr)
+        {
+            eventDestination = nullptr;
+            return;
+        }
+
+        UINT64* destination = threadInfo->destination;
+        if (destination < limit)
+        {
+            limit += PIXEventsSafeFastCopySpaceQwords;
+            UINT64 time = PIXGetTimestampCounter();
+            eventDestination = destination++;
+
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = PIXEventsBlockEndMarker;
+
+            eventSize = PIXGetEventSize(destination, threadInfo->destination);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIXEncodeIndexColor(color);
+            *eventDestination = PIXEncodeEventInfo(time, PIXEvent_SetMarker, eventSize, eventMetadata);
+
+            threadInfo->destination = destination;
+        }
+        else
+        {
+            PIXSetMarkerOnContextCpuAllocate(eventDestination, eventSize, threadInfo, context, color, formatString, args...);
+        }
+    }
+
+    template<typename CONTEXT, typename STR, typename... ARGS>
+    void PIXSetMarker(CONTEXT* context, UINT8 color, STR formatString, ARGS... args)
+    {
+        UINT64* destination = nullptr;
+        UINT8 eventSize = 0u;
+
+#ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
+        PIXSetMarkerOnContextCpu(destination, eventSize, context, color, formatString, args...);
+#endif
+
+#ifdef PIX_USE_GPU_MARKERS_V2
+        if (destination != nullptr)
+        {
+            PIXInsertTimingMarkerOnContextForSetMarker(context, PIXEvent_SetMarker, static_cast<void*>(destination), eventSize * sizeof(UINT64));
+        }
+        else
+#endif
+        {
+            UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
+
+#ifdef PIX_USE_GPU_MARKERS_V2
+            destination = buffer;
+            UINT64* limit = buffer + PIXEventsGraphicsRecordSpaceQwords - PIXEventsReservedTailSpaceQwords;
+
+            UINT64* eventDestination = destination++;
+
+            PIXCopyStringArgumentsWithContext(destination, limit, context, formatString, args...);
+            *destination = 0ull;
+
+            eventSize = static_cast<const UINT8>(destination - buffer);
+            const UINT8 eventMetadata =
+                PIX_EVENT_METADATA_ON_CONTEXT |
+                PIXEncodeStringIsAnsi<STR>() |
+                PIXEncodeIndexColor(color);
+            *eventDestination = PIXEncodeEventInfo(0, PIXEvent_SetMarker, eventSize, eventMetadata);
+            PIXInsertGPUMarkerOnContextForSetMarker(context, PIXEvent_SetMarker, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#else
+            destination = PixEventsLegacy::EncodeSetMarkerForContext(buffer, color, formatString, args...);
+            PIXSetGPUMarkerOnContext(context, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#endif
+        }
     }
 
     __declspec(noinline) inline void PIXEndEventAllocate(PIXEventsThreadInfo* threadInfo)
     {
-#ifdef PIX_XBOX
-        UINT64 time = PIXEventsReplaceBlock(true);
-#else
         UINT64 time = PIXEventsReplaceBlock(threadInfo, true);
-#endif
         if (!time)
             return;
 
@@ -382,8 +812,11 @@ namespace PIXEventsDetail
             return;
 
         limit += PIXEventsSafeFastCopySpaceQwords;
-        *destination++ = PIXEncodeEventInfo(time, PIXEvent_EndEvent);
+        const UINT8 eventSize = 1;
+        const UINT8 eventMetadata = PIX_EVENT_METADATA_NONE;
+        *destination++ = PIXEncodeEventInfo(time, PIXEvent_EndEvent, eventSize, eventMetadata);
         *destination = PIXEventsBlockEndMarker;
+
         threadInfo->destination = destination;
     }
 
@@ -398,8 +831,11 @@ namespace PIXEventsDetail
             {
                 limit += PIXEventsSafeFastCopySpaceQwords;
                 UINT64 time = PIXGetTimestampCounter();
-                *destination++ = PIXEncodeEventInfo(time, PIXEvent_EndEvent);
+                const UINT8 eventSize = 1;
+                const UINT8 eventMetadata = PIX_EVENT_METADATA_NONE;
+                *destination++ = PIXEncodeEventInfo(time, PIXEvent_EndEvent, eventSize, eventMetadata);
                 *destination = PIXEventsBlockEndMarker;
+
                 threadInfo->destination = destination;
             }
             else
@@ -409,34 +845,37 @@ namespace PIXEventsDetail
         }
     }
 
-    __declspec(noinline) inline void PIXEndEventOnContextCpuAllocate(PIXEventsThreadInfo* threadInfo, void* context)
+    __declspec(noinline) inline UINT64* PIXEndEventOnContextCpuAllocate(PIXEventsThreadInfo* threadInfo, void* context)
     {
-#ifdef PIX_XBOX
-        UINT64 time = PIXEventsReplaceBlock(true);
-#else
         UINT64 time = PIXEventsReplaceBlock(threadInfo, true);
-#endif
         if (!time)
-            return;
+            return nullptr;
 
         UINT64* destination = threadInfo->destination;
         UINT64* limit = threadInfo->biasedLimit;
 
         if (destination >= limit)
-            return;
+            return nullptr;
 
         limit += PIXEventsSafeFastCopySpaceQwords;
-        *destination++ = PIXEncodeEventInfo(time, PIXEvent_EndEvent_OnContext);
+        UINT64* eventDestination = destination++;
 #ifdef PIX_XBOX
         UNREFERENCED_PARAMETER(context);
 #else
         PIXCopyEventArgument(destination, limit, context);
 #endif
-        *destination = PIXEventsBlockEndMarker;
+        * destination = PIXEventsBlockEndMarker;
+
+        const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+        const UINT8 eventMetadata = PIX_EVENT_METADATA_ON_CONTEXT;
+        *eventDestination = PIXEncodeEventInfo(time, PIXEvent_EndEvent, eventSize, eventMetadata);
+
         threadInfo->destination = destination;
+
+        return eventDestination;
     }
 
-    inline void PIXEndEventOnContextCpu(void* context)
+    inline UINT64* PIXEndEventOnContextCpu(void* context)
     {
         PIXEventsThreadInfo* threadInfo = PIXGetThreadInfo();
         UINT64* limit = threadInfo->biasedLimit;
@@ -447,28 +886,59 @@ namespace PIXEventsDetail
             {
                 limit += PIXEventsSafeFastCopySpaceQwords;
                 UINT64 time = PIXGetTimestampCounter();
-                *destination++ = PIXEncodeEventInfo(time, PIXEvent_EndEvent_OnContext);
+                UINT64* eventDestination = destination++;
 #ifndef PIX_XBOX
                 PIXCopyEventArgument(destination, limit, context);
 #endif
-                *destination = PIXEventsBlockEndMarker;
+                * destination = PIXEventsBlockEndMarker;
+
+                const UINT8 eventSize = PIXGetEventSize(destination, threadInfo->destination);
+                const UINT8 eventMetadata = PIX_EVENT_METADATA_ON_CONTEXT;
+                *eventDestination = PIXEncodeEventInfo(time, PIXEvent_EndEvent, eventSize, eventMetadata);
+
                 threadInfo->destination = destination;
+
+                return eventDestination;
             }
             else
             {
-                PIXEndEventOnContextCpuAllocate(threadInfo, context);
+                return PIXEndEventOnContextCpuAllocate(threadInfo, context);
             }
         }
+
+        return nullptr;
     }
 
     template<typename CONTEXT>
     void PIXEndEvent(CONTEXT* context)
     {
+        UINT64* destination = nullptr;
 #ifdef PIX_CONTEXT_EMIT_CPU_EVENTS
-        //PIXEndEventOnContextCpu(context);
-        RgpPIXEndEventOnContextCpu(context);
+        destination = PIXEndEventOnContextCpu(context);
 #endif
-        PIXEndGPUEventOnContext(context);
+
+#ifdef PIX_USE_GPU_MARKERS_V2
+        if (destination != nullptr)
+        {
+            PIXInsertTimingMarkerOnContextForEndEvent(context, PIXEvent_EndEvent);
+        }
+        else
+#endif
+        {
+#ifdef PIX_USE_GPU_MARKERS_V2
+            UINT64 buffer[PIXEventsGraphicsRecordSpaceQwords];
+            destination = buffer;
+
+            UINT64* eventDestination = destination++;
+
+            const UINT8 eventSize = static_cast<const UINT8>(destination - buffer);
+            const UINT8 eventMetadata = PIX_EVENT_METADATA_NONE;
+            *eventDestination = PIXEncodeEventInfo(0, PIXEvent_EndEvent, eventSize, eventMetadata);
+            PIXInsertGPUMarkerOnContextForEndEvent(context, PIXEvent_EndEvent, static_cast<void*>(buffer), static_cast<UINT>(reinterpret_cast<BYTE*>(destination) - reinterpret_cast<BYTE*>(buffer)));
+#else
+            PIXEndGPUEventOnContext(context);
+#endif
+        }
     }
 }
 
@@ -487,6 +957,54 @@ void PIXBeginEvent(UINT64 color, PCSTR formatString, ARGS... args)
 }
 
 template<typename... ARGS>
+void PIXBeginEvent(UINT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(UINT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(INT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(INT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(DWORD color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(DWORD color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(UINT8 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(color, formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXBeginEvent(UINT8 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(color, formatString, args...);
+}
+
+template<typename... ARGS>
 void PIXSetMarker(UINT64 color, PCWSTR formatString, ARGS... args)
 {
     PIXEventsDetail::PIXSetMarker(color, formatString, args...);
@@ -494,6 +1012,54 @@ void PIXSetMarker(UINT64 color, PCWSTR formatString, ARGS... args)
 
 template<typename... ARGS>
 void PIXSetMarker(UINT64 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(color, formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(UINT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(UINT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(INT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(INT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(DWORD color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(DWORD color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(UINT8 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(color, formatString, args...);
+}
+
+template<typename... ARGS>
+void PIXSetMarker(UINT8 color, PCSTR formatString, ARGS... args)
 {
     PIXEventsDetail::PIXSetMarker(color, formatString, args...);
 }
@@ -511,6 +1077,54 @@ void PIXBeginEvent(CONTEXT* context, UINT64 color, PCSTR formatString, ARGS... a
 }
 
 template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, UINT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, UINT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, INT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, INT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, DWORD color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, DWORD color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, UINT8 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginEvent(CONTEXT* context, UINT8 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
 void PIXSetMarker(CONTEXT* context, UINT64 color, PCWSTR formatString, ARGS... args)
 {
     PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
@@ -518,6 +1132,54 @@ void PIXSetMarker(CONTEXT* context, UINT64 color, PCWSTR formatString, ARGS... a
 
 template<typename CONTEXT, typename... ARGS>
 void PIXSetMarker(CONTEXT* context, UINT64 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, UINT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, UINT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, INT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, INT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, DWORD color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, DWORD color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, UINT8 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetMarker(CONTEXT* context, UINT8 color, PCSTR formatString, ARGS... args)
 {
     PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
 }
@@ -561,6 +1223,54 @@ void PIXBeginRetailEvent(CONTEXT* context, UINT64 color, PCSTR formatString, ARG
 }
 
 template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, UINT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, UINT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, INT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, INT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, DWORD color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, DWORD color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, UINT8 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXBeginRetailEvent(CONTEXT* context, UINT8 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXBeginEvent(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
 void PIXSetRetailMarker(CONTEXT* context, UINT64 color, PCWSTR formatString, ARGS... args)
 {
     PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
@@ -568,6 +1278,54 @@ void PIXSetRetailMarker(CONTEXT* context, UINT64 color, PCWSTR formatString, ARG
 
 template<typename CONTEXT, typename... ARGS>
 void PIXSetRetailMarker(CONTEXT* context, UINT64 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, UINT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, UINT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, INT32 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, INT32 color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, DWORD color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, DWORD color, PCSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, static_cast<UINT64>(color), formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, UINT8 color, PCWSTR formatString, ARGS... args)
+{
+    PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
+}
+
+template<typename CONTEXT, typename... ARGS>
+void PIXSetRetailMarker(CONTEXT* context, UINT8 color, PCSTR formatString, ARGS... args)
 {
     PIXEventsDetail::PIXSetMarker(context, color, formatString, args...);
 }
@@ -593,6 +1351,62 @@ public:
 
     template<typename... ARGS>
     PIXScopedEventObject(CONTEXT* context, UINT64 color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, UINT32 color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, UINT32 color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, INT32 color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, INT32 color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, DWORD color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, DWORD color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, UINT8 color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(CONTEXT* context, UINT8 color, PCSTR formatString, ARGS... args)
         : m_context(context)
     {
         PIXBeginEvent(m_context, color, formatString, args...);
@@ -624,6 +1438,62 @@ public:
         PIXBeginRetailEvent(m_context, color, formatString, args...);
     }
 
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, UINT32 color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, UINT32 color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, INT32 color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, INT32 color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, DWORD color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, DWORD color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, UINT8 color, PCWSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedRetailEventObject(CONTEXT* context, UINT8 color, PCSTR formatString, ARGS... args)
+        : m_context(context)
+    {
+        PIXBeginRetailEvent(m_context, color, formatString, args...);
+    }
+
     ~PIXScopedRetailEventObject()
     {
         PIXEndRetailEvent(m_context);
@@ -646,6 +1516,54 @@ public:
         PIXBeginEvent(color, formatString, args...);
     }
 
+    template<typename... ARGS>
+    PIXScopedEventObject(UINT32 color, PCWSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(UINT32 color, PCSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(INT32 color, PCWSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(INT32 color, PCSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(DWORD color, PCWSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(DWORD color, PCSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(UINT8 color, PCWSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
+    template<typename... ARGS>
+    PIXScopedEventObject(UINT8 color, PCSTR formatString, ARGS... args)
+    {
+        PIXBeginEvent(color, formatString, args...);
+    }
+
     ~PIXScopedEventObject()
     {
         PIXEndEvent();
@@ -662,3 +1580,4 @@ public:
 #endif
 
 #endif // _PIXEvents_H__
+
