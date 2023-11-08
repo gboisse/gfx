@@ -1404,21 +1404,20 @@ public:
 
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
-            ID3D12InfoQueue1 *debugCallback;
-            if(SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&debugCallback))))
+            ID3D12InfoQueue1 *debug_callback = nullptr;
+            if(SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&debug_callback))))
             {
-                D3D12MessageFunc callback = [](D3D12_MESSAGE_CATEGORY  Category,
-                                                D3D12_MESSAGE_SEVERITY Severity, D3D12_MESSAGE_ID ID,
-                                                LPCSTR pDescription, void *pContext) {
-                    if(Severity <= D3D12_MESSAGE_SEVERITY_ERROR)
-                        GFX_ASSERTMSG(0, "D3D12 Error: %s", pDescription);
-                    else if(Severity == D3D12_MESSAGE_SEVERITY_WARNING)
-                        GFX_PRINTLN("D3D12 Warning: %s", pDescription);
+                DWORD cookie = 0;
+                D3D12MessageFunc callback = [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity,
+                                               D3D12_MESSAGE_ID, LPCSTR description, void *)
+                {
+                    if(severity <= D3D12_MESSAGE_SEVERITY_ERROR)
+                        GFX_ASSERTMSG(0, "D3D12 Error: %s", description);
+                    else if(severity == D3D12_MESSAGE_SEVERITY_WARNING)
+                        GFX_PRINTLN("D3D12 Warning: %s", description);
                 };
-                DWORD cookie;
-                debugCallback->RegisterMessageCallback(
-                    callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, this, &cookie);
-                debugCallback->Release();
+                debug_callback->RegisterMessageCallback(callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
+                debug_callback->Release();
             }
         }
 
