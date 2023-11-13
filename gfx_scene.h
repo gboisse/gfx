@@ -1461,7 +1461,7 @@ private:
             GfxRef<GfxImage> image_ref;
             if(gltf_image->uri != nullptr)
             {
-                char const *filename = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '//'));
+                char const *filename = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
                 std::string image_folder =
                     (filename != nullptr ? std::string(asset_file, 0, filename - asset_file)
                                          : std::string(""));
