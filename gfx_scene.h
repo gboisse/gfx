@@ -884,9 +884,9 @@ public:
                     GltfSkin const *skin = gltf_skins_.at(GetObjectIndex(node.skin_));
                     for(size_t i = 0; i < node.skin_->joint_matrices.size(); ++i)
                     {
-                        node.skin_->joint_matrices[i] = GetNodeMatrix(skin->joints[i])
-                                                      * glm::dmat4(skin->inverse_bind_matrices[i])
-                                                      * inverse_transform;
+                        node.skin_->joint_matrices[i] = inverse_transform
+                                                      * GetNodeMatrix(skin->joints_[i])
+                                                      * glm::dmat4(skin->inverse_bind_matrices_[i]);
                     }
                 }
                 for(size_t i = 0; i < node.children_.size(); ++i)
