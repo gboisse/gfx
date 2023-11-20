@@ -127,8 +127,6 @@ GfxResult gfxSceneApplyAnimation(GfxScene scene, uint64_t animation_handle, floa
 GfxResult gfxSceneResetAllAnimation(GfxScene scene);
 
 float gfxSceneGetAnimationLength(GfxScene scene, uint64_t animation_handle);    // in secs
-float gfxSceneGetAnimationStart(GfxScene scene, uint64_t animation_handle);
-float gfxSceneGetAnimationEnd(GfxScene scene, uint64_t animation_handle);
 
 uint32_t gfxSceneGetAnimationCount(GfxScene scene);
 GfxAnimation const *gfxSceneGetAnimations(GfxScene scene);
@@ -782,16 +780,14 @@ public:
                 switch(animation_channel.type_)
                 {
                 case kGltfAnimationChannelType_Translate:
-                    animated_node->translate_ = glm::mix(glm::dvec3(previous_value.x, previous_value.y, previous_value.z),
-                                                         glm::dvec3(next_value.x,     next_value.y,     next_value.z), interpolate);
+                    animated_node->translate_ = glm::mix(glm::dvec3(previous_value), glm::dvec3(next_value), interpolate);
                     break;
                 case kGltfAnimationChannelType_Rotate:
                     animated_node->rotate_ = glm::slerp(glm::dquat(previous_value.w, previous_value.x, previous_value.y, previous_value.z),
                                                         glm::dquat(next_value.w,     next_value.x,     next_value.y,     next_value.z), interpolate);
                     break;
                 case kGltfAnimationChannelType_Scale:
-                    animated_node->scale_ = glm::mix(glm::dvec3(previous_value.x, previous_value.y, previous_value.z),
-                                                     glm::dvec3(next_value.x,     next_value.y,     next_value.z), interpolate);
+                    animated_node->scale_ = glm::mix(glm::dvec3(previous_value), glm::dvec3(next_value), interpolate);
                     break;
                 default:
                     GFX_ASSERT(0);
@@ -945,39 +941,13 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the duration of an invalid animation object");
             return 0.0f;    // invalid operation
         }
-        return GFX_MAX(getAnimationEnd(animation_handle) - getAnimationStart(animation_handle), 0.0f);
-    }
-
-    float getAnimationStart(uint64_t animation_handle)
-    {
-        float animation_start = 0.0f;
-        if(!animation_handles_.has_handle(animation_handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the start of an invalid animation object");
-            return animation_start; // invalid operation
-        }
+        float animation_length = 0.0f;
         GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(animation_handle));
         if(gltf_animation != nullptr)
             for(size_t i = 0; i < gltf_animation->channels_.size(); ++i)
                 if(!gltf_animation->channels_[i].keyframes_.empty())
-                    animation_start = GFX_MIN(animation_start, gltf_animation->channels_[i].keyframes_.front());
-        return animation_start;
-    }
-
-    float getAnimationEnd(uint64_t animation_handle)
-    {
-        float animation_end = 0.0f;
-        if(!animation_handles_.has_handle(animation_handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the end of an invalid animation object");
-            return animation_end;   // invalid operation
-        }
-        GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(animation_handle));
-        if(gltf_animation != nullptr)
-            for(size_t i = 0; i < gltf_animation->channels_.size(); ++i)
-                if(!gltf_animation->channels_[i].keyframes_.empty())
-                    animation_end = GFX_MAX(animation_end, gltf_animation->channels_[i].keyframes_.back());
-        return animation_end;
+                    animation_length = GFX_MAX(animation_length, gltf_animation->channels_[i].keyframes_.back());
+        return animation_length;
     }
 
     GfxResult setActiveCamera(GfxScene const &scene, uint64_t camera_handle)
@@ -2638,20 +2608,6 @@ float gfxSceneGetAnimationLength(GfxScene scene, uint64_t animation_handle)
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return 0.0f; // invalid parameter
     return gfx_scene->getAnimationLength(animation_handle);
-}
-
-float gfxSceneGetAnimationStart(GfxScene scene, uint64_t animation_handle)
-{
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return 0.0f; // invalid parameter
-    return gfx_scene->getAnimationStart(animation_handle);
-}
-
-float gfxSceneGetAnimationEnd(GfxScene scene, uint64_t animation_handle)
-{
-    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
-    if(!gfx_scene) return 0.0f; // invalid parameter
-    return gfx_scene->getAnimationEnd(animation_handle);
 }
 
 uint32_t gfxSceneGetAnimationCount(GfxScene scene)
