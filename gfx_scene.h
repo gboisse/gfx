@@ -528,11 +528,8 @@ class GfxSceneInternal
 
     struct GltfNode
     {
-        glm::dmat4 matrix_;
-
-        glm::dvec3 translate_;
-        glm::dquat rotate_;
-        glm::dvec3 scale_;
+        glm::dmat4 default_local_transform_;
+        glm::dmat4 world_transform_;
 
         uint64_t parent_ = 0;
         GfxRef<GfxSkin> skin_;
@@ -750,147 +747,10 @@ public:
         if(!animation_handles_.has_handle(animation_handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot apply animation of an invalid object");
         GltfAnimation const *gltf_animation = gltf_animations_.at(GetObjectIndex(animation_handle));
-        if(gltf_animation != nullptr)
-        {
-            for(size_t i = 0; i < gltf_animation->channels_.size(); ++i)
-            {
-                double interpolate = 1.0;
-                glm::dvec4 previous_value, next_value;
-                GltfAnimationChannel const &animation_channel = gltf_animation->channels_[i];
-                if(!gltf_node_handles_.has_handle(animation_channel.node_)) continue;   // invalid target node
-                GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(animation_channel.node_));
-                if(animation_channel.keyframes_.empty() || animated_node == nullptr) { GFX_ASSERT(0); continue; }
-                uint32_t const keyframe = (uint32_t)(std::lower_bound(animation_channel.keyframes_.data(),
-                                                                      animation_channel.keyframes_.data() + animation_channel.keyframes_.size(), time_in_seconds)
-                                                                    - animation_channel.keyframes_.data());
-                if(keyframe == 0)
-                    previous_value = next_value = glm::dvec4(animation_channel.values_.front());
-                else if(keyframe >= (uint32_t)animation_channel.keyframes_.size())
-                    previous_value = next_value = glm::dvec4(animation_channel.values_.back());
-                else
-                {
-                    if(animation_channel.mode_ == kGltfAnimationChannelMode_Linear)
-                    {
-                        interpolate = ((double)time_in_seconds                        - (double)animation_channel.keyframes_[keyframe - 1])
-                                    / ((double)animation_channel.keyframes_[keyframe] - (double)animation_channel.keyframes_[keyframe - 1]);
-                    }
-                    previous_value = glm::dvec4(animation_channel.values_[keyframe - 1]);
-                    next_value     = glm::dvec4(animation_channel.values_[keyframe]);
-                }
-                switch(animation_channel.type_)
-                {
-                case kGltfAnimationChannelType_Translate:
-                    animated_node->translate_ = glm::mix(glm::dvec3(previous_value), glm::dvec3(next_value), interpolate);
-                    break;
-                case kGltfAnimationChannelType_Rotate:
-                    animated_node->rotate_ = glm::slerp(glm::dquat(previous_value.w, previous_value.x, previous_value.y, previous_value.z),
-                                                        glm::dquat(next_value.w,     next_value.x,     next_value.y,     next_value.z), interpolate);
-                    break;
-                case kGltfAnimationChannelType_Scale:
-                    animated_node->scale_ = glm::mix(glm::dvec3(previous_value), glm::dvec3(next_value), interpolate);
-                    break;
-                default:
-                    GFX_ASSERT(0);
-                    break;  // should never happen
-                }
-            }
-            std::function<glm::dmat4(uint64_t)> GetNodeMatrix;
-            GetNodeMatrix = [&](uint64_t node_handle) -> glm::dmat4
-            {
-                glm::dmat4 transform;
-                GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
-                GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(node_handle));
-                if(animated_node == nullptr)
-                {
-                    glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), node.translate_);
-                    glm::dmat4 const rotate = glm::toMat4(node.rotate_);
-                    glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), node.scale_);
-                    transform = translate * rotate * scale;
-                }
-                else
-                {
-                    glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), animated_node->translate_);
-                    glm::dmat4 const rotate = glm::toMat4(animated_node->rotate_);
-                    glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), animated_node->scale_);
-                    transform = translate * rotate * scale;
-                }
-                uint64_t parent_node_handle = node.parent_;
-
-                while(gltf_node_handles_.has_handle(parent_node_handle))
-                {
-                    GltfNode const &parent_node = gltf_nodes_[GetObjectIndex(parent_node_handle)];
-                    glm::dmat4 parent_transform;
-                    GltfAnimatedNode *parent_animated_node =
-                        gltf_animated_nodes_.at(GetObjectIndex(parent_node_handle));
-                    if(parent_animated_node == nullptr)
-                    {
-                        glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), parent_node.translate_);
-                        glm::dmat4 const rotate = glm::toMat4(parent_node.rotate_);
-                        glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), parent_node.scale_);
-                        parent_transform = translate * rotate * scale;
-                    }
-                    else
-                    {
-                        glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), parent_animated_node->translate_);
-                        glm::dmat4 const rotate = glm::toMat4(parent_animated_node->rotate_);
-                        glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), parent_animated_node->scale_);
-                        parent_transform = translate * rotate * scale;
-                    }
-                    transform = parent_transform * transform;
-                    parent_node_handle = parent_node.parent_;
-                }
-                return transform;
-            };
-            std::function<void(uint64_t, glm::dmat4 const &)> VisitNode;
-            VisitNode = [&](uint64_t node_handle, glm::dmat4 const &parent_transform)
-            {
-                glm::dmat4 transform;
-                if(!gltf_node_handles_.has_handle(node_handle)) return;
-                GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
-                GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(node_handle));
-                if(animated_node == nullptr)
-                    transform = parent_transform * node.matrix_;
-                else
-                {
-                    glm::dmat4 const translate = glm::translate(glm::dmat4(1.0), animated_node->translate_);
-                    glm::dmat4 const rotate = glm::toMat4(animated_node->rotate_);
-                    glm::dmat4 const scale = glm::scale(glm::dmat4(1.0), animated_node->scale_);
-                    transform = parent_transform * translate * rotate * scale;
-                }
-                for(size_t i = 0; i < node.children_.size(); ++i)
-                    VisitNode(node.children_[i], transform);
-                for(size_t i = 0; i < node.instances_.size(); ++i)
-                    if(node.instances_[i])
-                        node.instances_[i]->transform = glm::mat4(transform);
-                if(node.camera_)
-                    TransformGltfCamera(*node.camera_, transform);
-                if(node.light_)
-                    TransformGltfLight(*node.light_, transform);
-            };
-            for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
-                VisitNode(gltf_animation->nodes_[i], glm::dmat4(1.0));
-            std::function<void(uint64_t)> UpdateJoints;
-            UpdateJoints = [&](uint64_t node_handle)
-            {
-                if(!gltf_node_handles_.has_handle(node_handle)) return;
-                GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
-                if(node.skin_)
-                {
-                    glm::dmat4 inverse_transform = glm::inverse(GetNodeMatrix(node_handle));
-                    GltfSkin const *skin = gltf_skins_.at(GetObjectIndex(node.skin_));
-                    for(size_t i = 0; i < node.skin_->joint_matrices.size(); ++i)
-                    {
-                        node.skin_->joint_matrices[i] = inverse_transform
-                                                      * GetNodeMatrix(skin->joints_[i])
-                                                      * glm::dmat4(skin->inverse_bind_matrices_[i]);
-                    }
-                }
-                for(size_t i = 0; i < node.children_.size(); ++i)
-                    UpdateJoints(node.children_[i]);
-            };
-            for(size_t i = 0; i < gltf_animation->nodes_.size(); ++i)
-                UpdateJoints(gltf_animation->nodes_[i]);
-        }
+        if(gltf_animation == nullptr)
+            return kGfxResult_NoError;
+        applyAnimation(*gltf_animation, time_in_seconds);
+        updateTransforms(*gltf_animation);
         return kGfxResult_NoError;
     }
 
@@ -906,7 +766,7 @@ public:
             {
                 if(!gltf_node_handles_.has_handle(node_handle)) return;
                 GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
-                glm::dmat4 const transform = parent_transform * node.matrix_;
+                glm::dmat4 const transform = parent_transform * node.default_local_transform_;
                 for(size_t i = 0; i < node.children_.size(); ++i)
                     VisitNode(node.children_[i], transform);
                 for(size_t i = 0; i < node.instances_.size(); ++i)
@@ -1105,6 +965,34 @@ private:
         return true;
     }
 
+    // The cgltf_node_transform_local function adaptation
+    static inline glm::dmat4 CalculateNodeTransform(glm::dvec3 trans, glm::dquat rot, glm::dvec3 scale)
+    {
+        glm::dmat4 transform;
+
+		transform[0].x = (1 - 2.0 * rot.y * rot.y - 2.0 * rot.z * rot.z) * scale.x;
+		transform[0].y = (2.0 * rot.x * rot.y + 2.0 * rot.z * rot.w) * scale.x;
+		transform[0].z = (2.0 * rot.x * rot.z - 2.0 * rot.y * rot.w) * scale.x;
+		transform[0].w = 0.0;
+
+		transform[1].x = (2.0 * rot.x * rot.y - 2.0 * rot.z * rot.w) * scale.x;
+		transform[1].y = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.z * rot.z) * scale.x;
+		transform[1].z = (2.0 * rot.y * rot.z + 2 * rot.x * rot.w) * scale.x;
+		transform[1].w = 0.0;
+
+		transform[2].x = (2.0 * rot.x * rot.z + 2.0 * rot.y * rot.w) * scale.x;
+		transform[2].y = (2.0 * rot.y * rot.z - 2.0 * rot.x * rot.w) * scale.x;
+		transform[2].z = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.y * rot.y) * scale.x;
+		transform[2].w = 0.0;
+
+		transform[3].x = trans.x;
+		transform[3].y = trans.y;
+		transform[3].z = trans.z;
+		transform[3].w = 1.0;
+
+        return transform;
+    }
+
     static inline void TransformGltfCamera(GfxCamera &camera, glm::dmat4 const &transform)
     {
         glm::dvec4 eye(0.0, 0.0, 0.0, 1.0);
@@ -1182,6 +1070,101 @@ private:
             break;
         }
         return format;
+    }
+
+    void applyAnimation(GltfAnimation const &gltf_animation, float time_in_seconds)
+    {
+        for(size_t i = 0; i < gltf_animation.channels_.size(); ++i)
+        {
+            double interpolate = 1.0;
+            glm::dvec4 previous_value, next_value;
+            GltfAnimationChannel const &animation_channel = gltf_animation.channels_[i];
+            if(!gltf_node_handles_.has_handle(animation_channel.node_)) continue;   // invalid target node
+            GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(animation_channel.node_));
+            if(animation_channel.keyframes_.empty() || animated_node == nullptr) { GFX_ASSERT(0); continue; }
+            uint32_t const keyframe = (uint32_t)(std::lower_bound(animation_channel.keyframes_.begin(),
+                animation_channel.keyframes_.end(), time_in_seconds) - animation_channel.keyframes_.begin());
+            if(keyframe == 0)
+                previous_value = next_value = glm::dvec4(animation_channel.values_.front());
+            else if(keyframe >= (uint32_t)animation_channel.keyframes_.size())
+                previous_value = next_value = glm::dvec4(animation_channel.values_.back());
+            else
+            {
+                if(animation_channel.mode_ == kGltfAnimationChannelMode_Linear)
+                {
+                    interpolate = ((double)time_in_seconds - (double)animation_channel.keyframes_[keyframe - 1]) /
+                        ((double)animation_channel.keyframes_[keyframe] - (double)animation_channel.keyframes_[keyframe - 1]);
+                }
+                previous_value = glm::dvec4(animation_channel.values_[keyframe - 1]);
+                next_value     = glm::dvec4(animation_channel.values_[keyframe]);
+            }
+            switch(animation_channel.type_)
+            {
+            case kGltfAnimationChannelType_Translate:
+                animated_node->translate_ = glm::mix(glm::dvec3(previous_value), glm::dvec3(next_value), interpolate);
+                break;
+            case kGltfAnimationChannelType_Rotate:
+                animated_node->rotate_ = glm::slerp(glm::dquat(previous_value.w, glm::dvec3(previous_value)),
+                    glm::dquat(next_value.w, glm::dvec3(next_value)), interpolate);
+                break;
+            case kGltfAnimationChannelType_Scale:
+                animated_node->scale_ = glm::mix(glm::dvec3(previous_value), glm::dvec3(next_value), interpolate);
+                break;
+            default:
+                GFX_ASSERT(0);
+                break;  // should never happen
+            }
+        }
+    }
+
+    void updateTransforms(GltfAnimation const &gltf_animation)
+    {
+        std::function<void(uint64_t, glm::dmat4 const &)> VisitNode;
+        VisitNode = [&](uint64_t node_handle, glm::dmat4 const &parent_transform)
+        {
+            if(!gltf_node_handles_.has_handle(node_handle)) return;
+            GltfNode &node = gltf_nodes_[GetObjectIndex(node_handle)];
+            GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(node_handle));
+            if(animated_node == nullptr)
+                node.world_transform_ = parent_transform * node.default_local_transform_;
+            else
+                node.world_transform_ = parent_transform * CalculateNodeTransform(
+                    animated_node->translate_, animated_node->rotate_, animated_node->scale_);
+            for(size_t i = 0; i < node.children_.size(); ++i)
+                VisitNode(node.children_[i], node.world_transform_);
+            for(size_t i = 0; i < node.instances_.size(); ++i)
+                if(node.instances_[i])
+                    node.instances_[i]->transform = glm::mat4(node.world_transform_);
+            if(node.camera_)
+                TransformGltfCamera(*node.camera_, node.world_transform_);
+            if(node.light_)
+                TransformGltfLight(*node.light_, node.world_transform_);
+        };
+        for(size_t i = 0; i < gltf_animation.nodes_.size(); ++i)
+            VisitNode(gltf_animation.nodes_[i], glm::dmat4(1.0));
+        std::function<void(uint64_t)> UpdateJoints;
+        UpdateJoints = [&](uint64_t node_handle)
+        {
+            if(!gltf_node_handles_.has_handle(node_handle)) return;
+            GltfNode const &node = gltf_nodes_[GetObjectIndex(node_handle)];
+            if(node.skin_)
+            {
+                glm::dmat4 inverse_transform = glm::inverse(node.world_transform_);
+                GltfSkin const *skin = gltf_skins_.at(GetObjectIndex(node.skin_));
+                for(size_t i = 0; i < node.skin_->joint_matrices.size(); ++i)
+                {
+                    GFX_ASSERT(gltf_node_handles_.has_handle(skin->joints_[i]));
+                    GltfNode const &joint_node = gltf_nodes_[GetObjectIndex(skin->joints_[i])];
+                    node.skin_->joint_matrices[i] = inverse_transform
+                                                    * joint_node.world_transform_
+                                                    * glm::dmat4(skin->inverse_bind_matrices_[i]);
+                }
+            }
+            for(size_t i = 0; i < node.children_.size(); ++i)
+                UpdateJoints(node.children_[i]);
+        };
+        for(size_t i = 0; i < gltf_animation.nodes_.size(); ++i)
+            UpdateJoints(gltf_animation.nodes_[i]);
     }
 
     GfxResult importObj(GfxScene const &scene, char const *asset_file)
@@ -1986,11 +1969,6 @@ private:
         {
             if(gltf_node == nullptr)
                 return {};   // out of bounds
-            glm::vec3 T(0.0), S(1.0);
-            glm::quat R(1.0, 0.0, 0.0, 0.0);
-            if(gltf_node->has_translation) T = glm::make_vec3(gltf_node->translation);
-            if(gltf_node->has_scale)       S = glm::make_vec3(gltf_node->scale);
-            if(gltf_node->has_rotation)    R = glm::make_quat(gltf_node->rotation);
             glm::mat4 local_transform(1.0); // default to identity
             cgltf_node_transform_local(gltf_node, (float*)&local_transform);
             std::vector<GfxRef<GfxInstance>> instances;
@@ -2008,6 +1986,8 @@ private:
             {
                 std::map<cgltf_mesh const *, std::vector<GfxConstRef<GfxMesh>>>::const_iterator const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
+                {
+                    instances.reserve((*it).second.size());
                     for(size_t i = 0; i < (*it).second.size(); ++i)
                     {
                         GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
@@ -2022,6 +2002,7 @@ private:
                         else
                             instance_metadata.asset_file = asset_file;
                     }
+                }
             }
             GfxRef<GfxCamera> camera;
             if(gltf_node->camera != nullptr)
@@ -2064,17 +2045,10 @@ private:
                 {
                     parent_node_handle = gltf_node_handles_.allocate_handle();
                     auto parent_node = &gltf_nodes_.insert(GetObjectIndex(parent_node_handle));
-                    glm::vec3 T(0.0), S(1.0);
-                    glm::quat R(1.0, 0.0, 0.0, 0.0);
-                    if(gltf_node->parent->has_translation) T = glm::make_vec3(gltf_node->parent->translation);
-                    if(gltf_node->parent->has_scale)       S = glm::make_vec3(gltf_node->parent->scale);
-                    if(gltf_node->parent->has_rotation)    R = glm::make_quat(gltf_node->parent->rotation);
-                    glm::mat4 local_transform(1.0); // default to identity
-                    cgltf_node_transform_local(gltf_node->parent, (float *)&local_transform);
-                    parent_node->scale_               = S;
-                    parent_node->rotate_              = R;
-                    parent_node->translate_           = T;
-                    parent_node->matrix_              = local_transform;
+                    glm::mat4 parent_local_transform(1.0); // default to identity
+                    cgltf_node_transform_local(gltf_node->parent, (float *)&parent_local_transform);
+                    parent_node->default_local_transform_ = parent_local_transform;
+                    parent_node->world_transform_ = parent_transform;
                     animated_nodes[gltf_node->parent] = parent_node_handle;
                 }
             }
@@ -2121,10 +2095,8 @@ private:
                 animated_node->rotate_ = glm::quat_cast(rotMtx);
             }
             GFX_ASSERT(node != nullptr);
-            node->scale_ = S;
-            node->rotate_ = R;
-            node->translate_ = T;
-            node->matrix_ = local_transform;
+            node->default_local_transform_ = local_transform;
+            node->world_transform_ = transform;
             node->parent_ = parent_node_handle;
             std::swap(node->children_, children);
             std::swap(node->instances_, instances);
