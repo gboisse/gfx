@@ -218,8 +218,8 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
 
 class GfxDrawState { friend class GfxInternal; uint64_t handle; public: GfxDrawState(); GfxDrawState(GfxDrawState const &); GfxDrawState &operator =(GfxDrawState const &); ~GfxDrawState(); };
 
-GfxResult gfxDrawStateSetColorTarget(GfxDrawState draw_state, uint32_t target_index, DXGI_FORMAT texture_format, uint32_t mip_level = 0, uint32_t slice = 0);
-GfxResult gfxDrawStateSetDepthStencilTarget(GfxDrawState draw_state, DXGI_FORMAT texture_format, uint32_t mip_level = 0, uint32_t slice = 0);
+GfxResult gfxDrawStateSetColorTarget(GfxDrawState draw_state, uint32_t target_index, DXGI_FORMAT texture_format);
+GfxResult gfxDrawStateSetDepthStencilTarget(GfxDrawState draw_state, DXGI_FORMAT texture_format);
 
 GfxResult gfxDrawStateSetCullMode(GfxDrawState draw_state, D3D12_CULL_MODE cull_mode);
 GfxResult gfxDrawStateSetFillMode(GfxDrawState draw_state, D3D12_FILL_MODE fill_mode);
@@ -361,8 +361,8 @@ GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture textu
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
 GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture);   // expects mip level 0 to be populated, generates the others
 
-GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, GfxTexture target_texture);
-GfxResult gfxCommandBindDepthStencilTarget(GfxContext context, GfxTexture target_texture);
+GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, GfxTexture target_texture, uint32_t mip_level = 0, uint32_t slice = 0);
+GfxResult gfxCommandBindDepthStencilTarget(GfxContext context, GfxTexture target_texture, uint32_t mip_level = 0, uint32_t slice = 0);
 GfxResult gfxCommandBindKernel(GfxContext context, GfxKernel kernel);
 GfxResult gfxCommandBindIndexBuffer(GfxContext context, GfxBuffer index_buffer);
 GfxResult gfxCommandBindVertexBuffer(GfxContext context, GfxBuffer vertex_buffer);
@@ -559,8 +559,15 @@ class GfxInternal
     GfxBuffer *constant_buffer_pool_ = nullptr;
     uint64_t *constant_buffer_pool_cursors_ = nullptr;
     std::vector<GfxRaytracingPrimitive> active_raytracing_primitives_;
-    GfxTexture bound_color_targets_[kGfxConstant_MaxRenderTarget] = {};
-    GfxTexture bound_depth_stencil_target_ = {};
+
+    struct RenderTarget
+    {
+        GfxTexture  texture   = {};
+        uint32_t    mip_level = 0;
+        uint32_t    slice     = 0;
+    };
+    RenderTarget bound_color_targets_[kGfxConstant_MaxRenderTarget] = {};
+    RenderTarget bound_depth_stencil_target_                        = {};
 
     struct Viewport
     {
@@ -739,17 +746,10 @@ class GfxInternal
 
     struct DrawState
     {
-        struct RenderTarget
-        {
-            DXGI_FORMAT texture_format_ = DXGI_FORMAT_UNKNOWN;
-            uint32_t mip_level = 0;
-            uint32_t slice = 0;
-        };
-
         struct Data
         {
-            RenderTarget color_targets_[kGfxConstant_MaxRenderTarget] = {};
-            RenderTarget depth_stencil_target_ = {};
+            DXGI_FORMAT color_formats_[kGfxConstant_MaxRenderTarget] = {};
+            DXGI_FORMAT depth_stencil_format_                        = {};
             struct
             {
                 inline operator bool() const
@@ -3337,17 +3337,33 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeColorTarget(uint32_t target_index, GfxTexture target_texture)
+    GfxResult encodeColorTarget(uint32_t target_index, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
     {
         if(target_index >= kGfxConstant_MaxRenderTarget)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot have more than %u render targets in draw state object", (uint32_t)kGfxConstant_MaxRenderTarget);
-        bound_color_targets_[target_index] = target_texture;
+        if(!target_texture)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
+        if(mip_level >= target_texture.mip_levels)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
+        if(slice >= (target_texture.is3D() ? GFX_MAX(target_texture.depth >> mip_level, 1u) : target_texture.depth))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
+        bound_color_targets_[target_index].texture  = target_texture;
+        bound_color_targets_[target_index].mip_level = mip_level;
+        bound_color_targets_[target_index].slice     = slice;
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDepthStencilTarget(GfxTexture target_texture)
+    GfxResult encodeDepthStencilTarget(GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
     {
-        bound_depth_stencil_target_ = target_texture;
+        if(!target_texture)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
+        if(mip_level >= target_texture.mip_levels)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
+        if(slice >= (target_texture.is3D() ? GFX_MAX(target_texture.depth >> mip_level, 1u) : target_texture.depth))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
+        bound_depth_stencil_target_.texture   = target_texture;
+        bound_depth_stencil_target_.mip_level = mip_level;
+        bound_depth_stencil_target_.slice     = slice;
         return kGfxResult_NoError;
     }
 
@@ -4568,7 +4584,7 @@ public:
         }
     }
 
-    static GfxResult SetDrawStateColorTarget(GfxDrawState const &draw_state, uint32_t target_index, DXGI_FORMAT texture_format, uint32_t mip_level, uint32_t slice)
+    static GfxResult SetDrawStateColorTarget(GfxDrawState const &draw_state, uint32_t target_index, DXGI_FORMAT texture_format)
     {
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
         DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
@@ -4576,35 +4592,17 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set color target on an invalid draw state object");
         if(target_index >= kGfxConstant_MaxRenderTarget)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot have more than %u render targets in draw state object", (uint32_t)kGfxConstant_MaxRenderTarget);
-        // TODO: check in elsewhere
-        //if(!texture)
-        //    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
-        //if(mip_level >= texture.mip_levels)
-        //    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
-        //if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
-        //    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
-        gfx_draw_state->draw_state_.color_targets_[target_index].texture_format_ = texture_format;
-        gfx_draw_state->draw_state_.color_targets_[target_index].mip_level = mip_level;
-        gfx_draw_state->draw_state_.color_targets_[target_index].slice = slice;
+        gfx_draw_state->draw_state_.color_formats_[target_index] = texture_format;
         return kGfxResult_NoError;
     }
 
-    static GfxResult SetDrawStateDepthStencilTarget(GfxDrawState const &draw_state, DXGI_FORMAT texture_format, uint32_t mip_level, uint32_t slice)
+    static GfxResult SetDrawStateDepthStencilTarget(GfxDrawState const &draw_state, DXGI_FORMAT texture_format)
     {
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
         DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth/stencil target on an invalid draw state object");
-        // TODO: check in elsewhere
-        //if(!texture)
-        //    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
-        //if(mip_level >= texture.mip_levels)
-        //    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
-        //if(slice >= (texture.is3D() ? GFX_MAX(texture.depth >> mip_level, 1u) : texture.depth))
-        //    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to slice that does not exist in texture object");
-        gfx_draw_state->draw_state_.depth_stencil_target_.texture_format_ = texture_format;
-        gfx_draw_state->draw_state_.depth_stencil_target_.mip_level = mip_level;
-        gfx_draw_state->draw_state_.depth_stencil_target_.slice = slice;
+        gfx_draw_state->draw_state_.depth_stencil_format_ = texture_format;
         return kGfxResult_NoError;
     }
 
@@ -5769,20 +5767,20 @@ private:
         for(uint32_t i = 0; i < ARRAYSIZE(pso_desc.BlendState.BlendState.RenderTarget); ++i)
             pso_desc.BlendState.BlendState.RenderTarget[i] = GetDefaultBlendState();
         {
-            for(uint32_t i = 0; i < ARRAYSIZE(draw_state.color_targets_); ++i)
-                if(draw_state.color_targets_[i].texture_format_ == DXGI_FORMAT_UNKNOWN)
+            for(uint32_t i = 0; i < ARRAYSIZE(draw_state.color_formats_); ++i)
+                if(draw_state.color_formats_[i] == DXGI_FORMAT_UNKNOWN)
                     continue;   // no valid color target at index
                 else
                 {
-                    pso_desc.RTVFormats.RTVFormats.RTFormats[i]     = draw_state.color_targets_[i].texture_format_;
+                    pso_desc.RTVFormats.RTVFormats.RTFormats[i]     = draw_state.color_formats_[i];
                     pso_desc.RTVFormats.RTVFormats.NumRenderTargets = i + 1;
                 }
-            if(draw_state.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
+            if(draw_state.depth_stencil_format_ != DXGI_FORMAT_UNKNOWN)
             {
                 pso_desc.DepthStencilState.DepthStencilState.DepthEnable    = TRUE;
                 pso_desc.DepthStencilState.DepthStencilState.DepthWriteMask = draw_state.depth_stencil_state_.depth_write_mask_;
                 pso_desc.DepthStencilState.DepthStencilState.DepthFunc      = draw_state.depth_stencil_state_.depth_func_;
-                pso_desc.DSVFormat.DSVFormat                                = draw_state.depth_stencil_target_.texture_format_;
+                pso_desc.DSVFormat.DSVFormat                                = draw_state.depth_stencil_format_;
             }
             else if(pso_desc.RTVFormats.RTVFormats.NumRenderTargets == 0)   // special case - if no color target is supplied, draw to back buffer
             {
@@ -5896,20 +5894,20 @@ private:
         pso_desc.InputLayout.pInputElementDescs = input_layout.data();
         pso_desc.InputLayout.NumElements        = (uint32_t)input_layout.size();
         {
-            for(uint32_t i = 0; i < ARRAYSIZE(draw_state.color_targets_); ++i)
-                if(draw_state.color_targets_[i].texture_format_ == DXGI_FORMAT_UNKNOWN)
+            for(uint32_t i = 0; i < ARRAYSIZE(draw_state.color_formats_); ++i)
+                if(draw_state.color_formats_[i] == DXGI_FORMAT_UNKNOWN)
                     continue;   // no valid color target at index
                 else
                 {
-                    pso_desc.RTVFormats[i]    = draw_state.color_targets_[i].texture_format_;
+                    pso_desc.RTVFormats[i]    = draw_state.color_formats_[i];
                     pso_desc.NumRenderTargets = i + 1;
                 }
-            if(draw_state.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
+            if(draw_state.depth_stencil_format_ != DXGI_FORMAT_UNKNOWN)
             {
                 pso_desc.DepthStencilState.DepthEnable    = TRUE;
                 pso_desc.DepthStencilState.DepthWriteMask = draw_state.depth_stencil_state_.depth_write_mask_;
                 pso_desc.DepthStencilState.DepthFunc      = draw_state.depth_stencil_state_.depth_func_;
-                pso_desc.DSVFormat                        = draw_state.depth_stencil_target_.texture_format_;
+                pso_desc.DSVFormat                        = draw_state.depth_stencil_format_;
             }
             else if(pso_desc.NumRenderTargets == 0)  // special case - if no color target is supplied, draw to back buffer
             {
@@ -6006,22 +6004,22 @@ private:
             D3D12_CPU_DESCRIPTOR_HANDLE depth_stencil_target = {};
             uint32_t render_width = 0xFFFFFFFFu, render_height = 0xFFFFFFFFu;
             D3D12_CPU_DESCRIPTOR_HANDLE color_targets[kGfxConstant_MaxRenderTarget] = {};
-            for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_targets_); ++i)
-                if(!bound_color_targets_[i])
+            for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_formats_); ++i)
+                if(!bound_color_targets_[i].texture)
                 {
-                    if (kernel.draw_state_.color_targets_[i].texture_format_ != DXGI_FORMAT_UNKNOWN)
+                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at color target %u", i);
                 }
-                else if (kernel.draw_state_.color_targets_[i].texture_format_ != DXGI_FORMAT_UNKNOWN)
+                else if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
                 {
                      // valid bound color target and draw state requires one
-                    GfxTexture const &texture = bound_color_targets_[i];
+                    GfxTexture const &texture = bound_color_targets_[i].texture;
                     if(!texture_handles_.has_handle(texture.handle))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at color target %u", i);
                     Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
-                    GFX_TRY(ensureTextureHasRenderTargetView(texture, gfx_texture, kernel.draw_state_.color_targets_[i].mip_level, kernel.draw_state_.color_targets_[i].slice));
-                    GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level][kernel.draw_state_.color_targets_[i].slice] != 0xFFFFFFFFu);
-                    color_targets[i] = rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[kernel.draw_state_.color_targets_[i].mip_level][kernel.draw_state_.color_targets_[i].slice]);
+                    GFX_TRY(ensureTextureHasRenderTargetView(texture, gfx_texture, bound_color_targets_[i].mip_level, bound_color_targets_[i].slice));
+                    GFX_ASSERT(gfx_texture.rtv_descriptor_slots_[bound_color_targets_[i].mip_level] [bound_color_targets_[i].slice] != 0xFFFFFFFFu);
+                    color_targets[i] = rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[bound_color_targets_[i].mip_level][bound_color_targets_[i].slice]);
                     for(uint32_t j = color_target_count; j < i; ++j) color_targets[j] = rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_);
                     uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
                     uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
@@ -6029,20 +6027,20 @@ private:
                     transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
                     color_target_count = i + 1;
                 }
-            if(!bound_depth_stencil_target_)
+            if(!bound_depth_stencil_target_.texture)
             {
-                if(kernel.draw_state_.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
+                if(kernel.draw_state_.depth_stencil_format_ != DXGI_FORMAT_UNKNOWN)
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at depth/stencil target");
             }
-            else if(kernel.draw_state_.depth_stencil_target_.texture_format_ != DXGI_FORMAT_UNKNOWN)
+            else if(kernel.draw_state_.depth_stencil_format_ != DXGI_FORMAT_UNKNOWN)
             {
-                GfxTexture const &texture = bound_depth_stencil_target_;
+                GfxTexture const &texture = bound_depth_stencil_target_.texture;
                 if(!texture_handles_.has_handle(texture.handle))
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at depth/stencil target");
                 Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
-                GFX_TRY(ensureTextureHasDepthStencilView(texture, gfx_texture, kernel.draw_state_.depth_stencil_target_.mip_level, kernel.draw_state_.depth_stencil_target_.slice));
-                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level][kernel.draw_state_.depth_stencil_target_.slice] != 0xFFFFFFFFu);
-                depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[kernel.draw_state_.depth_stencil_target_.mip_level][kernel.draw_state_.depth_stencil_target_.slice]);
+                GFX_TRY(ensureTextureHasDepthStencilView(texture, gfx_texture, bound_depth_stencil_target_.mip_level, bound_depth_stencil_target_.slice));
+                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[bound_depth_stencil_target_.mip_level][bound_depth_stencil_target_] != 0xFFFFFFFFu);
+                depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[bound_depth_stencil_target_.mip_level][bound_depth_stencil_target_.slice]);
                 uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
                 uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
                 render_width = GFX_MIN(render_width, texture_width); render_height = GFX_MIN(render_height, texture_height);
@@ -9040,14 +9038,14 @@ GfxDrawState::~GfxDrawState()
     GfxInternal::ReleaseDrawState(*this);
 }
 
-GfxResult gfxDrawStateSetColorTarget(GfxDrawState draw_state, uint32_t target_index, DXGI_FORMAT texture_format, uint32_t mip_level, uint32_t slice)
+GfxResult gfxDrawStateSetColorTarget(GfxDrawState draw_state, uint32_t target_index, DXGI_FORMAT texture_format)
 {
-    return GfxInternal::SetDrawStateColorTarget(draw_state, target_index, texture_format, mip_level, slice);
+    return GfxInternal::SetDrawStateColorTarget(draw_state, target_index, texture_format);
 }
 
-GfxResult gfxDrawStateSetDepthStencilTarget(GfxDrawState draw_state, DXGI_FORMAT texture_format, uint32_t mip_level, uint32_t slice)
+GfxResult gfxDrawStateSetDepthStencilTarget(GfxDrawState draw_state, DXGI_FORMAT texture_format)
 {
-    return GfxInternal::SetDrawStateDepthStencilTarget(draw_state, texture_format, mip_level, slice);
+    return GfxInternal::SetDrawStateDepthStencilTarget(draw_state, texture_format);
 }
 
 GfxResult gfxDrawStateSetCullMode(GfxDrawState draw_state, D3D12_CULL_MODE cull_mode)
@@ -9330,18 +9328,18 @@ GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture)
     return gfx->encodeGenerateMips(texture);
 }
 
-GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, GfxTexture target_texture)
+GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeColorTarget(target_index, target_texture);
+    return gfx->encodeColorTarget(target_index, target_texture, mip_level, slice);
 }
 
-GfxResult gfxCommandBindDepthStencilTarget(GfxContext context, GfxTexture target_texture)
+GfxResult gfxCommandBindDepthStencilTarget(GfxContext context, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeDepthStencilTarget(target_texture);
+    return gfx->encodeDepthStencilTarget(target_texture, mip_level, slice);
 }
 
 GfxResult gfxCommandBindKernel(GfxContext context, GfxKernel kernel)
