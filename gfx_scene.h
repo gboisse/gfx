@@ -2142,6 +2142,15 @@ private:
             animation_object.dependent_skinned_nodes_ = std::vector<uint64_t>(
                 dependent_skinned_nodes.begin(), dependent_skinned_nodes.end());
         }
+        for(auto const it : node_handles)
+        {
+            uint64_t const node_handle = it.second;
+            uint32_t const node_index = GetObjectIndex(node_handle);
+            if(gltf_nodes_.has(node_index)) continue;
+            if(gltf_animated_nodes_.has(node_index))
+                gltf_animated_nodes_.erase(node_index);
+            gltf_node_handles_.free_handle(node_handle);
+        }
         cgltf_free(gltf_model);
         return kGfxResult_NoError;
     }
