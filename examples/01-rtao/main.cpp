@@ -53,13 +53,9 @@ float CalculateHaltonNumber(uint32_t index, uint32_t base)
 
 int32_t main()
 {
-    GfxWindow  window = gfxCreateWindow(1280, 720, "gfx - RTAO");
-#if _DEBUG
-    GfxContext gfx    = gfxCreateContext(window, kGfxCreateContextFlag_EnableDebugLayer);
-#else
-    GfxContext gfx    = gfxCreateContext(window);
-#endif
-    GfxScene   scene  = gfxCreateScene();
+    GfxWindow window = gfxCreateWindow(1280, 720, "gfx - RTAO");
+    GfxContext gfx = gfxCreateContext(window);
+    GfxScene scene = gfxCreateScene();
     gfxImGuiInitialize(gfx);
 
     // Upload the scene to GPU memory

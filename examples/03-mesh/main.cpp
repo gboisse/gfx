@@ -26,11 +26,7 @@ SOFTWARE.
 int32_t main()
 {
     GfxWindow window = gfxCreateWindow(1280, 720, "gfx - Mesh shaders");
-#if _DEBUG
-    GfxContext gfx    = gfxCreateContext(window, kGfxCreateContextFlag_EnableDebugLayer);
-#else
-    GfxContext gfx    = gfxCreateContext(window);
-#endif
+    GfxContext gfx = gfxCreateContext(window);
 
     GfxProgram program = gfxCreateProgram(gfx, "mesh");
     GfxKernel kernel  = gfxCreateMeshKernel(gfx, program);
