@@ -56,7 +56,7 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
 
     if (tls_checkAmdDriver)
     {
-        loaded = GetModuleHandleEx(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, L"amdxc64.dll", &hpAmdD3dDl2);
+        loaded = GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, L"amdxc64.dll", &hpAmdD3dDl2);
     }
 
     if (FALSE != loaded && nullptr != hpAmdD3dDl2)
