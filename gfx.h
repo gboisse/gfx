@@ -3337,10 +3337,10 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeColorTarget(uint32_t target_index, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
+    GfxResult encodeBindColorTarget(uint32_t target_index, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
     {
         if(target_index >= kGfxConstant_MaxRenderTarget)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot have more than %u render targets in draw state object", (uint32_t)kGfxConstant_MaxRenderTarget);
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot bind more than %u render targets", (uint32_t)kGfxConstant_MaxRenderTarget);
         if(!target_texture)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
         if(mip_level >= target_texture.mip_levels)
@@ -3353,7 +3353,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDepthStencilTarget(GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
+    GfxResult encodeBindDepthStencilTarget(GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
     {
         if(!target_texture)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
@@ -9332,14 +9332,14 @@ GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, G
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeColorTarget(target_index, target_texture, mip_level, slice);
+    return gfx->encodeBindColorTarget(target_index, target_texture, mip_level, slice);
 }
 
 GfxResult gfxCommandBindDepthStencilTarget(GfxContext context, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeDepthStencilTarget(target_texture, mip_level, slice);
+    return gfx->encodeBindDepthStencilTarget(target_texture, mip_level, slice);
 }
 
 GfxResult gfxCommandBindKernel(GfxContext context, GfxKernel kernel)
