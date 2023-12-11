@@ -2549,6 +2549,8 @@ public:
         if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with a buffer object containing more than 4 billion vertices");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        destroyBuffer(gfx_raytracing_primitive.index_buffer_);
+        destroyBuffer(gfx_raytracing_primitive.vertex_buffer_);
         gfx_raytracing_primitive.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.index_buffer_ = createBufferRange(index_buffer, 0, index_buffer.size);
         gfx_raytracing_primitive.index_stride_ = index_stride;
