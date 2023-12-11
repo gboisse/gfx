@@ -1,5 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-
 /*==========================================================================;
  *
  *  Copyright (C) Microsoft Corporation.  All Rights Reserved.
@@ -46,6 +44,7 @@
 #define PIX_CAPTURE_SYSTEM_MONITOR_COUNTERS (1 << 6)
 #define PIX_CAPTURE_VIDEO                   (1 << 7)
 #define PIX_CAPTURE_AUDIO                   (1 << 8)
+#define PIX_CAPTURE_GPU_TRACE               (1 << 9)
 #define PIX_CAPTURE_RESERVED                (1 << 15)
 
 union PIXCaptureParameters
@@ -53,6 +52,8 @@ union PIXCaptureParameters
     enum PIXCaptureStorage
     {
         Memory = 0,
+        MemoryCircular = 1, // Xbox only
+        FileCircular = 2, // PC only
     };
 
     struct GpuCaptureParameters
@@ -79,6 +80,15 @@ union PIXCaptureParameters
         BOOL CaptureXMemEvents; // Xbox only
         BOOL CapturePixMemEvents; // Xbox only
     } TimingCaptureParameters;
+
+    struct GpuTraceParameters // Xbox Series and newer only
+    {
+        PWSTR FileName;
+        UINT32 MaximumToolingMemorySizeMb;
+
+        BOOL CaptureGpuOccupancy;
+
+    } GpuTraceParameters;
 };
 
 typedef PIXCaptureParameters* PPIXCaptureParameters;
@@ -89,15 +99,24 @@ typedef PIXCaptureParameters* PPIXCaptureParameters;
 #include "pix3_win.h"
 #endif
 
+#if defined(XBOX) || defined(_XBOX_ONE) || defined(_DURANGO) || defined(_GAMING_XBOX) || defined(_GAMING_XBOX_SCARLETT)
+#define PIX_XBOX
+#if defined(_GAMING_XBOX) || defined(_GAMING_XBOX_SCARLETT)
+#define PIX_GAMING_XBOX
+#endif
+#endif
+
+#if !defined(PIX_USE_GPU_MARKERS_V2)
+#ifdef PIX_GAMING_XBOX 
+#define PIX_USE_GPU_MARKERS_V2
+#endif
+#endif
+
 #if defined(USE_PIX_SUPPORTED_ARCHITECTURE) && (defined(USE_PIX) || defined(USE_PIX_RETAIL))
 
 #define PIX_EVENTS_ARE_TURNED_ON
 
 #include "PIXEventsCommon.h"
-#if defined(USE_PIX) || !defined(PIX_XBOX)
-#define PIX_CONTEXT_EMIT_CPU_EVENTS
-#include "AmdDxExt\AmdPix3.h"
-#endif
 #include "PIXEvents.h"
 
 #ifdef USE_PIX
@@ -172,8 +191,8 @@ inline void PIXScopedEvent(void*, UINT64, _In_ PCWSTR, ...) {}
 // Use PIX_COLOR() to specify a particular color for an event.
 // Or, use PIX_COLOR_INDEX() to specify a set of unique event categories, and let PIX choose
 // the colors to represent each category.
-inline UINT PIX_COLOR(BYTE r, BYTE g, BYTE b) { return 0xff000000 | (r << 16) | (g << 8) | b; }
-inline UINT PIX_COLOR_INDEX(BYTE i) { return i; }
-const UINT PIX_COLOR_DEFAULT = PIX_COLOR_INDEX(0);
+inline UINT32 PIX_COLOR(UINT8 r, UINT8 g, UINT8 b) { return 0xff000000u | ((UINT32)r << 16) | ((UINT32)g << 8) | (UINT32)b; }
+inline UINT8 PIX_COLOR_INDEX(UINT8 i) { return i; }
+const UINT8 PIX_COLOR_DEFAULT = PIX_COLOR_INDEX(0);
 
 #endif // _PIX3_H_
