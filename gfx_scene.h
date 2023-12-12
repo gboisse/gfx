@@ -575,7 +575,7 @@ class GfxSceneInternal
     struct GltfAnimation
     {
         std::vector<uint64_t> animated_root_nodes_;
-        std::vector<uint64_t> dependent_skinned_nodes_;
+        std::vector<GfxRef<GfxSkin>> dependent_skins_;
         std::vector<GltfAnimationChannel> channels_;
     };
 
@@ -1131,7 +1131,7 @@ private:
         std::function<void(uint64_t, glm::dmat4 const &)> VisitNode;
         VisitNode = [&](uint64_t node_handle, glm::dmat4 const &parent_transform)
         {
-            if(!gltf_node_handles_.has_handle(node_handle)) return;
+            GFX_ASSERT(gltf_node_handles_.has_handle(node_handle));
             GltfNode &node = gltf_nodes_[GetObjectIndex(node_handle)];
             GltfAnimatedNode *animated_node = gltf_animated_nodes_.at(GetObjectIndex(node_handle));
             if(animated_node == nullptr)
@@ -1151,7 +1151,7 @@ private:
         };
         for(uint64_t node_handle : gltf_animation.animated_root_nodes_)
         {
-            if(!gltf_node_handles_.has_handle(node_handle)) continue;
+            GFX_ASSERT(gltf_node_handles_.has_handle(node_handle));
             GltfNode &node = gltf_nodes_[GetObjectIndex(node_handle)];
             if (!node.parent_ || !gltf_node_handles_.has_handle(node.parent_))
             {
@@ -1160,20 +1160,14 @@ private:
             }
             VisitNode(node_handle, gltf_nodes_[GetObjectIndex(node.parent_)].world_transform_);
         }
-        for(auto const node_handle : gltf_animation.dependent_skinned_nodes_)
+        for(auto const skin : gltf_animation.dependent_skins_)
         {
-            if(!gltf_node_handles_.has_handle(node_handle)) continue;
-            GltfNode &node = gltf_nodes_[GetObjectIndex(node_handle)];
-            GFX_ASSERT(node.skin_);
-            glm::dmat4 inverse_transform = glm::inverse(node.world_transform_);
-            GltfSkin const *skin = gltf_skins_.at(GetObjectIndex(node.skin_));
-            for(size_t i = 0; i < node.skin_->joint_matrices.size(); ++i)
+            GltfSkin const *gltf_skin = gltf_skins_.at(GetObjectIndex(skin));
+            for(size_t i = 0; i < skin->joint_matrices.size(); ++i)
             {
-                GFX_ASSERT(gltf_node_handles_.has_handle(skin->joints_[i]));
-                GltfNode const &joint_node = gltf_nodes_[GetObjectIndex(skin->joints_[i])];
-                node.skin_->joint_matrices[i] = inverse_transform
-                                                 * joint_node.world_transform_
-                                                 * glm::dmat4(skin->inverse_bind_matrices_[i]);
+                GFX_ASSERT(gltf_node_handles_.has_handle(gltf_skin->joints_[i]));
+                GltfNode const &joint_node = gltf_nodes_[GetObjectIndex(gltf_skin->joints_[i])];
+                skin->joint_matrices[i] = joint_node.world_transform_ * glm::dmat4(gltf_skin->inverse_bind_matrices_[i]);
             }
         }
     }
@@ -2102,8 +2096,10 @@ private:
         }
         for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
         {
-            GltfSkin &skin = gltf_skins_.insert((std::uint32_t)i);
             cgltf_skin const &gltf_skin = gltf_model->skins[i];
+            std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
+            if (it == skins.end()) continue;
+            GltfSkin &skin = gltf_skins_.insert(GetObjectIndex((*it).second));
             skin.joints_.resize(gltf_skin.joints_count);
             for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
             {
@@ -2125,22 +2121,22 @@ private:
             for(auto const &channel : animation_object.channels_)
                 animated_nodes.insert(channel.node_);
             std::set<uint64_t> dependent_skinned_nodes;
+            animation_object.dependent_skins_.reserve(gltf_model->skins_count);
             for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
             {
                 GltfSkin &skin = *gltf_skins_.at((std::uint32_t)i);
                 cgltf_skin const &gltf_skin = gltf_model->skins[i];
+                std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
+                if (it == skins.end()) continue;
                 for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
                 {
                     if(animated_nodes.find(skin.joints_[j]) != animated_nodes.end())
                     {
-                        dependent_skinned_nodes.insert(
-                            skin_referencing_nodes[&gltf_skin].begin(), skin_referencing_nodes[&gltf_skin].end());
+                        animation_object.dependent_skins_.push_back(it->second);
                         break;
                     }
                 }
             }
-            animation_object.dependent_skinned_nodes_ = std::vector<uint64_t>(
-                dependent_skinned_nodes.begin(), dependent_skinned_nodes.end());
         }
         for(auto const it : node_handles)
         {
