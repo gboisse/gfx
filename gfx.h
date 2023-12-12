@@ -6039,7 +6039,7 @@ private:
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object; found at depth/stencil target");
                 Texture &gfx_texture = textures_[texture]; SetObjectName(gfx_texture, texture.name);
                 GFX_TRY(ensureTextureHasDepthStencilView(texture, gfx_texture, bound_depth_stencil_target_.mip_level, bound_depth_stencil_target_.slice));
-                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[bound_depth_stencil_target_.mip_level][bound_depth_stencil_target_] != 0xFFFFFFFFu);
+                GFX_ASSERT(gfx_texture.dsv_descriptor_slots_[bound_depth_stencil_target_.mip_level][bound_depth_stencil_target_.slice] != 0xFFFFFFFFu);
                 depth_stencil_target = dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[bound_depth_stencil_target_.mip_level][bound_depth_stencil_target_.slice]);
                 uint32_t const texture_width  = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_width_  : texture.width);
                 uint32_t const texture_height = ((gfx_texture.flags_ & Texture::kFlag_AutoResize) != 0 ? window_height_ : texture.height);
