@@ -53,6 +53,10 @@ int main()
         gfxFrame(gfx);
     }
 
+    gfxDestroyBuffer(gfx, vertex_buffer);
+    gfxDestroyKernel(gfx, kernel);
+    gfxDestroyProgram(gfx, program);
+
     gfxDestroyContext(gfx);
     gfxDestroyWindow(window);
 
