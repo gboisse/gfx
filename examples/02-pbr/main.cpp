@@ -182,8 +182,6 @@ int main()
         gfxCommandCopyTexture(gfx, history_buffer, resolve_buffer);
 
         // Resolve into the backbuffer
-        gfxCommandBindColorTarget(gfx, 0, {});
-        gfxCommandBindDepthStencilTarget(gfx, {});
         gfxCommandBindKernel(gfx, resolve_kernel);
         gfxCommandDraw(gfx, 3);
 

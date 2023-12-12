@@ -245,8 +245,6 @@ int32_t main()
         gfxCommandDraw(gfx, 3);
 
         // And resolve into the back buffer
-        gfxCommandBindColorTarget(gfx, 0, {});
-        gfxCommandBindDepthStencilTarget(gfx, {});
         gfxCommandBindKernel(gfx, resolve_kernel);
 
         gfxCommandDraw(gfx, 3);
