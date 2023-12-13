@@ -4535,7 +4535,7 @@ public:
         force_install_index_buffer_ = true;
         force_install_vertex_buffer_ = true;
         force_install_draw_id_buffer_ = true;
-        for (auto& bound_color_target : bound_color_targets_)
+        for(auto &bound_color_target : bound_color_targets_)
             bound_color_target = {};
         bound_depth_stencil_target_ = {};
     }
