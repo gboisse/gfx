@@ -138,11 +138,11 @@ int32_t main()
 
     // Compile our ambient occlusion shaders
     GfxDrawState trace_draw_state;
-    gfxDrawStateSetColorTarget(trace_draw_state, 0, color_buffer);
-    gfxDrawStateSetDepthStencilTarget(trace_draw_state, depth_buffer);
+    gfxDrawStateSetColorTarget(trace_draw_state, 0, color_buffer.getFormat());
+    gfxDrawStateSetDepthStencilTarget(trace_draw_state, depth_buffer.getFormat());
 
     GfxDrawState accumulate_draw_state;
-    gfxDrawStateSetColorTarget(accumulate_draw_state, 0, accum_buffer);
+    gfxDrawStateSetColorTarget(accumulate_draw_state, 0, accum_buffer.getFormat());
     gfxDrawStateSetBlendMode(accumulate_draw_state, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_ADD, D3D12_BLEND_ONE, D3D12_BLEND_ONE, D3D12_BLEND_OP_ADD);
 
     GfxProgram rtao_program      = gfxCreateProgram(gfx, "rtao");
@@ -216,6 +216,8 @@ int32_t main()
         gfxProgramSetParameter(gfx, rtao_program, "ViewProjectionMatrix", view_projection_matrix);
 
         // Perform our occlusion tracing
+        gfxCommandBindColorTarget(gfx, 0, color_buffer);
+        gfxCommandBindDepthStencilTarget(gfx, depth_buffer);
         gfxCommandBindKernel(gfx, trace_kernel);
 
         gfxCommandClearTexture(gfx, color_buffer);
@@ -237,6 +239,7 @@ int32_t main()
         }
 
         // Accumulate the occlusion values
+        gfxCommandBindColorTarget(gfx, 0, accum_buffer);
         gfxCommandBindKernel(gfx, accumulate_kernel);
 
         gfxCommandDraw(gfx, 3);
