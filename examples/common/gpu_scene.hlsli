@@ -36,12 +36,13 @@ struct Mesh
     uint count;
     uint first_index;
     uint base_vertex;
-    uint material_id;
+    uint padding;
 };
 
 struct Instance
 {
     uint mesh_id;
+    uint material_id;
 };
 
 struct Vertex

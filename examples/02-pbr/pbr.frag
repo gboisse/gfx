@@ -68,8 +68,7 @@ Result main(in Params params)
 {
     // Load our material
     Instance instance = g_InstanceBuffer[g_InstanceId];
-    Mesh     mesh     = g_MeshBuffer[instance.mesh_id];
-    Material material = g_MaterialBuffer[mesh.material_id];
+    Material material = g_MaterialBuffer[instance.material_id];
 
     // Load and sample our texture maps
     uint albedo_map      = asuint(material.albedo.w);

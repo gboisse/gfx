@@ -28,16 +28,16 @@ endif()
 
 target_compile_options(gfx PRIVATE /bigobj)
 
-target_include_directories(gfx PUBLIC ${GFX_DXC_PATH})
-target_include_directories(gfx PUBLIC ${GFX_PIX_PATH}/include)
+target_include_directories(gfx PRIVATE ${GFX_DXC_PATH})
+target_include_directories(gfx PRIVATE ${GFX_PIX_PATH}/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
-target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
+target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
+target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
 
 target_compile_features(gfx PUBLIC cxx_std_14)
 target_compile_options(gfx PRIVATE
     -DUSE_PIX
-    /W3 /WX /external:anglebrackets /external:W0 /analyze:external-
+    /W3 /external:anglebrackets /external:W0 /analyze:external-
     -D_HAS_EXCEPTIONS=0
 )
 

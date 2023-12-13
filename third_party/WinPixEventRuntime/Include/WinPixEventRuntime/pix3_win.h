@@ -1,5 +1,3 @@
-// Copyright (c) Microsoft Corporation. All rights reserved.
-
 /*==========================================================================;
  *
  *  Copyright (C) Microsoft Corporation.  All Rights Reserved.
@@ -44,13 +42,19 @@ inline void PIXRecordMemoryFreeEvent(USHORT, void*, size_t, UINT64) {}
 
 #endif
 
-// The following defines denote the different metadata values that have been used
-// by tools to denote how to parse pix marker event data. The first two values
-// are legacy values.
+// The following WINPIX_EVENT_* defines denote the different metadata values that have
+// been used by tools to denote how to parse pix marker event data. The first two values
+// are legacy values used by pix.h in the Windows SDK.
 #define WINPIX_EVENT_UNICODE_VERSION 0
 #define WINPIX_EVENT_ANSI_VERSION 1
-#define WINPIX_EVENT_PIX3BLOB_VERSION 2
 
+// These values denote PIX marker event data that was created by the WinPixEventRuntime.
+// In early 2023 we revised the PIX marker format and defined a new version number.
+#define WINPIX_EVENT_PIX3BLOB_VERSION 2
+#define WINPIX_EVENT_PIX3BLOB_V2 6345127 // A number that other applications are unlikely to have used before
+
+// For backcompat reasons, the WinPixEventRuntime uses the older PIX3BLOB format when it passes data
+// into the D3D12 runtime. It will be updated to use the V2 format in the future.
 #define D3D12_EVENT_METADATA WINPIX_EVENT_PIX3BLOB_VERSION
 
 __forceinline UINT64 PIXGetTimestampCounter()
@@ -324,8 +328,6 @@ extern "C"  __forceinline HRESULT WINAPI PIXBeginCapture2(DWORD captureFlags, _I
 
 extern "C"  __forceinline HRESULT WINAPI PIXEndCapture(BOOL discard)
 {
-    UNREFERENCED_PARAMETER(discard);
-
     // We can't tell if the user wants to end a GPU Capture or a Timing Capture.
     // The user shouldn't have both WinPixGpuCapturer and WinPixTimingCapturer loaded in the process though,
     // so we can just look for one of them and call it.
@@ -435,5 +437,79 @@ __forceinline HINSTANCE WINAPI PIXOpenCaptureInUI(PCWSTR)
 #endif // WINAPI_PARTITION
 
 #endif // USE_PIX_SUPPORTED_ARCHITECTURE || USE_PIX
+
+#if defined(__d3d12_h__)
+
+inline void PIXInsertTimingMarkerOnContextForBeginEvent(_In_ ID3D12GraphicsCommandList* commandList, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandList->BeginEvent(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertTimingMarkerOnContextForBeginEvent(_In_ ID3D12CommandQueue* commandQueue, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandQueue->BeginEvent(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertTimingMarkerOnContextForSetMarker(_In_ ID3D12GraphicsCommandList* commandList, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandList->SetMarker(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertTimingMarkerOnContextForSetMarker(_In_ ID3D12CommandQueue* commandQueue, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandQueue->SetMarker(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertTimingMarkerOnContextForEndEvent(_In_ ID3D12GraphicsCommandList* commandList, UINT8 eventType)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandList->EndEvent();
+}
+
+inline void PIXInsertTimingMarkerOnContextForEndEvent(_In_ ID3D12CommandQueue* commandQueue, UINT8 eventType)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandQueue->EndEvent();
+}
+
+inline void PIXInsertGPUMarkerOnContextForBeginEvent(_In_ ID3D12GraphicsCommandList* commandList, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandList->BeginEvent(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertGPUMarkerOnContextForBeginEvent(_In_ ID3D12CommandQueue* commandQueue, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandQueue->BeginEvent(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertGPUMarkerOnContextForSetMarker(_In_ ID3D12GraphicsCommandList* commandList, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandList->SetMarker(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertGPUMarkerOnContextForSetMarker(_In_ ID3D12CommandQueue* commandQueue, UINT8 eventType, _In_reads_bytes_(size) void* data, UINT size)
+{
+    UNREFERENCED_PARAMETER(eventType);
+    commandQueue->SetMarker(WINPIX_EVENT_PIX3BLOB_V2, data, size);
+}
+
+inline void PIXInsertGPUMarkerOnContextForEndEvent(_In_ ID3D12GraphicsCommandList* commandList, UINT8, void*, UINT)
+{
+    commandList->EndEvent();
+}
+
+inline void PIXInsertGPUMarkerOnContextForEndEvent(_In_ ID3D12CommandQueue* commandQueue, UINT8, void*, UINT)
+{
+    commandQueue->EndEvent();
+}
+
+#endif
 
 #endif //_PIX3_WIN_H_

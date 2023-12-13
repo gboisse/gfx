@@ -1,12 +1,9 @@
 //==============================================================================
-// Copyright (c) 2017-2021 Advanced Micro Devices, Inc. All rights reserved.
-/// \author AMD Developer Tools Team
-/// \file
-/// \brief  This file contains three macro definitions to wrap existing PIX3
+// Copyright (c) 2017-2023 Advanced Micro Devices, Inc. All rights reserved.
+/// @author AMD Developer Tools Team
+/// @file
+/// @brief  This file contains macro definitions to wrap existing PIX3
 ///         functions with AMD RGP marker support.
-///
-///         This requires AMD driver with a device level marker extension
-///         support (driver 17.30.1081 or newer).
 ///
 ///         This requires a WinPixEventRuntime version of at least
 ///         1.0.200127001.
@@ -16,9 +13,13 @@
 ///                 PIXEndEventOnContextCpu and PIXSetMarkerOnContextCpu within
 ///                 that file to add an "Rgp" prefix (so the calls become
 ///                 RgpPIXBeginEventOnContextCpu, RgpPIXEndEventOnContextCpu and
-///                 RgpPIXSetMarkerOnContextCpu). Also check the RGP user
-///                 documentation for a complete user guide.
+///                 RgpPIXSetMarkerOnContextCpu). When using a version of
+///                 WinPixEventRuntime prior to v1.0.231030001, you should also
+///                 add a "Legacy" suffix to the aforementioned calls. More
+///                 information, including a complete user guide, can be found
+///                 in the RGP user documentation.
 //==============================================================================
+
 #ifndef _AMD_PIX3_H_
 #define _AMD_PIX3_H_
 
@@ -30,21 +31,21 @@
 
 #define MAX_MARKER_STRING_LENGTH 1024
 
-// per thread amd ext device object using TLS
+// Per-thread AMD extension device object using TLS.
 static __declspec(thread) IAmdExtD3DDevice1* tls_pAmdExtDeviceObject = nullptr;
 static __declspec(thread) bool tls_checkAmdDriver                    = true;
 
-// this function will initialize the tls_pAmdExtDeviceObject per thread
-// tls_pAmdExtDeviceObject contains the marker API
+// This function will initialize the tls_pAmdExtDeviceObject per thread
+// tls_pAmdExtDeviceObject contains the marker API.
 inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList)
 {
-    // return immediately if the device extension object has been created for the thread
+    // Return immediately if the device extension object has been created for the thread.
     if (nullptr != tls_pAmdExtDeviceObject)
     {
         return;
     }
 
-    // return immediately if on non-AMD system
+    // Return immediately if on non-AMD system.
     if (!tls_checkAmdDriver)
     {
         return;
@@ -73,13 +74,13 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
 
             if (nullptr != pDevice)
             {
-                // create the extension object factory
+                // Create the extension object factory.
                 IAmdExtD3DFactory* pAmdExtObject = nullptr;
                 pAmdExtD3dCreateFunc(pDevice, __uuidof(IAmdExtD3DFactory), reinterpret_cast<void**>(&pAmdExtObject));
 
                 if (nullptr != pAmdExtObject)
                 {
-                    // use the extension factory object to create a device extension object that contains the marker API
+                    // Use the extension factory object to create a device extension object that contains the marker API.
                     pAmdExtObject->CreateInterface(pDevice, __uuidof(IAmdExtD3DDevice1), reinterpret_cast<void**>(&tls_pAmdExtDeviceObject));
                     pAmdExtObject->Release();
                 }
@@ -89,7 +90,7 @@ inline void InitializeAmdExtDeviceObject(ID3D12GraphicsCommandList* pCommandList
     }
     else
     {
-        // running on non-amd hardware or missing amd driver install
+        // Running on non-AMD hardware or missing AMD driver install.
         tls_checkAmdDriver = false;
     }
 }
@@ -100,19 +101,19 @@ inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCWSTR formatS
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
-        // create a new marker string that includes all the variadic args
+        // Create a new marker string that includes all the variadic args.
         wchar_t markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
         va_start(args, formatString);
         vswprintf_s(markerString, formatString, args);
         va_end(args);
 
-        // convert from wchar_t to char string
+        // Convert from wchar_t to char string.
         char   markerStringInChar[MAX_MARKER_STRING_LENGTH];
         size_t retValue = 0;
         wcstombs_s(&retValue, markerStringInChar, MAX_MARKER_STRING_LENGTH, markerString, MAX_MARKER_STRING_LENGTH);
 
-        // set the rgp marker
+        // Set the RGP marker.
         tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerStringInChar);
     }
 }
@@ -123,14 +124,14 @@ inline void RgpSetMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatSt
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
-        // create a new marker string that includes all the variadic args
-        char markerString[MAX_MARKER_STRING_LENGTH];
+        // Create a new marker string that includes all the variadic args.
+        char    markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
         va_start(args, formatString);
         vsprintf_s(markerString, formatString, args);
         va_end(args);
 
-        // set the rgp marker
+        // Set the RGP marker.
         tls_pAmdExtDeviceObject->SetMarker(pCommandList, markerString);
     }
 }
@@ -141,19 +142,19 @@ inline void RgpPushMarker(ID3D12GraphicsCommandList* pCommandList, PCWSTR format
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
-        // create a new marker string that includes all the variadic args
+        // Create a new marker string that includes all the variadic args.
         wchar_t markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
         va_start(args, formatString);
         vswprintf_s(markerString, formatString, args);
         va_end(args);
 
-        // convert from wchar_t to char string
+        // Convert from wchar_t to char string.
         char   markerStringInChar[MAX_MARKER_STRING_LENGTH];
         size_t retValue = 0;
         wcstombs_s(&retValue, markerStringInChar, MAX_MARKER_STRING_LENGTH, markerString, MAX_MARKER_STRING_LENGTH);
 
-        // push the rgp marker
+        // Push the RGP marker.
         tls_pAmdExtDeviceObject->PushMarker(pCommandList, markerStringInChar);
     }
 }
@@ -164,14 +165,14 @@ inline void RgpPushMarker(ID3D12GraphicsCommandList* pCommandList, PCSTR formatS
 
     if (nullptr != tls_pAmdExtDeviceObject)
     {
-        // create a new marker string that includes all the variadic args
-        char markerString[MAX_MARKER_STRING_LENGTH];
+        // Create a new marker string that includes all the variadic args.
+        char    markerString[MAX_MARKER_STRING_LENGTH];
         va_list args;
         va_start(args, formatString);
         vsprintf_s(markerString, formatString, args);
         va_end(args);
 
-        // push the rgp marker
+        // Push the RGP marker.
         tls_pAmdExtDeviceObject->PushMarker(pCommandList, markerString);
     }
 }
@@ -188,41 +189,53 @@ inline void RgpPopMarker(ID3D12GraphicsCommandList* pCommandList)
 
 inline void RgpSetMarker(ID3D12CommandQueue*, PCWSTR, ...)
 {
-    // there is no queue-based marker yet
+    // There is no queue-based marker yet.
 }
 
 inline void RgpSetMarker(ID3D12CommandQueue*, PCSTR, ...)
 {
-    // there is no queue-based marker yet
+    // There is no queue-based marker yet.
 }
 
 inline void RgpPushMarker(ID3D12CommandQueue*, PCWSTR, ...)
 {
-    // there is no queue-based marker yet
+    // There is no queue-based marker yet.
 }
 
 inline void RgpPushMarker(ID3D12CommandQueue*, PCSTR, ...)
 {
-    // there is no queue-based marker yet
+    // There is no queue-based marker yet.
 }
-
 
 inline void RgpPopMarker(ID3D12CommandQueue*)
 {
-    // there is no queue-based marker yet
+    // There is no queue-based marker yet.
 }
 
-// define three macros to wrap existing PIX3 functions
-#define RgpPIXBeginEventOnContextCpu(context, color, formatString, ...) \
-    RgpPushMarker(context, formatString, args...);                      \
+// Define three macros to wrap existing PIX3 functions when using WinPixEventRuntime v1.0.231030001 or newer.
+#define RgpPIXBeginEventOnContextCpu(destination, eventSize, context, color, formatString, ...) \
+    RgpPushMarker(context, formatString, args...);                                              \
+    PIXBeginEventOnContextCpu(destination, eventSize, context, color, formatString, args...);
+
+#define RgpPIXEndEventOnContextCpu(destination, context) \
+    RgpPopMarker(context);                               \
+    destination = PIXEndEventOnContextCpu(context);
+
+#define RgpPIXSetMarkerOnContextCpu(destination, eventSize, context, color, formatString, ...) \
+    RgpSetMarker(context, formatString, args...);                                              \
+    PIXSetMarkerOnContextCpu(destination, eventSize, context, color, formatString, args...);
+
+// Define three macros to wrap existing PIX3 functions when using a legacy version of WinPixEventRuntime (prior to v1.0.231030001).
+#define RgpPIXBeginEventOnContextCpuLegacy(context, color, formatString, ...) \
+    RgpPushMarker(context, formatString, args...);                            \
     PIXBeginEventOnContextCpu(context, color, formatString, args...);
 
-#define RgpPIXEndEventOnContextCpu(context) \
-    RgpPopMarker(context);                  \
+#define RgpPIXEndEventOnContextCpuLegacy(context) \
+    RgpPopMarker(context);                        \
     PIXEndEventOnContextCpu(context);
 
-#define RgpPIXSetMarkerOnContextCpu(context, color, formatString, ...) \
-    RgpSetMarker(context, formatString, args...);                      \
+#define RgpPIXSetMarkerOnContextCpuLegacy(context, color, formatString, ...) \
+    RgpSetMarker(context, formatString, args...);                            \
     PIXSetMarkerOnContextCpu(context, color, formatString, args...);
 
 #endif  //_AMD_PIX3_H_

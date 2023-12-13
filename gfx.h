@@ -24,8 +24,8 @@ SOFTWARE.
 #ifndef GFX_INCLUDE_GFX_H
 #define GFX_INCLUDE_GFX_H
 
-#include "d3d12.h"
-#include "dxgi1_4.h"
+#include <d3d12.h>
+#include <dxgi1_4.h>
 #include "gfx_core.h"
 
 //!
@@ -486,17 +486,17 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
 #include <map>                  // std::map
 #include <deque>                // std::deque
 #include <memory>               // std::unique_ptr
-#include "direct.h"             // _mkdir()
-#include "inc/dxcapi.h"         // shader compiler
-#include "inc/d3d12shader.h"    // shader reflection
+#include <direct.h>             // _mkdir()
+#include <inc/dxcapi.h>         // shader compiler
+#include <inc/d3d12shader.h>    // shader reflection
 
 #pragma warning(push)
 #pragma warning(disable:4100)   // unreferenced formal parameter
 #pragma warning(disable:4127)   // conditional expression is constant
 #pragma warning(disable:4189)   // local variable is initialized but not referenced
 #pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
-#include "D3D12MemAlloc.cpp"    // D3D12MemoryAllocator
-#include "WinPixEventRuntime/pix3.h"
+#include <D3D12MemAlloc.cpp>    // D3D12MemoryAllocator
+#include <WinPixEventRuntime/pix3.h>
 #pragma warning(pop)
 
 #pragma warning(push)
@@ -1403,6 +1403,25 @@ public:
         device_->QueryInterface(IID_PPV_ARGS(&mesh_device_));
         SetDebugName(device_, "gfx_Device");
 
+        if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
+        {
+            ID3D12InfoQueue1 *debug_callback = nullptr;
+            if(SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&debug_callback))))
+            {
+                DWORD cookie = 0;
+                D3D12MessageFunc callback = [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity,
+                                               D3D12_MESSAGE_ID, LPCSTR description, void *)
+                {
+                    if(severity <= D3D12_MESSAGE_SEVERITY_ERROR)
+                        GFX_ASSERTMSG(0, "D3D12 Error: %s", description);
+                    else if(severity == D3D12_MESSAGE_SEVERITY_WARNING)
+                        GFX_PRINTLN("D3D12 Warning: %s", description);
+                };
+                debug_callback->RegisterMessageCallback(callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
+                debug_callback->Release();
+            }
+        }
+
         D3D12_COMMAND_QUEUE_DESC
         queue_desc      = {};
         queue_desc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
@@ -1425,8 +1444,9 @@ public:
         swap_chain_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
         swap_chain_desc.BufferCount      = max_frames_in_flight_;
         swap_chain_desc.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swap_chain_desc.SampleDesc.Count = 1;
+        swap_chain_desc.Flags            = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
         IDXGISwapChain1 *swap_chain = nullptr;
         if(!SUCCEEDED(factory->CreateSwapChainForHwnd(command_queue_, window_, &swap_chain_desc, nullptr, nullptr, &swap_chain)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create swap chain");
@@ -4235,7 +4255,7 @@ public:
             ID3D12CommandList *const command_lists[] = { command_list_ };
             command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
             command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
-            swap_chain_->Present(vsync ? 1 : 0, 0); // toggle vsync
+            swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING);
             uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
             uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
             fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
@@ -4293,17 +4313,17 @@ public:
         return kGfxResult_NoError;
     }
 
-    ID3D12Device *getDevice() const
+    inline ID3D12Device *getDevice() const
     {
         return device_;
     }
 
-    ID3D12CommandQueue *getCommandQueue() const
+    inline ID3D12CommandQueue *getCommandQueue() const
     {
         return command_queue_;
     }
 
-    ID3D12GraphicsCommandList *getCommandList() const
+    inline ID3D12GraphicsCommandList *getCommandList() const
     {
         return command_list_;
     }
@@ -8686,7 +8706,7 @@ private:
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i) { collect(back_buffers_[i]); back_buffers_[i] = nullptr; }
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i) { freeRTVDescriptor(back_buffer_rtvs_[i]); back_buffer_rtvs_[i] = 0xFFFFFFFFu; }
         sync(); // make sure the GPU is done with the previous swap chain before resizing
-        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, 0);
+        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         if(!SUCCEEDED(hr))
