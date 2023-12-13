@@ -979,25 +979,25 @@ private:
     {
         glm::dmat4 transform;
 
-		transform[0].x = (1 - 2.0 * rot.y * rot.y - 2.0 * rot.z * rot.z) * scale.x;
-		transform[0].y = (2.0 * rot.x * rot.y + 2.0 * rot.z * rot.w) * scale.x;
-		transform[0].z = (2.0 * rot.x * rot.z - 2.0 * rot.y * rot.w) * scale.x;
-		transform[0].w = 0.0;
+        transform[0].x = (1 - 2.0 * rot.y * rot.y - 2.0 * rot.z * rot.z) * scale.x;
+        transform[0].y = (2.0 * rot.x * rot.y + 2.0 * rot.z * rot.w) * scale.x;
+        transform[0].z = (2.0 * rot.x * rot.z - 2.0 * rot.y * rot.w) * scale.x;
+        transform[0].w = 0.0;
 
-		transform[1].x = (2.0 * rot.x * rot.y - 2.0 * rot.z * rot.w) * scale.x;
-		transform[1].y = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.z * rot.z) * scale.x;
-		transform[1].z = (2.0 * rot.y * rot.z + 2 * rot.x * rot.w) * scale.x;
-		transform[1].w = 0.0;
+        transform[1].x = (2.0 * rot.x * rot.y - 2.0 * rot.z * rot.w) * scale.x;
+        transform[1].y = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.z * rot.z) * scale.x;
+        transform[1].z = (2.0 * rot.y * rot.z + 2 * rot.x * rot.w) * scale.x;
+        transform[1].w = 0.0;
 
-		transform[2].x = (2.0 * rot.x * rot.z + 2.0 * rot.y * rot.w) * scale.x;
-		transform[2].y = (2.0 * rot.y * rot.z - 2.0 * rot.x * rot.w) * scale.x;
-		transform[2].z = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.y * rot.y) * scale.x;
-		transform[2].w = 0.0;
+        transform[2].x = (2.0 * rot.x * rot.z + 2.0 * rot.y * rot.w) * scale.x;
+        transform[2].y = (2.0 * rot.y * rot.z - 2.0 * rot.x * rot.w) * scale.x;
+        transform[2].z = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.y * rot.y) * scale.x;
+        transform[2].w = 0.0;
 
-		transform[3].x = trans.x;
-		transform[3].y = trans.y;
-		transform[3].z = trans.z;
-		transform[3].w = 1.0;
+        transform[3].x = trans.x;
+        transform[3].y = trans.y;
+        transform[3].z = trans.z;
+        transform[3].w = 1.0;
 
         return transform;
     }
@@ -1959,7 +1959,6 @@ private:
                 animation_channel.type_ = type;
             }
         }
-        std::map<cgltf_skin const *, std::set<uint64_t>> skin_referencing_nodes;
         std::function<uint64_t (cgltf_node const *gltf_node, glm::mat4 const &parent_transform,
             std::vector<GfxConstRef<GfxAnimation>> const &parent_animations, uint64_t parent_handle)> VisitNode;
         VisitNode = [&](cgltf_node const *gltf_node, glm::mat4 const &parent_transform,
@@ -2080,10 +2079,6 @@ private:
             node.skin_ = skin;
             node.camera_ = camera;
             node.light_ = light;
-            if(gltf_node->skin)
-            {
-                skin_referencing_nodes[gltf_node->skin].insert(node_handle);
-            }
             return node_handle;
         };
         cgltf_scene const &gltf_scene = gltf_model->scene != nullptr ? *gltf_model->scene : gltf_model->scenes[0];
