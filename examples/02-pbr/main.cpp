@@ -68,20 +68,20 @@ int main()
     GfxProgram taa_program = gfxCreateProgram(gfx, "taa");
 
     GfxDrawState pbr_draw_state;
-    gfxDrawStateSetColorTarget(pbr_draw_state, 0, color_buffer);
-    gfxDrawStateSetColorTarget(pbr_draw_state, 1, velocity_buffer);
-    gfxDrawStateSetDepthStencilTarget(pbr_draw_state, depth_buffer);
+    gfxDrawStateSetColorTarget(pbr_draw_state, 0, color_buffer.getFormat());
+    gfxDrawStateSetColorTarget(pbr_draw_state, 1, velocity_buffer.getFormat());
+    gfxDrawStateSetDepthStencilTarget(pbr_draw_state, depth_buffer.getFormat());
 
     GfxKernel pbr_kernel = gfxCreateGraphicsKernel(gfx, pbr_program, pbr_draw_state);
 
     GfxDrawState sky_draw_state;
-    gfxDrawStateSetColorTarget(sky_draw_state, 0, color_buffer);
-    gfxDrawStateSetDepthStencilTarget(sky_draw_state, depth_buffer);
+    gfxDrawStateSetColorTarget(sky_draw_state, 0, color_buffer.getFormat());
+    gfxDrawStateSetDepthStencilTarget(sky_draw_state, depth_buffer.getFormat());
 
     GfxKernel sky_kernel = gfxCreateGraphicsKernel(gfx, sky_program, sky_draw_state);
 
     GfxDrawState reproject_draw_state;
-    gfxDrawStateSetColorTarget(reproject_draw_state, 0, resolve_buffer);
+    gfxDrawStateSetColorTarget(reproject_draw_state, 0, resolve_buffer.getFormat());
 
     GfxKernel reproject_kernel = gfxCreateGraphicsKernel(gfx, taa_program, reproject_draw_state, "Reproject");
     GfxKernel resolve_kernel   = gfxCreateGraphicsKernel(gfx, taa_program, "Resolve");
@@ -144,6 +144,9 @@ int main()
         // Draw all the meshes in the scene
         uint32_t const instance_count = gfxSceneGetInstanceCount(scene);
 
+        gfxCommandBindColorTarget(gfx, 0, color_buffer);
+        gfxCommandBindColorTarget(gfx, 1, velocity_buffer);
+        gfxCommandBindDepthStencilTarget(gfx, depth_buffer);
         gfxCommandBindKernel(gfx, pbr_kernel);
         gfxCommandBindIndexBuffer(gfx, gpu_scene.index_buffer);
         gfxCommandBindVertexBuffer(gfx, gpu_scene.vertex_buffer);
@@ -165,10 +168,13 @@ int main()
         }
 
         // Draw our skybox
+        gfxCommandBindColorTarget(gfx, 0, color_buffer);
+        gfxCommandBindDepthStencilTarget(gfx, depth_buffer);
         gfxCommandBindKernel(gfx, sky_kernel);
         gfxCommandDraw(gfx, 3);
 
         // Reproject the temporal history (a.k.a., TAA)
+        gfxCommandBindColorTarget(gfx, 0, resolve_buffer);
         gfxCommandBindKernel(gfx, reproject_kernel);
         gfxCommandDraw(gfx, 3);
 
