@@ -211,7 +211,7 @@ GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracin
 GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
 uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);    // in bytes
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 
 //!
 //! Draw state manipulation.
@@ -2554,7 +2554,7 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
-    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -2575,7 +2575,6 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         destroyBuffer(gfx_raytracing_primitive.index_buffer_);
         destroyBuffer(gfx_raytracing_primitive.vertex_buffer_);
-        gfx_raytracing_primitive.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.index_buffer_ = createBufferRange(index_buffer, 0, index_buffer.size);
         gfx_raytracing_primitive.index_stride_ = index_stride;
         gfx_raytracing_primitive.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
@@ -9049,11 +9048,11 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     return gfx->updateRaytracingPrimitive(raytracing_primitive);
 }
 
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, build_flags);
+    return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride);
 }
 
 GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
