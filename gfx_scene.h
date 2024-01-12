@@ -1101,6 +1101,21 @@ private:
         return format;
     }
 
+    template<typename T>
+    static inline bool UnpackAccessor(cgltf_accessor const *accessor, std::vector<T> &buffer)
+    {
+        if(accessor == nullptr) return true;
+        GFX_ASSERT(sizeof(T) == cgltf_num_components(accessor->type) * sizeof(float));
+        buffer.resize(accessor->count);
+        cgltf_size floats_size = cgltf_num_components(accessor->type) * accessor->count;
+        if(cgltf_accessor_unpack_floats(accessor, (float*)&buffer[0], floats_size) < floats_size)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to unpack sparse accessor");
+            return false;
+        }
+        return true;
+    };
+
     void applyAnimation(GltfAnimation const &gltf_animation, float time_in_seconds)
     {
         for(size_t i = 0; i < gltf_animation.channels_.size(); ++i)
@@ -1765,6 +1780,21 @@ private:
                 return false;
             }
         };
+        struct MeshData
+        {
+            std::vector<glm::vec3> positions;
+            std::vector<glm::vec3> normals;
+            std::vector<glm::vec2> uvs;
+            std::vector<glm::vec4> joints;
+            std::vector<glm::vec4> weights;
+            struct TargetAccessors
+            {
+                std::vector<glm::vec3> positions;
+                std::vector<glm::vec3> normals;
+                std::vector<glm::vec2> uvs;
+            };
+            std::vector<TargetAccessors> targets;
+        };
         std::map<MeshAccessors, GfxConstRef<GfxMesh>> meshInstances;
         for(size_t i = 0; i < gltf_model->meshes_count; ++i)
         {
@@ -1795,40 +1825,47 @@ private:
                     [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_weights; });  // weights stream
                 accessors.weights = it != attributes_end ? it->data : nullptr;
                 accessors.targets.resize(gltf_primitive.targets_count);
-                for(cgltf_size i = 0; i < gltf_primitive.targets_count; ++i)
+                for(cgltf_size k = 0; k < gltf_primitive.targets_count; ++k)
                 {
-                    cgltf_attribute *target_attributes_end = gltf_primitive.targets[i].attributes + gltf_primitive.targets[i].attributes_count;
-                    it = std::find_if(gltf_primitive.targets[i].attributes, target_attributes_end,
+                    cgltf_attribute *target_attributes_end = gltf_primitive.targets[k].attributes + gltf_primitive.targets[k].attributes_count;
+                    it = std::find_if(gltf_primitive.targets[k].attributes, target_attributes_end,
                         [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_position; });
-                    accessors.targets[i].positions = it != target_attributes_end ? it->data : nullptr;
-                    it = std::find_if(gltf_primitive.targets[i].attributes, target_attributes_end,
+                    accessors.targets[k].positions = it != target_attributes_end ? it->data : nullptr;
+                    it = std::find_if(gltf_primitive.targets[k].attributes, target_attributes_end,
                         [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_normal; });
-                    accessors.targets[i].normals = it != target_attributes_end ? it->data : nullptr;
-                    it = std::find_if(gltf_primitive.targets[i].attributes, target_attributes_end,
+                    accessors.targets[k].normals = it != target_attributes_end ? it->data : nullptr;
+                    it = std::find_if(gltf_primitive.targets[k].attributes, target_attributes_end,
                         [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });
-                    accessors.targets[i].uvs = it != target_attributes_end ? it->data : nullptr;
+                    accessors.targets[k].uvs = it != target_attributes_end ? it->data : nullptr;
                 }
                 auto mesh_it = meshInstances.find(accessors);
                 if(mesh_it == meshInstances.end())
                 {
+                    MeshData mesh_data;
+                    bool unpacked;
+                    unpacked = UnpackAccessor(accessors.positions, mesh_data.positions); GFX_ASSERT(unpacked);
+                    unpacked = UnpackAccessor(accessors.normals, mesh_data.normals); GFX_ASSERT(unpacked);
+                    unpacked = UnpackAccessor(accessors.uvs, mesh_data.uvs); GFX_ASSERT(unpacked);
+                    unpacked = UnpackAccessor(accessors.joints, mesh_data.joints); GFX_ASSERT(unpacked);
+                    unpacked = UnpackAccessor(accessors.weights, mesh_data.weights); GFX_ASSERT(unpacked);
+                    mesh_data.targets.resize(accessors.targets.size());
+                    for(size_t k = 0; k < accessors.targets.size(); ++k)
+                    {
+                        unpacked = UnpackAccessor(accessors.targets[k].positions, mesh_data.targets[k].positions); GFX_ASSERT(unpacked);
+                        unpacked = UnpackAccessor(accessors.targets[k].normals, mesh_data.targets[k].normals); GFX_ASSERT(unpacked);
+                        unpacked = UnpackAccessor(accessors.targets[k].uvs, mesh_data.targets[k].uvs); GFX_ASSERT(unpacked);
+                    }
                     bool skinned_mesh = accessors.joints != nullptr;
                     GfxRef<GfxMesh> mesh_ref = gfxSceneCreateMesh(scene);
                     GfxMesh &mesh = *mesh_ref;
                     mesh.default_weights = std::vector<float>(gltf_mesh.weights, gltf_mesh.weights + gltf_mesh.weights_count);
                     auto unpack_vertex = [&](size_t const gltf_index) {
                         GfxVertex vertex = {};
-                        GFX_ASSERT(cgltf_accessor_read_float(
-                            accessors.positions, gltf_index, (float *)&vertex.position, sizeof(glm::vec3)));
-                        if(accessors.normals != nullptr)
-                        {
-                            GFX_ASSERT(cgltf_accessor_read_float(
-                                accessors.normals, gltf_index, (float *)&vertex.normal, sizeof(glm::vec3)));
-                        }
-                        if(accessors.uvs != nullptr)
-                        {
-                            GFX_ASSERT(cgltf_accessor_read_float(
-                                accessors.uvs, gltf_index, (float *)&vertex.uv, sizeof(glm::vec2)));
-                        }
+                        vertex.position = mesh_data.positions[gltf_index];
+                        if(!mesh_data.normals.empty())
+                            vertex.normal = mesh_data.normals[gltf_index];
+                        if(!mesh_data.uvs.empty())
+                            vertex.uv = mesh_data.uvs[gltf_index];
                         uint32_t const index = (uint32_t)mesh.vertices.size();
                         if(index == 0)
                         {
@@ -1842,41 +1879,24 @@ private:
                         }
                         mesh.vertices.push_back(vertex);
                         mesh.indices.push_back(index);
-                        for(auto const& target : accessors.targets)
+                        for(size_t k = 0; k < mesh_data.targets.size(); ++k)
                         {
                             GfxVertex target_vertex = {};
-                            if(target.positions != nullptr)
-                            {
-                                GFX_ASSERT(cgltf_accessor_read_float(
-                                    target.positions, gltf_index, (float *)&target_vertex.position, sizeof(glm::vec3)));
-                            }
-                            if(target.normals != nullptr)
-                            {
-                                GFX_ASSERT(cgltf_accessor_read_float(
-                                    target.normals, gltf_index, (float *)&target_vertex.normal, sizeof(glm::vec3)));
-                            }
-                            if(target.uvs != nullptr)
-                            {
-                                GFX_ASSERT(cgltf_accessor_read_float(
-                                    target.uvs, gltf_index, (float *)&target_vertex.uv, sizeof(glm::vec2)));
-                            }
-                            mesh.bounds_min = glm::min(mesh.bounds_min, vertex.position + target_vertex.position);
-                            mesh.bounds_max = glm::max(mesh.bounds_max, vertex.position + target_vertex.position);
+                            if(!mesh_data.targets[k].positions.empty())
+                                target_vertex.position = mesh_data.targets[k].positions[gltf_index];
+                            if(!mesh_data.targets[k].normals.empty())
+                                target_vertex.normal = mesh_data.targets[k].normals[gltf_index];
+                            if(!mesh_data.targets[k].uvs.empty())
+                                target_vertex.uv = mesh_data.targets[k].uvs[gltf_index];
                             mesh.morph_targets.push_back(target_vertex);
                         }
                         if(skinned_mesh)
                         {
                             GfxJoint joint = {};
-                            if(accessors.joints != nullptr)
-                            {
-                                GFX_ASSERT(cgltf_accessor_read_uint(
-                                    accessors.joints, gltf_index, (std::uint32_t *)&joint.joints, sizeof(glm::uvec4)));
-                            }
-                            if(accessors.weights != nullptr)
-                            {
-                                GFX_ASSERT(cgltf_accessor_read_float(
-                                    accessors.weights, gltf_index, (float *)&joint.weights, sizeof(glm::vec4)));
-                            }
+                            if(!mesh_data.joints.empty())
+                                joint.joints = mesh_data.joints[gltf_index];
+                            if(!mesh_data.weights.empty())
+                                joint.weights = mesh_data.weights[gltf_index];
                             mesh.joints.push_back(joint);
                         }
                     };
@@ -1899,8 +1919,7 @@ private:
                     }
                     else
                     {
-                        size_t const count = accessors.positions->count / 3 * 3;
-                        for(size_t k = 0; k < count; ++k)
+                        for(size_t k = 0; k < mesh_data.positions.size(); ++k)
                         {
                             unpack_vertex(k);
                         }
