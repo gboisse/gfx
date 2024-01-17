@@ -3100,7 +3100,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearBuffer(GfxBuffer const &buffer, uint32_t clear_value)
+    GfxResult encodeClearBuffer(GfxBuffer buffer, uint32_t clear_value)
     {
         GfxResult result = kGfxResult_NoError;
         if(command_list_ == nullptr)
@@ -3110,6 +3110,7 @@ public:
         if(buffer.size == 0) return kGfxResult_NoError; // nothing to clear
         uint64_t const data_size = GFX_ALIGN(buffer.size, 4);
         uint64_t const num_uints = data_size / sizeof(uint32_t);
+        buffer.setStride(sizeof(uint32_t));
         switch(buffer.cpu_access)
         {
         case kGfxCpuAccess_Write:
