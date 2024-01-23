@@ -43,7 +43,8 @@ enum GfxCreateWindowFlag
     kGfxCreateWindowFlag_MaximizeWindow   = 1 << 0,
     kGfxCreateWindowFlag_NoResizeWindow   = 1 << 1,
     kGfxCreateWindowFlag_HideWindow       = 1 << 2,
-    kGfxCreateWindowFlag_FullscreenWindow = 1 << 3
+    kGfxCreateWindowFlag_FullscreenWindow = 1 << 3,
+    kGfxCreateWindowFlag_AcceptDrop       = 1 << 4
 };
 typedef uint32_t GfxCreateWindowFlags;
 
@@ -58,6 +59,9 @@ bool gfxWindowIsKeyReleased(GfxWindow window, uint32_t key_code);
 bool gfxWindowIsCloseRequested(GfxWindow window);
 bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
+bool gfxRegisterDropCallback(
+    GfxWindow window, void (*callback)(char const*, uint32_t, void *), void *data = nullptr);
+bool gfxUnregisterDropCallback(GfxWindow window);
 
 #endif //! GFX_INCLUDE_GFX_WINDOW_H
 
@@ -84,6 +88,8 @@ class GfxWindowInternal
     bool is_close_requested_ = false;
     bool is_key_down_[VK_OEM_CLEAR] = {};
     bool is_previous_key_down_[VK_OEM_CLEAR] = {};
+    void (*drop_callback)(char const *, uint32_t, void *) = nullptr;
+    void *callback_data = nullptr;
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
@@ -111,7 +117,7 @@ public:
 
         AdjustWindowRect(&window_rect, window_style, FALSE);
 
-        window_ = CreateWindowEx(0,
+        window_ = CreateWindowEx((flags & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0,
                                  window_title,
                                  window_title,
                                  window_style,
@@ -215,6 +221,17 @@ public:
         return is_maximized_;
     }
 
+    inline void registerDropCallback(void (*callback)(char const *, uint32_t, void *), void *data)
+    {
+        drop_callback = callback;
+        callback_data = data;
+    }
+
+    inline void unregisterDropCallback()
+    {
+        drop_callback = nullptr;
+    }
+
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
 
 private:
@@ -266,6 +283,26 @@ private:
             case WM_KILLFOCUS:
                 {
                     gfx_window->resetKeyBindings();
+                }
+                break;
+            case WM_DROPFILES:
+                {
+                    HDROP hdrop = (HDROP)w_param;
+                    if(gfx_window->drop_callback != nullptr)
+                    {
+                        char file_name[MAX_PATH];
+                        // Get the number of files dropped onto window
+                        uint32_t fileCount = DragQueryFileA(hdrop, 0xFFFFFFFF, file_name, MAX_PATH);
+                        for(uint32_t i = 0; i < fileCount; i++)
+                        {
+                            // Get i'th filename
+                            DragQueryFileA(hdrop, i, file_name, MAX_PATH);
+
+                            // Pass to callback function
+                            (*gfx_window->drop_callback)(file_name, i, gfx_window->callback_data);
+                        }
+                    }
+                    DragFinish(hdrop);
                 }
                 break;
             case WM_CHAR:
@@ -364,6 +401,23 @@ bool gfxWindowIsMaximized(GfxWindow window)
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
     if(!gfx_window) return false;   // invalid window handle
     return gfx_window->getIsMaximized();
+}
+
+bool gfxRegisterDropCallback(
+    GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return false; // invalid window handle
+    gfx_window->registerDropCallback(callback, data);
+    return true;
+}
+
+bool gfxUnregisterDropCallback(GfxWindow window)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return false; // invalid window handle
+    gfx_window->unregisterDropCallback();
+    return true;
 }
 
 #endif //! GFX_IMPLEMENTATION_DEFINE
