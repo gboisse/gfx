@@ -230,6 +230,7 @@ public:
     inline void unregisterDropCallback()
     {
         drop_callback = nullptr;
+        callback_data = nullptr;
     }
 
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
