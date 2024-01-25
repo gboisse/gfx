@@ -59,9 +59,9 @@ bool gfxWindowIsKeyReleased(GfxWindow window, uint32_t key_code);
 bool gfxWindowIsCloseRequested(GfxWindow window);
 bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
-bool gfxRegisterDropCallback(
+bool gfxWindowRegisterDropCallback(
     GfxWindow window, void (*callback)(char const*, uint32_t, void *), void *data = nullptr);
-bool gfxUnregisterDropCallback(GfxWindow window);
+bool gfxWindowUnregisterDropCallback(GfxWindow window);
 
 #endif //! GFX_INCLUDE_GFX_WINDOW_H
 
@@ -88,8 +88,8 @@ class GfxWindowInternal
     bool is_close_requested_ = false;
     bool is_key_down_[VK_OEM_CLEAR] = {};
     bool is_previous_key_down_[VK_OEM_CLEAR] = {};
-    void (*drop_callback)(char const *, uint32_t, void *) = nullptr;
-    void *callback_data = nullptr;
+    void (*drop_callback_)(char const *, uint32_t, void *) = nullptr;
+    void *callback_data_ = nullptr;
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
@@ -223,14 +223,14 @@ public:
 
     inline void registerDropCallback(void (*callback)(char const *, uint32_t, void *), void *data)
     {
-        drop_callback = callback;
-        callback_data = data;
+        drop_callback_ = callback;
+        callback_data_ = data;
     }
 
     inline void unregisterDropCallback()
     {
-        drop_callback = nullptr;
-        callback_data = nullptr;
+        drop_callback_ = nullptr;
+        callback_data_ = nullptr;
     }
 
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
@@ -289,7 +289,7 @@ private:
             case WM_DROPFILES:
                 {
                     HDROP hdrop = (HDROP)w_param;
-                    if(gfx_window->drop_callback != nullptr)
+                    if(gfx_window->drop_callback_ != nullptr)
                     {
                         char file_name[MAX_PATH];
                         // Get the number of files dropped onto window
@@ -300,7 +300,7 @@ private:
                             DragQueryFileA(hdrop, i, file_name, MAX_PATH);
 
                             // Pass to callback function
-                            (*gfx_window->drop_callback)(file_name, i, gfx_window->callback_data);
+                            (*gfx_window->drop_callback_)(file_name, i, gfx_window->callback_data_);
                         }
                     }
                     DragFinish(hdrop);
@@ -404,7 +404,7 @@ bool gfxWindowIsMaximized(GfxWindow window)
     return gfx_window->getIsMaximized();
 }
 
-bool gfxRegisterDropCallback(
+bool gfxWindowRegisterDropCallback(
     GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data)
 {
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
@@ -413,7 +413,7 @@ bool gfxRegisterDropCallback(
     return true;
 }
 
-bool gfxUnregisterDropCallback(GfxWindow window)
+bool gfxWindowUnregisterDropCallback(GfxWindow window)
 {
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
     if(!gfx_window) return false; // invalid window handle
