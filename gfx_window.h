@@ -59,8 +59,7 @@ bool gfxWindowIsKeyReleased(GfxWindow window, uint32_t key_code);
 bool gfxWindowIsCloseRequested(GfxWindow window);
 bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
-bool gfxWindowRegisterDropCallback(
-    GfxWindow window, void (*callback)(char const*, uint32_t, void *), void *data = nullptr);
+bool gfxWindowRegisterDropCallback(GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data = nullptr);
 bool gfxWindowUnregisterDropCallback(GfxWindow window);
 
 #endif //! GFX_INCLUDE_GFX_WINDOW_H
@@ -293,8 +292,8 @@ private:
                     {
                         char file_name[MAX_PATH];
                         // Get the number of files dropped onto window
-                        uint32_t fileCount = DragQueryFileA(hdrop, 0xFFFFFFFF, file_name, MAX_PATH);
-                        for(uint32_t i = 0; i < fileCount; i++)
+                        uint32_t const file_count = DragQueryFileA(hdrop, 0xFFFFFFFFu, file_name, MAX_PATH);
+                        for(uint32_t i = 0; i < file_count; i++)
                         {
                             // Get i'th filename
                             DragQueryFileA(hdrop, i, file_name, MAX_PATH);
@@ -404,8 +403,7 @@ bool gfxWindowIsMaximized(GfxWindow window)
     return gfx_window->getIsMaximized();
 }
 
-bool gfxWindowRegisterDropCallback(
-    GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data)
+bool gfxWindowRegisterDropCallback(GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data)
 {
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
     if(!gfx_window) return false; // invalid window handle
