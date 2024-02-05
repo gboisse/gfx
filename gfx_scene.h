@@ -1905,8 +1905,9 @@ private:
                         std::map<cgltf_uint, uint32_t> indices;
                         for(size_t k = 0; k < accessors.indices->count; ++k)
                         {
-                            cgltf_uint gltf_index;
-                            GFX_ASSERT(cgltf_accessor_read_uint(accessors.indices, k, (cgltf_uint *)&gltf_index, sizeof(cgltf_uint)));
+                            cgltf_uint gltf_index = 0;
+                            cgltf_bool read = cgltf_accessor_read_uint(accessors.indices, k, (cgltf_uint *)&gltf_index, sizeof(cgltf_uint));
+                            GFX_ASSERT(read); (void)read;
                             std::map<cgltf_uint, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
                             if(it2 != indices.end())
                                 mesh.indices.push_back((*it2).second);
