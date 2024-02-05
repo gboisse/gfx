@@ -1138,7 +1138,7 @@ private:
             }
             if(animation_channel.type_ == kGltfAnimationChannelType_Translate)
             {
-                for(size_t j = 0; j < 3; ++j)
+                for(uint32_t j = 0; j < 3; ++j)
                 {
                     animated_node->translate_[j] = glm::mix(animation_channel.values_[3 * previous_index + j],
                         animation_channel.values_[3 * next_index + j], interpolate);
@@ -1154,7 +1154,7 @@ private:
             }
             if(animation_channel.type_ == kGltfAnimationChannelType_Scale)
             {
-                for(size_t j = 0; j < 3; ++j)
+                for(uint32_t j = 0; j < 3; ++j)
                 {
                     animated_node->scale_[j] = glm::mix(animation_channel.values_[3 * previous_index + j],
                         animation_channel.values_[3 * next_index + j], interpolate);
@@ -1207,7 +1207,7 @@ private:
         {
             GFX_ASSERT(gltf_node_handles_.has_handle(node_handle));
             GltfNode &node = gltf_nodes_[GetObjectIndex(node_handle)];
-            if (!node.parent_ || !gltf_node_handles_.has_handle(node.parent_))
+            if(!node.parent_ || !gltf_node_handles_.has_handle(node.parent_))
             {
                 VisitNode(node_handle, glm::dmat4(1.0));
                 continue;
@@ -1773,9 +1773,9 @@ private:
                 if(targets.size() != v.targets.size()) return targets.size() < v.targets.size();
                 for(size_t i = 0; i < targets.size(); ++i)
                 {
-                    if (targets[i].positions != v.targets[i].positions) return targets[i].positions < v.targets[i].positions;
-                    if (targets[i].normals != v.targets[i].normals) return targets[i].normals < v.targets[i].normals;
-                    if (targets[i].uvs != v.targets[i].uvs) return targets[i].uvs < v.targets[i].uvs;
+                    if(targets[i].positions != v.targets[i].positions) return targets[i].positions < v.targets[i].positions;
+                    if(targets[i].normals != v.targets[i].normals) return targets[i].normals < v.targets[i].normals;
+                    if(targets[i].uvs != v.targets[i].uvs) return targets[i].uvs < v.targets[i].uvs;
                 }
                 return false;
             }
@@ -2143,7 +2143,7 @@ private:
             children.reserve(gltf_node->children_count);
             for(size_t i = 0; i < gltf_node->children_count; ++i)
             {
-                if (gltf_node->children[i] == nullptr) continue;
+                if(gltf_node->children[i] == nullptr) continue;
                 uint64_t child_handle = VisitNode(gltf_node->children[i], transform, propagate_parent_animations, node_handle);
                 children.push_back(child_handle);
             }
@@ -2163,7 +2163,7 @@ private:
         scene_gltf_nodes_.reserve(gltf_scene.nodes_count);
         for(size_t i = 0; i < gltf_scene.nodes_count; ++i)
         {
-            if (gltf_scene.nodes[i] == nullptr) continue;
+            if(gltf_scene.nodes[i] == nullptr) continue;
             uint64_t node_handle = VisitNode(gltf_scene.nodes[i], glm::mat4(1.0), {}, 0);
             scene_gltf_nodes_.push_back(node_handle);
         }
@@ -2171,7 +2171,7 @@ private:
         {
             cgltf_skin const &gltf_skin = gltf_model->skins[i];
             std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
-            if (it == skins.end()) continue;
+            if(it == skins.end()) continue;
             GltfSkin &skin = gltf_skins_.insert(GetObjectIndex((*it).second));
             skin.joints_.resize(gltf_skin.joints_count);
             for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
@@ -2200,7 +2200,7 @@ private:
                 GltfSkin &skin = *gltf_skins_.at((std::uint32_t)i);
                 cgltf_skin const &gltf_skin = gltf_model->skins[i];
                 std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
-                if (it == skins.end()) continue;
+                if(it == skins.end()) continue;
                 for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
                 {
                     if(animated_nodes.find(skin.joints_[j]) != animated_nodes.end())
