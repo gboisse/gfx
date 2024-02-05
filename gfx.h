@@ -2326,6 +2326,16 @@ public:
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
         if(!gfx_acceleration_structure.needs_update_ && !gfx_acceleration_structure.needs_rebuild_)
             return kGfxResult_NoError;  // no outstanding build requests, early out
+        // do not perform update if primitive data is missing; update should be triggered later
+        for(size_t i = 0; i < gfx_acceleration_structure.raytracing_primitives_.size(); ++i)
+        {
+            GfxRaytracingPrimitive const &raytracing_primitive = gfx_acceleration_structure.raytracing_primitives_[i];
+            if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+                return kGfxResult_NoError;  // invalid raytracing primitive object
+            RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+            if(!buffer_handles_.has_handle(gfx_raytracing_primitive.bvh_buffer_.handle))
+                return kGfxResult_NoError;  // no valid BVH memory, probably wasn't built
+        }
         D3D12_GPU_VIRTUAL_ADDRESS const gpu_addr = allocateConstantMemory(gfx_acceleration_structure.raytracing_primitives_.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), data);
         D3D12_RAYTRACING_INSTANCE_DESC *instance_descs = (D3D12_RAYTRACING_INSTANCE_DESC *)data;
         uint32_t instance_desc_count = 0;
@@ -2336,12 +2346,8 @@ public:
         for(size_t i = 0; i < gfx_acceleration_structure.raytracing_primitives_.size(); ++i)
         {
             GfxRaytracingPrimitive const &raytracing_primitive = gfx_acceleration_structure.raytracing_primitives_[i];
-            if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
-                continue;   // invalid raytracing primitive object
             active_raytracing_primitives_.push_back(raytracing_primitive);
             RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-            if(!buffer_handles_.has_handle(gfx_raytracing_primitive.bvh_buffer_.handle))
-                continue;   // no valid BVH memory, probably wasn't built
             Buffer const &gfx_buffer = buffers_[gfx_raytracing_primitive.bvh_buffer_];
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
             for(uint32_t row = 0; row < 3; ++row)
