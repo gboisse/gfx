@@ -3428,55 +3428,18 @@ public:
         submitPipelineBarriers();   // transition our resources if needed
         for(uint32_t mip_level = 0; mip_level < src.mip_levels; ++mip_level)
         {
-            Buffer *texture_copy_buffer = nullptr;
             if(buffer_offset >= dst.size)
                 break;  // further mips aren't available
             uint64_t const buffer_row_pitch = row_sizes[mip_level];
-            uint64_t const texture_row_pitch = subresource_footprints[mip_level].Footprint.RowPitch;
             uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
             if(buffer_offset + buffer_size > dst.size)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from mip level %u to buffer object with insufficient storage", mip_level);
-            uint64_t const texture_offset = GFX_ALIGN(buffer_offset, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
-            if(buffer_row_pitch != texture_row_pitch || // we must respect the 256-byte pitch alignment
-                texture_offset != buffer_offset)
-            {
-                uint64_t texture_copy_buffer_size = num_rows[mip_level] * buffer_row_pitch;
-                if(texture_upload_buffer_.size < texture_copy_buffer_size)
-                {
-                    destroyBuffer(texture_upload_buffer_);
-                    texture_copy_buffer_size += (texture_copy_buffer_size + 2) >> 1;
-                    texture_copy_buffer_size = GFX_ALIGN(texture_copy_buffer_size, 65536);
-                    texture_upload_buffer_ = createBuffer(texture_copy_buffer_size, nullptr, kGfxCpuAccess_None);
-                    if(!texture_upload_buffer_)
-                        return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory to download texture data");
-                    texture_upload_buffer_.setName("gfx_TextureCopyBuffer");
-                }
-                texture_copy_buffer = &buffers_[texture_upload_buffer_];
-                SetObjectName(*texture_copy_buffer, texture_upload_buffer_.name);
-                transitionResource(*texture_copy_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
-                submitPipelineBarriers();   // transition our resources if needed
-                for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
-                    command_list_->CopyBufferRegion(texture_copy_buffer->resource_, i * buffer_row_pitch,
-                        gfx_texture.resource_, i * texture_row_pitch + texture_offset, buffer_row_pitch);
-                transitionResource(*texture_copy_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
-                submitPipelineBarriers();
-            }
             {
                 D3D12_TEXTURE_COPY_LOCATION dst_location = {};
                 D3D12_TEXTURE_COPY_LOCATION src_location = {};
-                src_location.pResource =
-                    (texture_copy_buffer == nullptr ? gfx_texture.resource_ : texture_copy_buffer->resource_);
-                if(texture_copy_buffer == nullptr)
-                {
-                    src_location.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-                    src_location.SubresourceIndex = mip_level; // copy from mip level
-                }
-                else
-                {
-                    src_location.Type                      = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-                    src_location.PlacedFootprint.Footprint = subresource_footprints[mip_level].Footprint;
-                    src_location.PlacedFootprint.Offset    = 0;
-                }
+                src_location.pResource = gfx_texture.resource_;
+                src_location.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                src_location.SubresourceIndex = mip_level; // copy from mip level
                 dst_location.pResource = gfx_buffer.resource_;
                 dst_location.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
                 dst_location.PlacedFootprint.Footprint = subresource_footprints[mip_level].Footprint;
