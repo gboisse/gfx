@@ -360,6 +360,7 @@ GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t 
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
+GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src);
 GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture);   // expects mip level 0 to be populated, generates the others
 
 GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, GfxTexture target_texture, uint32_t mip_level = 0, uint32_t slice = 0);
@@ -3392,6 +3393,95 @@ public:
                 src_location.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
                 src_location.PlacedFootprint.Footprint = subresource_footprints[mip_level].Footprint;
                 src_location.PlacedFootprint.Offset = (texture_upload_buffer == nullptr ? buffer_offset : 0);
+                command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
+            }
+            buffer_offset += buffer_size;   // advance the buffer offset
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeCopyTextureToBuffer(GfxBuffer const &dst, GfxTexture const &src)
+    {
+        if(command_list_ == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(!texture_handles_.has_handle(src.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid texture object");
+        if(!buffer_handles_.has_handle(dst.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy to an invalid buffer object");
+        if(!src.is2D()) // TODO: implement for the other texture types (gboisse)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy a non-2D texture object");
+        if(dst.cpu_access == kGfxCpuAccess_Write)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to a buffer object with write CPU access");
+        Texture &gfx_texture = textures_[src]; SetObjectName(gfx_texture, src.name);
+        Buffer &gfx_buffer = buffers_[dst]; SetObjectName(gfx_buffer, dst.name);
+        uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
+        uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
+        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
+        device_->GetCopyableFootprints(&resource_desc, 0, src.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
+        uint64_t buffer_offset = 0;
+        uint32_t const bytes_per_pixel = GetBytesPerPixel(src.format);
+        if(bytes_per_pixel == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from texture object of unsupported format");
+        if(dst.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        submitPipelineBarriers();   // transition our resources if needed
+        for(uint32_t mip_level = 0; mip_level < src.mip_levels; ++mip_level)
+        {
+            Buffer *texture_copy_buffer = nullptr;
+            if(buffer_offset >= dst.size)
+                break;  // further mips aren't available
+            uint64_t const buffer_row_pitch = row_sizes[mip_level];
+            uint64_t const texture_row_pitch = subresource_footprints[mip_level].Footprint.RowPitch;
+            uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
+            if(buffer_offset + buffer_size > dst.size)
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from mip level %u to buffer object with insufficient storage", mip_level);
+            uint64_t const texture_offset = GFX_ALIGN(buffer_offset, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT);
+            if(buffer_row_pitch != texture_row_pitch || // we must respect the 256-byte pitch alignment
+                texture_offset != buffer_offset)
+            {
+                uint64_t texture_copy_buffer_size = num_rows[mip_level] * buffer_row_pitch;
+                if(texture_upload_buffer_.size < texture_copy_buffer_size)
+                {
+                    destroyBuffer(texture_upload_buffer_);
+                    texture_copy_buffer_size += (texture_copy_buffer_size + 2) >> 1;
+                    texture_copy_buffer_size = GFX_ALIGN(texture_copy_buffer_size, 65536);
+                    texture_upload_buffer_ = createBuffer(texture_copy_buffer_size, nullptr, kGfxCpuAccess_None);
+                    if(!texture_upload_buffer_)
+                        return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory to download texture data");
+                    texture_upload_buffer_.setName("gfx_TextureCopyBuffer");
+                }
+                texture_copy_buffer = &buffers_[texture_upload_buffer_];
+                SetObjectName(*texture_copy_buffer, texture_upload_buffer_.name);
+                transitionResource(*texture_copy_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+                submitPipelineBarriers();   // transition our resources if needed
+                for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
+                    command_list_->CopyBufferRegion(texture_copy_buffer->resource_, i * buffer_row_pitch,
+                        gfx_texture.resource_, i * texture_row_pitch + texture_offset, buffer_row_pitch);
+                transitionResource(*texture_copy_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                submitPipelineBarriers();
+            }
+            {
+                D3D12_TEXTURE_COPY_LOCATION dst_location = {};
+                D3D12_TEXTURE_COPY_LOCATION src_location = {};
+                src_location.pResource =
+                    (texture_copy_buffer == nullptr ? gfx_texture.resource_ : texture_copy_buffer->resource_);
+                if(texture_copy_buffer == nullptr)
+                {
+                    src_location.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                    src_location.SubresourceIndex = mip_level; // copy from mip level
+                }
+                else
+                {
+                    src_location.Type                      = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                    src_location.PlacedFootprint.Footprint = subresource_footprints[mip_level].Footprint;
+                    src_location.PlacedFootprint.Offset    = 0;
+                }
+                dst_location.pResource = gfx_buffer.resource_;
+                dst_location.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+                dst_location.PlacedFootprint.Footprint = subresource_footprints[mip_level].Footprint;
+                dst_location.PlacedFootprint.Footprint.RowPitch = (UINT)buffer_row_pitch;
+                dst_location.PlacedFootprint.Offset = buffer_offset;
                 command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
             }
             buffer_offset += buffer_size;   // advance the buffer offset
@@ -9506,6 +9596,13 @@ GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxB
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyBufferToTexture(dst, src);
+}
+
+GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeCopyTextureToBuffer(dst, src);
 }
 
 GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture)
