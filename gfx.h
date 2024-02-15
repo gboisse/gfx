@@ -3250,7 +3250,23 @@ public:
         transitionResource(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST);
         transitionResource(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
         submitPipelineBarriers();   // transition our resources if needed
-        command_list_->CopyResource(dst_texture.resource_, src_texture.resource_);
+        if(dst.mip_levels == src.mip_levels)
+            command_list_->CopyResource(dst_texture.resource_, src_texture.resource_);
+        else
+        {
+            for(uint32_t mip_level = 0; mip_level < min(dst.mip_levels, src.mip_levels); ++mip_level)
+            {
+                D3D12_TEXTURE_COPY_LOCATION dst_location = {};
+                D3D12_TEXTURE_COPY_LOCATION src_location = {};
+                dst_location.pResource                   = dst_texture.resource_;
+                dst_location.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                dst_location.SubresourceIndex            = mip_level; // copy to mip level
+                src_location.pResource                   = src_texture.resource_;
+                src_location.Type                        = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+                src_location.SubresourceIndex            = mip_level;
+                command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
+            }
+        }
         return kGfxResult_NoError;
     }
 
