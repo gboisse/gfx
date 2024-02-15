@@ -8721,12 +8721,6 @@ private:
                 submitPipelineBarriers();
                 break;  // break barrier batches to avoid debug layer warnings
             }
-        if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_INDEX_BUFFER &&  // unbind if active index buffer to prevent debug layer errors
-           buffer_handles_.has_handle(bound_index_buffer_.handle) && buffers_[bound_index_buffer_].resource_ == buffer.resource_)
-            command_list_->IASetIndexBuffer(nullptr);
-        if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER &&    // unbind if active vertex buffer to prevent debug layer errors
-           buffer_handles_.has_handle(bound_vertex_buffer_.handle) && buffers_[bound_vertex_buffer_].resource_ == buffer.resource_)
-            command_list_->IASetVertexBuffers(0, 1, nullptr);
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
         resource_barrier.Transition.pResource = buffer.resource_;
