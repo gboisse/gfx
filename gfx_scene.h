@@ -1152,7 +1152,7 @@ private:
                     animation_channel.values_[4 * next_index + 1], animation_channel.values_[4 * next_index + 2]);
                 animated_node->rotate_ = glm::slerp(previous, next, interpolate);
             }
-            if(animation_channel.type_ == kGltfAnimationChannelType_Scale)
+            else if(animation_channel.type_ == kGltfAnimationChannelType_Scale)
             {
                 for(uint32_t j = 0; j < 3; ++j)
                 {
