@@ -226,6 +226,7 @@ GfxResult gfxDrawStateSetCullMode(GfxDrawState draw_state, D3D12_CULL_MODE cull_
 GfxResult gfxDrawStateSetFillMode(GfxDrawState draw_state, D3D12_FILL_MODE fill_mode);
 GfxResult gfxDrawStateSetDepthFunction(GfxDrawState draw_state, D3D12_COMPARISON_FUNC depth_function);
 GfxResult gfxDrawStateSetDepthWriteMask(GfxDrawState draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask);
+GfxResult gfxDrawStateSetPrimitiveTopologyType(GfxDrawState draw_state, D3D12_PRIMITIVE_TOPOLOGY_TYPE primitive_topology_type);
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha);
 
 //!
@@ -754,8 +755,9 @@ class GfxInternal
     {
         struct Data
         {
-            DXGI_FORMAT color_formats_[kGfxConstant_MaxRenderTarget] = {};
-            DXGI_FORMAT depth_stencil_format_                        = {};
+            DXGI_FORMAT                   color_formats_[kGfxConstant_MaxRenderTarget] = {};
+            DXGI_FORMAT                   depth_stencil_format_                        = {};
+            D3D12_PRIMITIVE_TOPOLOGY_TYPE primitive_topology_type_                     = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
             struct
             {
                 inline operator bool() const
@@ -4862,6 +4864,16 @@ public:
         return kGfxResult_NoError;
     }
 
+    static GfxResult SetDrawStatePrimitiveTopologyType(GfxDrawState const &draw_state, D3D12_PRIMITIVE_TOPOLOGY_TYPE primitive_topology_type)
+    {
+        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
+        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        if(!gfx_draw_state)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set primitive topology type on an invalid draw state object");
+        gfx_draw_state->draw_state_.primitive_topology_type_ = primitive_topology_type;
+        return kGfxResult_NoError;
+    }
+
     static GfxResult SetDrawStateBlendMode(GfxDrawState const &draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
     {
         uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
@@ -5978,7 +5990,7 @@ private:
         pso_desc.RasterizerState.RasterizerState.DepthClipEnable       = TRUE;
         pso_desc.DepthStencilState.DepthStencilState.DepthFunc         = D3D12_COMPARISON_FUNC_LESS;
         pso_desc.DepthStencilState.DepthStencilState.DepthWriteMask    = D3D12_DEPTH_WRITE_MASK_ALL;
-        pso_desc.PrimitiveTopologyType.PrimitiveTopologyType           = D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;
+        pso_desc.PrimitiveTopologyType.PrimitiveTopologyType           = draw_state.primitive_topology_type_;
         pso_desc.SampleDesc.SampleDesc.Count                           = 1;
         for(uint32_t i = 0; i < ARRAYSIZE(pso_desc.BlendState.BlendState.RenderTarget); ++i)
             pso_desc.BlendState.BlendState.RenderTarget[i] = GetDefaultBlendState();
@@ -6109,6 +6121,7 @@ private:
         pso_desc.RasterizerState.FillMode       = draw_state.raster_state_.fill_mode_;
         pso_desc.InputLayout.pInputElementDescs = input_layout.data();
         pso_desc.InputLayout.NumElements        = (uint32_t)input_layout.size();
+        pso_desc.PrimitiveTopologyType          = draw_state.primitive_topology_type_;
         {
             for(uint32_t i = 0; i < ARRAYSIZE(draw_state.color_formats_); ++i)
                 if(draw_state.color_formats_[i] == DXGI_FORMAT_UNKNOWN)
@@ -9290,6 +9303,11 @@ GfxResult gfxDrawStateSetDepthFunction(GfxDrawState draw_state, D3D12_COMPARISON
 GfxResult gfxDrawStateSetDepthWriteMask(GfxDrawState draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask)
 {
     return GfxInternal::SetDrawStateDepthWriteMask(draw_state, depth_write_mask);
+}
+
+GfxResult gfxDrawStateSetPrimitiveTopologyType(GfxDrawState draw_state, D3D12_PRIMITIVE_TOPOLOGY_TYPE primitive_topology_type)
+{
+    return GfxInternal::SetDrawStatePrimitiveTopologyType(draw_state, primitive_topology_type);
 }
 
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
