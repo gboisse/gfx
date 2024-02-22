@@ -116,7 +116,7 @@ TYPE *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
 //! Texture resources.
 //!
 
-class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; public:
+class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; float clear_value_[4]; public:
                    inline bool is2DArray() const { return type == kType_2DArray; }
                    inline bool isCube() const { return type == kType_Cube; }
                    inline bool is3D() const { return type == kType_3D; }
@@ -125,7 +125,8 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32
                    inline uint32_t getHeight() const { return height; }
                    inline uint32_t getDepth() const { return depth; }
                    inline DXGI_FORMAT getFormat() const { return format; }
-                   inline uint32_t getMipLevels() const { return mip_levels; } };
+                   inline uint32_t getMipLevels() const { return mip_levels; }
+                   inline float const* getClearValue() const { return clear_value_; } };
 
 GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr);  // creates auto-resize window-sized texture
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
@@ -2069,6 +2070,7 @@ public:
             texture.width = width;
             texture.height = height;
         }
+        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.flags_ = flags;
         return texture;
@@ -2119,6 +2121,7 @@ public:
         texture.width = width;
         texture.height = height;
         texture.depth = slice_count;
+        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -2168,6 +2171,7 @@ public:
         texture.width = width;
         texture.height = height;
         texture.depth = depth;
+        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -2210,6 +2214,7 @@ public:
         texture.width = size;
         texture.height = size;
         texture.depth = 6;
+        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -4567,6 +4572,7 @@ public:
         texture.format = resource_desc.Format;
         texture.mip_levels = (uint32_t)resource_desc.MipLevels;
         ResolveClearValueForTexture(gfx_texture, nullptr, texture.format);
+        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
         if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
             for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
             {
