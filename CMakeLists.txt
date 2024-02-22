@@ -8,7 +8,7 @@ option(GFX_ENABLE_SCENE "Build gfx with scene loading support" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-add_library(gfx STATIC gfx.cpp)
+add_library(gfx STATIC gfx.cpp gfx_window.cpp gfx_imgui.cpp gfx_scene.cpp)
 
 set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
 set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime)
