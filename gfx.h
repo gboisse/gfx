@@ -126,7 +126,7 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32
                    inline uint32_t getDepth() const { return depth; }
                    inline DXGI_FORMAT getFormat() const { return format; }
                    inline uint32_t getMipLevels() const { return mip_levels; }
-                   inline float const* getClearValue() const { return clear_value_; } };
+                   inline float const *getClearValue() const { return clear_value_; } };
 
 GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr);  // creates auto-resize window-sized texture
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
