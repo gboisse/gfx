@@ -117,7 +117,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         ktx
         GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-        GIT_TAG        v4.2.1
+        GIT_TAG        v4.3.1
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
     )   
     set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
