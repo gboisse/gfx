@@ -101,7 +101,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         tinyobjloader
         GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
-        GIT_TAG        v2.0.0rc10
+        GIT_TAG        v2.0.0rc13
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/
     )
 
