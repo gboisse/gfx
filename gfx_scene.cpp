@@ -42,6 +42,7 @@ SOFTWARE.
 #include <stb_image_write.h>
 #include <ktx.h>
 #include <vulkan/vulkan.h>
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 
