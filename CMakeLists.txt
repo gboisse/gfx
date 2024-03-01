@@ -66,7 +66,7 @@ if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.89.9
+        GIT_TAG        v1.90.4
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/
     )
     FetchContent_MakeAvailable(imgui)
