@@ -2905,6 +2905,9 @@ public:
         Buffer &gfx_buffer = buffers_[src]; SetObjectName(gfx_buffer, src.name);
         if(src.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
         transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST);
+        D3D12_FEATURE_DATA_D3D12_OPTIONS13 features;
+        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS13, &features, sizeof(features));
+        bool unrestricted_pitch = features.UnrestrictedBufferTextureCopyPitchSupported;
         for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
         {
             if(buffer_offset >= src.size)
@@ -2913,17 +2916,43 @@ public:
             uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
             if(buffer_offset + buffer_size > src.size)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to mip level %u from buffer object with insufficient storage", mip_level);
+            Buffer *texture_upload_buffer = nullptr;
+            uint64_t const texture_row_pitch = subresource_footprints[mip_level].Footprint.RowPitch;
+            if(!unrestricted_pitch && (buffer_row_pitch != texture_row_pitch || // we must respect the 256-byte pitch alignment
+               GFX_ALIGN(buffer_offset, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) != buffer_offset))
+            {
+                uint64_t texture_upload_buffer_size = num_rows[mip_level] * static_cast<uint64_t>(subresource_footprints[mip_level].Footprint.RowPitch);
+                if(texture_upload_buffer_.size < texture_upload_buffer_size)
+                {
+                    destroyBuffer(texture_upload_buffer_);
+                    texture_upload_buffer_size += (texture_upload_buffer_size + 2) >> 1;
+                    texture_upload_buffer_size = GFX_ALIGN(texture_upload_buffer_size, 65536);
+                    texture_upload_buffer_ = createBuffer(texture_upload_buffer_size, nullptr, kGfxCpuAccess_None);
+                    if(!texture_upload_buffer_)
+                        return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory to upload texture data");
+                    texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
+                }
+                texture_upload_buffer = &buffers_[texture_upload_buffer_];
+                SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
+                transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+                submitPipelineBarriers();   // transition our resources if needed
+                for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
+                    command_list_->CopyBufferRegion(texture_upload_buffer->resource_, i * texture_row_pitch, gfx_buffer.resource_, i * buffer_row_pitch + buffer_offset, buffer_row_pitch);
+                transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
+                submitPipelineBarriers();
+            }
             {
                 D3D12_TEXTURE_COPY_LOCATION dst_location = {};
                 D3D12_TEXTURE_COPY_LOCATION src_location = {};
                 dst_location.pResource = gfx_texture.resource_;
                 dst_location.Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
                 dst_location.SubresourceIndex = mip_level;  // copy to mip level
-                src_location.pResource = gfx_buffer.resource_;
+                src_location.pResource = (texture_upload_buffer == nullptr ? gfx_buffer.resource_ : texture_upload_buffer->resource_);
                 src_location.Type = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
                 src_location.PlacedFootprint.Footprint = subresource_footprints[mip_level].Footprint;
-                src_location.PlacedFootprint.Footprint.RowPitch = (UINT)buffer_row_pitch;
-                src_location.PlacedFootprint.Offset = buffer_offset;
+                if(texture_upload_buffer == nullptr)
+                    src_location.PlacedFootprint.Footprint.RowPitch = (UINT)buffer_row_pitch;
+                src_location.PlacedFootprint.Offset = (texture_upload_buffer == nullptr ? buffer_offset : 0);
                 command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
             }
             buffer_offset += buffer_size;   // advance the buffer offset
