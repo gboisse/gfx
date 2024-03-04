@@ -2905,7 +2905,7 @@ public:
         Buffer &gfx_buffer = buffers_[src]; SetObjectName(gfx_buffer, src.name);
         if(src.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
         transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST);
-        D3D12_FEATURE_DATA_D3D12_OPTIONS13 features;
+        D3D12_FEATURE_DATA_D3D12_OPTIONS13 features = {};   // feature check
         device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS13, &features, sizeof(features));
         bool unrestricted_pitch = features.UnrestrictedBufferTextureCopyPitchSupported;
         for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
