@@ -160,7 +160,11 @@ public:
     GfxResult terminate()
     {
         if(ImGui::GetCurrentContext() != nullptr)
+        {
+            if(ImGui::GetIO().BackendPlatformUserData != nullptr)
+                ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
+        }
         if(gfx_)
         {
             GFX_TRY(gfxDestroyTexture(gfx_, font_buffer_));
