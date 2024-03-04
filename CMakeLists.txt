@@ -66,7 +66,7 @@ if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.89.9
+        GIT_TAG        v1.90.4
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/
     )
     FetchContent_MakeAvailable(imgui)
@@ -80,7 +80,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         stb
         GIT_REPOSITORY https://github.com/nothings/stb.git
-        GIT_TAG        6199bf77130da41fd424722eeb7a8db4d766c4c6
+        GIT_TAG        ae721c50eaf761660b4f90cc590453cdb0c2acd0
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/
     )
 
@@ -94,21 +94,21 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        0.9.9.8
+        GIT_TAG        1.0.0
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/
     )
 
     FetchContent_Declare(
         tinyobjloader
         GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
-        GIT_TAG        v2.0.0rc10
+        GIT_TAG        v2.0.0rc13
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/
     )
 
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-        GIT_TAG        v1.0.7
+        GIT_TAG        v1.0.8
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/
     )
     set(TINYEXR_BUILD_SAMPLE OFF CACHE BOOL "")
@@ -117,7 +117,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         ktx
         GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-        GIT_TAG        v4.2.1
+        GIT_TAG        v4.3.1
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
     )   
     set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
@@ -131,7 +131,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         vulkan-headers
         GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-        GIT_TAG        v1.3.263
+        GIT_TAG        v1.3.278
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/
     )
 
@@ -150,23 +150,12 @@ if(GFX_ENABLE_SCENE)
     target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
 
     # Organize third party projects
+    set_target_properties(glm PROPERTIES FOLDER "third_party")
     set_target_properties(tinyobjloader PROPERTIES FOLDER "third_party")
-    set_target_properties(obj_basisu_cbind PROPERTIES FOLDER "third_party/ktx_deps")
-    set_target_properties(objUtil PROPERTIES FOLDER "third_party/ktx_deps")
-    set_target_properties(uninstall PROPERTIES FOLDER "third_party")
     set_target_properties(tinyexr PROPERTIES FOLDER "third_party")
     set_target_properties(ktx PROPERTIES FOLDER "third_party")
-    set_target_properties(ktx_read PROPERTIES FOLDER "third_party/ktx_deps")
     set_target_properties(astcenc-avx2-static PROPERTIES FOLDER "third_party/ktx_deps")
     set_target_properties(ktx_version PROPERTIES FOLDER "third_party/ktx_deps")
-    set_target_properties(fmt PROPERTIES FOLDER "third_party/ktx_deps")
-
-    if(TARGET mkvk)
-        set_target_properties(mkvk PROPERTIES FOLDER "third_party/ktx_deps")
-        set_target_properties(makedfd2vk PROPERTIES FOLDER "third_party/ktx_deps")
-        set_target_properties(makevk2dfd PROPERTIES FOLDER "third_party/ktx_deps")
-        set_target_properties(mkvkformatfiles PROPERTIES FOLDER "third_party/ktx_deps")
-    endif()
 endif()
 
 if(GFX_BUILD_EXAMPLES)

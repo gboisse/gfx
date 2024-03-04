@@ -1,0 +1,2 @@
+DXC version 2023-08-14
+Downloaded from https://github.com/microsoft/DirectXShaderCompiler/
