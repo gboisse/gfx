@@ -5385,9 +5385,9 @@ private:
             {
                 D3D12_LIBRARY_DESC library_desc;
                 library->GetDesc(&library_desc);
-                for(uint32_t i = 0; i < library_desc.FunctionCount; i++)
+                for(uint32_t k = 0; k < library_desc.FunctionCount; k++)
                 {
-                    ID3D12FunctionReflection *function = library->GetFunctionByIndex(i);
+                    ID3D12FunctionReflection *function = library->GetFunctionByIndex(k);
                     D3D12_FUNCTION_DESC function_desc = {};
                     function->GetDesc(&function_desc);
                     for(uint32_t j = 0; j < function_desc.BoundResources; ++j)
@@ -5482,12 +5482,12 @@ private:
             uint32_t const space = root_signature_parameters.first;
             auto &local_root_signature_parameters = root_signature_parameters.second;
 
-            D3D12_ROOT_SIGNATURE_DESC root_signature_desc = {};
-            root_signature_desc.pParameters = local_root_signature_parameters.root_parameters.data();
-            root_signature_desc.NumParameters = (uint32_t) local_root_signature_parameters.root_parameters.size();
-            root_signature_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+            D3D12_ROOT_SIGNATURE_DESC root_signature_desc2 = {};
+            root_signature_desc2.pParameters = local_root_signature_parameters.root_parameters.data();
+            root_signature_desc2.NumParameters = (uint32_t) local_root_signature_parameters.root_parameters.size();
+            root_signature_desc2.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 
-            D3D12SerializeRootSignature(&root_signature_desc, D3D_ROOT_SIGNATURE_VERSION_1, &result, &error);
+            D3D12SerializeRootSignature(&root_signature_desc2, D3D_ROOT_SIGNATURE_VERSION_1, &result, &error);
             if(!result)
             {
                 GFX_PRINTLN("Error: Failed to serialize local root signature%s%s", error ? ":\r\n" : "", error ? (char const *)error->GetBufferPointer() : "");
