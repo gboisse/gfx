@@ -33,7 +33,25 @@ SOFTWARE.
 #include <inc/dxcapi.h>         // shader compiler
 #include <inc/d3d12shader.h>    // shader reflection
 
-#ifdef _MSC_VER
+#ifdef __clang__
+#   pragma clang diagnostic push
+#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#   pragma clang diagnostic ignored "-Wmisleading-indentation"
+#   pragma clang diagnostic ignored "-Wswitch"
+#   pragma clang diagnostic ignored "-Wunused-parameter"
+#   pragma clang diagnostic ignored "-Wtautological-undefined-compare"
+#   pragma clang diagnostic ignored "-Wunused-but-set-variable"
+#   pragma clang diagnostic ignored "-Wunused-function"
+#elif defined(__GNUC__)
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#   pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#   pragma GCC diagnostic ignored "-Wswitch"
+#   pragma GCC diagnostic ignored "-Wunused-parameter"
+#   pragma GCC diagnostic ignored "-Wtautological-undefined-compare"
+#   pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#   pragma GCC diagnostic ignored "-Wunused-function"
+#elif defined(_MSC_VER)
 #   pragma warning(push)
 #   pragma warning(disable:4100)   // unreferenced formal parameter
 #   pragma warning(disable:4127)   // conditional expression is constant
@@ -42,8 +60,12 @@ SOFTWARE.
 #endif
 #include <D3D12MemAlloc.cpp>    // D3D12MemoryAllocator
 #include <WinPixEventRuntime/pix3.h>
-#ifdef _MSC_VER
-#   pragma warning(pop)
+#ifdef __clang__
+#    pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#    pragma warning(pop)
 #endif
 
 class GfxInternal
@@ -7090,7 +7112,7 @@ private:
         for(uint32_t i = 0; i < parameter.variable_count_; ++i)
         {
             Kernel::Parameter::Variable &variable = parameter.variables_[i];
-            if(force_update_parameter || variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter)
+            if(force_update_parameter || (variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter))
             {
                 Program::Parameters::const_iterator const it = parameters.find(variable.parameter_id_);
                 if(it != parameters.end()) variable.parameter_ = &(*it).second;

@@ -43,7 +43,19 @@ SOFTWARE.
 #include <stb_image.h>
 #include <tinyexr.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#ifdef __clang__
+#   pragma clang diagnostic push
+#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#elif defined(__GNUC__)
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
 #include <stb_image_write.h>
+#ifdef __clang__
+#   pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#   pragma GCC diagnostic pop
+#endif
 #include <ktx.h>
 #include <vulkan/vulkan.h>
 #define GLM_ENABLE_EXPERIMENTAL
