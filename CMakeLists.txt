@@ -34,12 +34,36 @@ target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
 target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
 
-target_compile_features(gfx PUBLIC cxx_std_14)
-target_compile_options(gfx PRIVATE
-    -DUSE_PIX
-    /W3 /external:anglebrackets /external:W0 /analyze:external-
-    -D_HAS_EXCEPTIONS=0
-)
+target_compile_features(gfx PUBLIC cxx_std_17)
+target_compile_definitions(gfx PRIVATE USE_PIX)
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+    target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -pedantic -Werror>)
+elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+    target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /experimental:external /external:anglebrackets /external:W0 /analyze:external->)
+    target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd4324>) # structure was padded due to alignment specifier
+    target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
+elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+    if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+        target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX>)
+        target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
+    else()
+        target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -pedantic -Werror>)
+    endif()
+endif()
+
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+    if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
+        target_compile_options(gfx PRIVATE -march=x86-64-v3)
+    elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
+        target_compile_options(gfx PRIVATE /arch:AVX2)
+    elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+        if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+            target_compile_options(gfx PRIVATE /arch:AVX2)
+        else()
+            target_compile_options(gfx PRIVATE -march=x86-64-v3)
+        endif()
+    endif()
+endif()
 
 add_library(dxcompiler SHARED IMPORTED)
 set_target_properties(dxcompiler PROPERTIES
@@ -97,6 +121,11 @@ if(GFX_ENABLE_SCENE)
         GIT_TAG        1.0.0
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/
     )
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
+        set(GLM_ENABLE_SIMD_AVX2 ON CACHE BOOL "")
+    endif()
+    set(GLM_ENABLE_CXX_17 ON CACHE BOOL "")
+    set(GLM_QUIET ON CACHE BOOL "")
 
     FetchContent_Declare(
         tinyobjloader
@@ -139,13 +168,14 @@ if(GFX_ENABLE_SCENE)
 
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf)
-    target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
+    target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr)
     target_link_libraries(gfx PUBLIC glm::glm)
     target_link_libraries(gfx PRIVATE tinyobjloader ktx tinyexr)
 
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE)
-	
+    target_compile_definitions(gfx PRIVATE GLM_FORCE_XYZW_ONLY)
+
     #tinyexr cmake is currently broken when not using miniz
     target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
 

@@ -30,24 +30,37 @@ SOFTWARE.
 #include <ios>
 #include <fstream>
 #define CGLTF_IMPLEMENTATION
-#pragma warning(push)
-#pragma warning(disable:4789)   // buffer will be overrun
+#ifdef _MSC_VER
+#   pragma warning(push)
+#   pragma warning(disable:4789)   // buffer will be overrun
+#endif
 #include <cgltf.h>              // glTF loader
-#pragma warning(pop)
+#ifdef _MSC_VER
+#   pragma warning(pop)
+#endif
 #include <tiny_obj_loader.h>   // obj loader
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include <tinyexr.h>
 #define STB_IMAGE_WRITE_IMPLEMENTATION
+#ifdef __clang__
+#   pragma clang diagnostic push
+#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#elif defined(__GNUC__)
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
 #include <stb_image_write.h>
+#ifdef __clang__
+#   pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#   pragma GCC diagnostic pop
+#endif
 #include <ktx.h>
 #include <vulkan/vulkan.h>
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
-
-#pragma warning(push)
-#pragma warning(disable:4996)   // this function or variable may be unsafe
 
 class GfxSceneInternal
 {
@@ -316,15 +329,15 @@ public:
                 GltfAnimationChannel const &channel = gltf_animation->channels_[i];
                 if(!gltf_node_handles_.has_handle(channel.node_) || (channel.type_ != kGltfAnimationChannelType_Weights)) continue;
                 GltfNode const &node = gltf_nodes_[GetObjectIndex(channel.node_)];
-                for(size_t i = 0; i < node.instances_.size(); ++i)
+                for(size_t j = 0; j < node.instances_.size(); ++j)
                 {
-                    if(!node.instances_[i]) continue;
+                    if(!node.instances_[j]) continue;
                     if(!node.default_weights_.empty())
-                        node.instances_[i]->weights = node.default_weights_;
-                    else if(!node.instances_[i]->mesh->default_weights.empty())
-                        node.instances_[i]->weights = node.instances_[i]->mesh->default_weights;
+                        node.instances_[j]->weights = node.default_weights_;
+                    else if(!node.instances_[j]->mesh->default_weights.empty())
+                        node.instances_[j]->weights = node.instances_[j]->mesh->default_weights;
                     else
-                        std::fill(node.instances_[i]->weights.begin(), node.instances_[i]->weights.end(), 0.0f);
+                        std::fill(node.instances_[j]->weights.begin(), node.instances_[j]->weights.end(), 0.0f);
                 }
             }
         }
@@ -1126,7 +1139,7 @@ private:
                         if(gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
                         {
                             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Compressed textures require separate metal/roughness textures '%s'",
-                                image_metadata_[(*it).second].asset_file);
+                                image_metadata_[(*it).second].asset_file.c_str());
                             continue;
                         }
                         metallicity_map_ref = gfxSceneCreateImage(scene);
@@ -1800,11 +1813,10 @@ private:
         return kGfxResult_NoError;
     }
 
-    static inline KTX_error_code IterateKtxImage(int32_t miplevel, int32_t face, int32_t width, int32_t height, int32_t depth,
+    static inline KTX_error_code IterateKtxImage(int32_t, int32_t, int32_t, int32_t, int32_t,
         ktx_uint64_t faceLodSize, void *pixels, void *userdata)
     {
         GfxRef<GfxImage> *image_ref = (GfxRef<GfxImage> *)userdata;
-        uint64_t current_pos = (*image_ref)->data.size();
         size_t const size = (*image_ref)->data.size();
         (*image_ref)->data.resize(size + faceLodSize);
         uint8_t *back = &((*image_ref)->data[size]);
@@ -2003,7 +2015,7 @@ private:
     GfxResult importImage(GfxScene const &scene, char const *asset_file, void const *memory = nullptr, size_t size = 0)
     {
         GFX_ASSERT(asset_file != nullptr);
-        int32_t image_width, image_height, channel_count;
+        int32_t image_width = 0, image_height = 0, channel_count = 0;
         if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
             return kGfxResult_NoError;  // image was already imported
         stbi_uc *image_data = nullptr;
@@ -2083,8 +2095,6 @@ private:
         return kGfxResult_NoError;
     }
 };
-
-#pragma warning(pop)
 
 GfxArray<GfxScene> GfxSceneInternal::scenes_;
 GfxHandles         GfxSceneInternal::scene_handles_("scene");

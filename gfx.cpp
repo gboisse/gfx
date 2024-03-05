@@ -33,17 +33,40 @@ SOFTWARE.
 #include <inc/dxcapi.h>         // shader compiler
 #include <inc/d3d12shader.h>    // shader reflection
 
-#pragma warning(push)
-#pragma warning(disable:4100)   // unreferenced formal parameter
-#pragma warning(disable:4127)   // conditional expression is constant
-#pragma warning(disable:4189)   // local variable is initialized but not referenced
-#pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
+#ifdef __clang__
+#   pragma clang diagnostic push
+#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#   pragma clang diagnostic ignored "-Wmisleading-indentation"
+#   pragma clang diagnostic ignored "-Wswitch"
+#   pragma clang diagnostic ignored "-Wunused-parameter"
+#   pragma clang diagnostic ignored "-Wtautological-undefined-compare"
+#   pragma clang diagnostic ignored "-Wunused-but-set-variable"
+#   pragma clang diagnostic ignored "-Wunused-function"
+#elif defined(__GNUC__)
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#   pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#   pragma GCC diagnostic ignored "-Wswitch"
+#   pragma GCC diagnostic ignored "-Wunused-parameter"
+#   pragma GCC diagnostic ignored "-Wtautological-undefined-compare"
+#   pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#   pragma GCC diagnostic ignored "-Wunused-function"
+#elif defined(_MSC_VER)
+#   pragma warning(push)
+#   pragma warning(disable:4100)   // unreferenced formal parameter
+#   pragma warning(disable:4127)   // conditional expression is constant
+#   pragma warning(disable:4189)   // local variable is initialized but not referenced
+#   pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
+#endif
 #include <D3D12MemAlloc.cpp>    // D3D12MemoryAllocator
 #include <WinPixEventRuntime/pix3.h>
-#pragma warning(pop)
-
-#pragma warning(push)
-#pragma warning(disable:4996)   // this function or variable may be unsafe
+#ifdef __clang__
+#    pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
 
 class GfxInternal
 {
@@ -5384,9 +5407,9 @@ private:
             {
                 D3D12_LIBRARY_DESC library_desc;
                 library->GetDesc(&library_desc);
-                for(uint32_t i = 0; i < library_desc.FunctionCount; i++)
+                for(uint32_t k = 0; k < library_desc.FunctionCount; k++)
                 {
-                    ID3D12FunctionReflection *function = library->GetFunctionByIndex(i);
+                    ID3D12FunctionReflection *function = library->GetFunctionByIndex(k);
                     D3D12_FUNCTION_DESC function_desc = {};
                     function->GetDesc(&function_desc);
                     for(uint32_t j = 0; j < function_desc.BoundResources; ++j)
@@ -5481,12 +5504,12 @@ private:
             uint32_t const space = root_signature_parameters.first;
             auto &local_root_signature_parameters = root_signature_parameters.second;
 
-            D3D12_ROOT_SIGNATURE_DESC root_signature_desc = {};
-            root_signature_desc.pParameters = local_root_signature_parameters.root_parameters.data();
-            root_signature_desc.NumParameters = (uint32_t) local_root_signature_parameters.root_parameters.size();
-            root_signature_desc.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
+            D3D12_ROOT_SIGNATURE_DESC root_signature_desc2 = {};
+            root_signature_desc2.pParameters = local_root_signature_parameters.root_parameters.data();
+            root_signature_desc2.NumParameters = (uint32_t) local_root_signature_parameters.root_parameters.size();
+            root_signature_desc2.Flags = D3D12_ROOT_SIGNATURE_FLAG_LOCAL_ROOT_SIGNATURE;
 
-            D3D12SerializeRootSignature(&root_signature_desc, D3D_ROOT_SIGNATURE_VERSION_1, &result, &error);
+            D3D12SerializeRootSignature(&root_signature_desc2, D3D_ROOT_SIGNATURE_VERSION_1, &result, &error);
             if(!result)
             {
                 GFX_PRINTLN("Error: Failed to serialize local root signature%s%s", error ? ":\r\n" : "", error ? (char const *)error->GetBufferPointer() : "");
@@ -7089,7 +7112,7 @@ private:
         for(uint32_t i = 0; i < parameter.variable_count_; ++i)
         {
             Kernel::Parameter::Variable &variable = parameter.variables_[i];
-            if(force_update_parameter || variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter)
+            if(force_update_parameter || (variable.parameter_ == nullptr && variable.parameter_id_ != dispatch_id_parameter))
             {
                 Program::Parameters::const_iterator const it = parameters.find(variable.parameter_id_);
                 if(it != parameters.end()) variable.parameter_ = &(*it).second;
@@ -8505,8 +8528,6 @@ private:
         return kGfxResult_NoError;
     }
 };
-
-#pragma warning(pop)
 
 char const *GfxInternal::shader_extensions_[] =
 {
