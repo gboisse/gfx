@@ -30,10 +30,14 @@ SOFTWARE.
 #include <ios>
 #include <fstream>
 #define CGLTF_IMPLEMENTATION
-#pragma warning(push)
-#pragma warning(disable:4789)   // buffer will be overrun
+#ifdef _MSC_VER
+#   pragma warning(push)
+#   pragma warning(disable:4789)   // buffer will be overrun
+#endif
 #include <cgltf.h>              // glTF loader
-#pragma warning(pop)
+#ifdef _MSC_VER
+#   pragma warning(pop)
+#endif
 #include <tiny_obj_loader.h>   // obj loader
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
@@ -45,9 +49,6 @@ SOFTWARE.
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
-
-#pragma warning(push)
-#pragma warning(disable:4996)   // this function or variable may be unsafe
 
 class GfxSceneInternal
 {
@@ -2083,8 +2084,6 @@ private:
         return kGfxResult_NoError;
     }
 };
-
-#pragma warning(pop)
 
 GfxArray<GfxScene> GfxSceneInternal::scenes_;
 GfxHandles         GfxSceneInternal::scene_handles_("scene");

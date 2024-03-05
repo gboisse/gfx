@@ -33,17 +33,18 @@ SOFTWARE.
 #include <inc/dxcapi.h>         // shader compiler
 #include <inc/d3d12shader.h>    // shader reflection
 
-#pragma warning(push)
-#pragma warning(disable:4100)   // unreferenced formal parameter
-#pragma warning(disable:4127)   // conditional expression is constant
-#pragma warning(disable:4189)   // local variable is initialized but not referenced
-#pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
+#ifdef _MSC_VER
+#   pragma warning(push)
+#   pragma warning(disable:4100)   // unreferenced formal parameter
+#   pragma warning(disable:4127)   // conditional expression is constant
+#   pragma warning(disable:4189)   // local variable is initialized but not referenced
+#   pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
+#endif
 #include <D3D12MemAlloc.cpp>    // D3D12MemoryAllocator
 #include <WinPixEventRuntime/pix3.h>
-#pragma warning(pop)
-
-#pragma warning(push)
-#pragma warning(disable:4996)   // this function or variable may be unsafe
+#ifdef _MSC_VER
+#   pragma warning(pop)
+#endif
 
 class GfxInternal
 {
@@ -8505,8 +8506,6 @@ private:
         return kGfxResult_NoError;
     }
 };
-
-#pragma warning(pop)
 
 char const *GfxInternal::shader_extensions_[] =
 {
