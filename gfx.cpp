@@ -4877,6 +4877,13 @@ private:
         return (value != 0 ? true : false);
     }
 
+    static inline D3D12_RESOURCE_STATES GetShaderVisibleResourceState(Kernel const &kernel)
+    {
+        return kernel.isGraphics() && kernel.ps_reflection_ != nullptr
+                 ? D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE
+                 : D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
+    }
+
     uint64_t getDescriptorHeapId() const
     {
         return (static_cast<uint64_t>(descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0) << 32) |
@@ -6081,7 +6088,7 @@ private:
             uint32_t descriptor_slot = (parameter.descriptor_slot_ != 0xFFFFFFFFu ? parameter.descriptor_slot_ :
                                                                                     dummy_descriptors_[parameter.type_]);
             if(parameter.descriptor_slot_ != 0xFFFFFFFFu)
-                initDescriptorParameter(program, invalidate_descriptors, parameter, descriptor_slot);
+                initDescriptorParameter(kernel, program, invalidate_descriptors, parameter, descriptor_slot);
             GFX_ASSERT(descriptor_slot < (descriptors_.descriptor_heap_ != nullptr ? descriptors_.descriptor_heap_->GetDesc().NumDescriptors : 0));
             if(is_compute)
                 command_list_->SetComputeRootDescriptorTable(i, descriptors_.getGPUHandle(descriptor_slot));
@@ -6136,7 +6143,7 @@ private:
                                                                 ? parameter.descriptor_slot_
                                                                 : dummy_descriptors_[parameter.type_]);
                                 if(parameter.descriptor_slot_ != 0xFFFFFFFFu)
-                                    initDescriptorParameter(program, invalidate_sbt_descriptors, parameter, descriptor_slot);
+                                    initDescriptorParameter(kernel, program, invalidate_sbt_descriptors, parameter, descriptor_slot);
                                 for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
                                 {
                                     auto descriptor_handle =
@@ -7130,7 +7137,7 @@ private:
         }
     }
 
-    void initDescriptorParameter(Program const &program, bool const invalidate_descriptors, Kernel::Parameter &parameter, uint32_t &descriptor_slot)
+    void initDescriptorParameter(Kernel const &kernel, Program const &program, bool const invalidate_descriptors, Kernel::Parameter &parameter, uint32_t &descriptor_slot)
     {
         bool const invalidate_descriptor = parameter.parameter_ != nullptr && (invalidate_descriptors || parameter.id_ != parameter.parameter_->id_);
         if(parameter.parameter_ != nullptr) parameter.id_ = parameter.parameter_->id_;
@@ -7186,7 +7193,7 @@ private:
                         Buffer &gfx_buffer = buffers_[buffer];
                         SetObjectName(gfx_buffer, buffer.name);
                         if(buffer.cpu_access == kGfxCpuAccess_None)
-                            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                            transitionResource(gfx_buffer, GetShaderVisibleResourceState(kernel));
                         if(!invalidate_descriptor) continue;    // already up to date
                         if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
                             GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
@@ -7314,7 +7321,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -7437,7 +7444,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -7562,7 +7569,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -7686,7 +7693,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
