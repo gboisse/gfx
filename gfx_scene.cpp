@@ -258,6 +258,8 @@ public:
             GFX_TRY(importGltf(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".hdr"))
             GFX_TRY(importHdr(scene, asset_file));
+        else if (CaseInsensitiveCompare(asset_extension, ".dds"))
+            GFX_TRY(importDds(scene, asset_file));
 #ifdef GFX_ENABLE_SCENE_KTX
         else if(CaseInsensitiveCompare(asset_extension, ".ktx2") ||
             CaseInsensitiveCompare(asset_extension, ".ktx"))
@@ -641,6 +643,271 @@ private:
             break;
         }
         return format;
+    }
+
+    inline static uint32_t GetBitsPerPixel(DXGI_FORMAT format)
+    {
+        switch (format)
+        {
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+            return 128;
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+        case DXGI_FORMAT_R32G32B32_UINT:
+        case DXGI_FORMAT_R32G32B32_SINT:
+            return 96;
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G32_FLOAT:
+        case DXGI_FORMAT_R32G32_UINT:
+        case DXGI_FORMAT_R32G32_SINT:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+        case DXGI_FORMAT_Y416:
+        case DXGI_FORMAT_Y210:
+        case DXGI_FORMAT_Y216:
+            return 64;
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R16G16_FLOAT:
+        case DXGI_FORMAT_R16G16_UNORM:
+        case DXGI_FORMAT_R16G16_UINT:
+        case DXGI_FORMAT_R16G16_SNORM:
+        case DXGI_FORMAT_R16G16_SINT:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT:
+        case DXGI_FORMAT_R32_FLOAT:
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R32_SINT:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        case DXGI_FORMAT_AYUV:
+        case DXGI_FORMAT_Y410:
+        case DXGI_FORMAT_YUY2:
+            return 32;
+        case DXGI_FORMAT_P010:
+        case DXGI_FORMAT_P016:
+            return 24;
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
+        case DXGI_FORMAT_B5G6R5_UNORM:
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+        case DXGI_FORMAT_A8P8:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+            return 16;
+        case DXGI_FORMAT_NV12:
+        case DXGI_FORMAT_420_OPAQUE:
+        case DXGI_FORMAT_NV11:
+            return 12;
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+        case DXGI_FORMAT_AI44:
+        case DXGI_FORMAT_IA44:
+        case DXGI_FORMAT_P8:
+            return 8;
+        case DXGI_FORMAT_R1_UNORM:
+            return 1;
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+            return 4;
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+        case DXGI_FORMAT_BC7_TYPELESS:
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return 8;
+        default:
+            return 0;
+        }
+    }
+
+    inline static uint32_t GetNumChannels(DXGI_FORMAT format)
+    {
+        switch (format)
+        {
+        case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        case DXGI_FORMAT_R32G32B32A32_UINT:
+        case DXGI_FORMAT_R32G32B32A32_SINT:
+        case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+        case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        case DXGI_FORMAT_R16G16B16A16_UNORM:
+        case DXGI_FORMAT_R16G16B16A16_UINT:
+        case DXGI_FORMAT_R16G16B16A16_SNORM:
+        case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+        case DXGI_FORMAT_R10G10B10A2_UNORM:
+        case DXGI_FORMAT_R10G10B10A2_UINT:
+        case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+        case DXGI_FORMAT_R8G8B8A8_UNORM:
+        case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        case DXGI_FORMAT_R8G8B8A8_UINT:
+        case DXGI_FORMAT_R8G8B8A8_SNORM:
+        case DXGI_FORMAT_R8G8B8A8_SINT:
+        case DXGI_FORMAT_R9G9B9E5_SHAREDEXP:
+        case DXGI_FORMAT_B5G5R5A1_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_UNORM:
+        case DXGI_FORMAT_B8G8R8X8_UNORM:
+        case DXGI_FORMAT_R10G10B10_XR_BIAS_A2_UNORM:
+        case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+        case DXGI_FORMAT_B8G8R8X8_TYPELESS:
+        case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+        case DXGI_FORMAT_B4G4R4A4_UNORM:
+        case DXGI_FORMAT_BC2_TYPELESS:
+        case DXGI_FORMAT_BC2_UNORM:
+        case DXGI_FORMAT_BC2_UNORM_SRGB:
+        case DXGI_FORMAT_BC3_TYPELESS:
+        case DXGI_FORMAT_BC3_UNORM:
+        case DXGI_FORMAT_BC3_UNORM_SRGB:
+        case DXGI_FORMAT_BC7_TYPELESS: // BC7 could also be 3 channel, there is no way of knowing
+        case DXGI_FORMAT_BC7_UNORM:
+        case DXGI_FORMAT_BC7_UNORM_SRGB:
+            return 4;
+        case DXGI_FORMAT_R32G32B32_TYPELESS:
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+        case DXGI_FORMAT_R32G32B32_UINT:
+        case DXGI_FORMAT_R32G32B32_SINT:
+        case DXGI_FORMAT_R11G11B10_FLOAT:
+        case DXGI_FORMAT_R8G8_B8G8_UNORM:
+        case DXGI_FORMAT_G8R8_G8B8_UNORM:
+        case DXGI_FORMAT_B5G6R5_UNORM:
+        case DXGI_FORMAT_BC1_TYPELESS:
+        case DXGI_FORMAT_BC1_UNORM:
+        case DXGI_FORMAT_BC1_UNORM_SRGB:
+        case DXGI_FORMAT_AYUV:
+        case DXGI_FORMAT_Y410:
+        case DXGI_FORMAT_Y416:
+        case DXGI_FORMAT_NV12:
+        case DXGI_FORMAT_P010:
+        case DXGI_FORMAT_P016:
+        case DXGI_FORMAT_420_OPAQUE:
+        case DXGI_FORMAT_YUY2:
+        case DXGI_FORMAT_Y210:
+        case DXGI_FORMAT_Y216:
+        case DXGI_FORMAT_NV11:
+        case DXGI_FORMAT_AI44:
+        case DXGI_FORMAT_IA44:
+        case DXGI_FORMAT_P8:
+        case DXGI_FORMAT_A8P8:
+        case DXGI_FORMAT_P208:
+        case DXGI_FORMAT_V208:
+        case DXGI_FORMAT_V408:
+        case DXGI_FORMAT_BC6H_TYPELESS:
+        case DXGI_FORMAT_BC6H_UF16:
+        case DXGI_FORMAT_BC6H_SF16:
+            return 3;
+        case DXGI_FORMAT_R32G32_TYPELESS:
+        case DXGI_FORMAT_R32G32_FLOAT:
+        case DXGI_FORMAT_R32G32_UINT:
+        case DXGI_FORMAT_R32G32_SINT:
+        case DXGI_FORMAT_R32G8X24_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+        case DXGI_FORMAT_R16G16_TYPELESS:
+        case DXGI_FORMAT_R16G16_FLOAT:
+        case DXGI_FORMAT_R16G16_UNORM:
+        case DXGI_FORMAT_R16G16_UINT:
+        case DXGI_FORMAT_R16G16_SNORM:
+        case DXGI_FORMAT_R16G16_SINT:
+        case DXGI_FORMAT_R24G8_TYPELESS:
+        case DXGI_FORMAT_D24_UNORM_S8_UINT:
+        case DXGI_FORMAT_R8G8_TYPELESS:
+        case DXGI_FORMAT_R8G8_UNORM:
+        case DXGI_FORMAT_R8G8_UINT:
+        case DXGI_FORMAT_R8G8_SNORM:
+        case DXGI_FORMAT_R8G8_SINT:
+        case DXGI_FORMAT_BC5_TYPELESS:
+        case DXGI_FORMAT_BC5_UNORM:
+        case DXGI_FORMAT_BC5_SNORM:
+            return 2;
+        case DXGI_FORMAT_R32_FLOAT_X8X24_TYPELESS:
+        case DXGI_FORMAT_X32_TYPELESS_G8X24_UINT:
+        case DXGI_FORMAT_R32_TYPELESS:
+        case DXGI_FORMAT_D32_FLOAT:
+        case DXGI_FORMAT_R32_FLOAT:
+        case DXGI_FORMAT_R32_UINT:
+        case DXGI_FORMAT_R32_SINT:
+        case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        case DXGI_FORMAT_X24_TYPELESS_G8_UINT:
+        case DXGI_FORMAT_R16_TYPELESS:
+        case DXGI_FORMAT_R16_FLOAT:
+        case DXGI_FORMAT_D16_UNORM:
+        case DXGI_FORMAT_R16_UNORM:
+        case DXGI_FORMAT_R16_UINT:
+        case DXGI_FORMAT_R16_SNORM:
+        case DXGI_FORMAT_R16_SINT:
+        case DXGI_FORMAT_R8_TYPELESS:
+        case DXGI_FORMAT_R8_UNORM:
+        case DXGI_FORMAT_R8_UINT:
+        case DXGI_FORMAT_R8_SNORM:
+        case DXGI_FORMAT_R8_SINT:
+        case DXGI_FORMAT_A8_UNORM:
+        case DXGI_FORMAT_R1_UNORM:
+        case DXGI_FORMAT_BC4_TYPELESS:
+        case DXGI_FORMAT_BC4_UNORM:
+        case DXGI_FORMAT_BC4_SNORM:
+        return 1;
+        default: return 0;
+        }
     }
 
     template<typename T>
@@ -1814,6 +2081,540 @@ private:
         image_metadata.asset_file = asset_file; // set up metadata
         image_metadata.object_name = file;
         stbi_image_free(image_data);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult importDds(GfxScene const &scene, char const *asset_file)
+    {
+        GFX_ASSERT(asset_file != nullptr);
+        if(gfxSceneFindObjectByAssetFile<GfxImage>(scene, asset_file))
+            return kGfxResult_NoError;  // image was already imported
+
+        struct DDSHeader
+        {
+            uint32_t size;
+            enum class Flags : uint32_t
+            {
+                Caps        = 0x1,
+                Height      = 0x2,
+                Width       = 0x4,
+                Pitch       = 0x8,
+                PixelFormat = 0x1000,
+                Texture     = Caps | Height | Width | PixelFormat,
+                Mipmap      = 0x20000,
+                LinearSize  = 0x80000,
+                Depth      = 0x800000,
+            } flags;
+            uint32_t height;
+            uint32_t width;
+            uint32_t pitchOrLinearSize;
+            uint32_t depth;
+            uint32_t mipMapCount;
+            uint32_t reserved[11];
+            struct PixelFormat
+            {
+                uint32_t size;
+                enum Flags : uint32_t
+                {
+                    AlphaPixels   = 0x1,
+                    Alpha         = 0x2,
+                    FourCC        = 0x4,
+                    PAL8          = 0x20,
+                    RGB           = 0x40,
+                    RGBA          = RGB | AlphaPixels,
+                    YUV           = 0x200,
+                    Luminance     = 0x20000,
+                    LuminanceA    = Luminance | AlphaPixels,
+                    BumpLuminance = 0x00040000,
+                    BumpDuDv      = 0x00080000
+                } flags;
+                uint32_t fourCC;
+                uint32_t bitCount;
+                uint32_t rBitMask;
+                uint32_t gBitMask;
+                uint32_t bBitMask;
+                uint32_t aBitMask;
+            } pixelFormat;
+            uint32_t caps1;
+            enum class Caps2Flags : uint32_t
+            {
+                CubemapPositiveX = 0x00000600,
+                CubemapNegativeX = 0x00000a00,
+                CubemapPositiveY = 0x00001200,
+                CubemapNegativeY = 0x00002200,
+                CubemapPositiveZ = 0x00004200,
+                CubemapNegativeZ = 0x00008200,
+                CubemapAllFaces  = CubemapPositiveX | CubemapNegativeX | CubemapPositiveY | CubemapNegativeY
+                                | CubemapPositiveZ | CubemapNegativeZ,
+                Volume = 0x00200000,
+            } caps2;
+            uint32_t caps3;
+            uint32_t caps4;
+            uint32_t reserved2;
+        };
+
+        struct DDSHeaderDX10
+        {
+            uint32_t DXGIFormat;
+            enum class TextureDimension : uint32_t
+            {
+                Unknown   = 0,
+                Texture1D = 2,
+                Texture2D = 3,
+                Texture3D = 4
+            } resourceDimension;
+            enum class MiscFlags : uint32_t
+            {
+                Unknown     = 0,
+                TextureCube = 0x4
+            } miscFlag;
+            uint32_t arraySize;
+            uint32_t reserved;
+        };
+
+#define MAKE_FOURCC(char1, char2, char3, char4)                 \
+    (static_cast<uint32_t>(char1) | (static_cast<uint32_t>(char2) << 8) \
+    | (static_cast<uint32_t>(char3) << 16) | (static_cast<uint32_t>(char4) << 24))
+
+        // Open file
+        std::FILE *file = std::fopen(asset_file, "rb");
+        if(!file)
+        {
+            return GFX_SET_ERROR(
+                kGfxResult_InvalidOperation, "Unable to load image `%s' : File not found", asset_file);
+        }
+        // Check DDS magic number identifier
+        uint32_t magic;
+        if((std::fread(&magic, sizeof(uint32_t), 1, file) != sizeof(uint32_t))
+            || (magic != MAKE_FOURCC('D', 'D', 'S', ' ')))
+        {
+            std::fclose(file);
+            return GFX_SET_ERROR(
+                kGfxResult_InvalidOperation, "Unable to load image `%s' : Invalid dds file", asset_file);
+        }
+
+        // Read and validate header
+        DDSHeader header;
+        if(std::fread(&header, sizeof(DDSHeader), 1, file) != sizeof(DDSHeader)
+            || header.size != sizeof(DDSHeader) || header.pixelFormat.size != sizeof(DDSHeader::PixelFormat))
+        {
+            std::fclose(file);
+            return GFX_SET_ERROR(
+                kGfxResult_InvalidOperation, "Unable to load image `%s' : Invalid dds file", asset_file);
+        }
+
+        uint32_t width  = header.width;
+        uint32_t height = header.height;
+        uint32_t depth  = 1;
+        DXGI_FORMAT format = DXGI_FORMAT_UNKNOWN;
+        uint32_t numDimensions = 0;
+        uint32_t mipCount  = header.mipMapCount;
+        uint32_t arraySize = 1;
+        bool     cubeMap   = false;
+
+        // Check for DX10 header
+        if((header.pixelFormat.flags & DDSHeader::PixelFormat::FourCC)
+            && (header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', '1', '0')))
+        {
+            DDSHeaderDX10 header10;
+            if(std::fread(&header10, sizeof(DDSHeaderDX10), 1, file) != sizeof(DDSHeaderDX10))
+            {
+                std::fclose(file);
+                return GFX_SET_ERROR(
+                    kGfxResult_InvalidOperation, "Unable to load image `%s' : Invalid dds10 file", asset_file);
+            }
+            format = (DXGI_FORMAT)header10.DXGIFormat;
+            if(header10.arraySize != 0)
+            {
+                arraySize = header10.arraySize;
+            }
+            switch(header10.resourceDimension)
+            {
+            case DDSHeaderDX10::TextureDimension::Texture1D:
+                if((static_cast<uint32_t>(header.flags) & static_cast<uint32_t>(DDSHeader::Flags::Height) && (height != 1)))
+                {
+                    std::fclose(file);
+                    return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                        "Unable to load image `%s' : Invalid dds header", asset_file);
+                }
+                height = depth = 1;
+                numDimensions  = 1;
+                break;
+            case DDSHeaderDX10::TextureDimension::Texture2D:
+                if(static_cast<uint32_t>(header10.miscFlag) & static_cast<uint32_t>(DDSHeaderDX10::MiscFlags::TextureCube))
+                {
+                    arraySize *= 6;
+                    cubeMap = true;
+                }
+                depth         = 1;
+                numDimensions = 2;
+                break;
+            case DDSHeaderDX10::TextureDimension::Texture3D:
+                if(!(static_cast<uint32_t>(header.flags) & static_cast<uint32_t>(DDSHeader::Flags::Depth)))
+                {
+                    std::fclose(file);
+                    return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                        "Unable to load image `%s' : Invalid dds header", asset_file);
+                }
+                numDimensions = 3;
+                break;
+            }
+
+        }
+
+        if(format == DXGI_FORMAT_UNKNOWN || format > DXGI_FORMAT_B4G4R4A4_UNORM)
+        {
+            if(header.pixelFormat.flags & DDSHeader::PixelFormat::Flags::RGB)
+            {
+                if(header.pixelFormat.bitCount == 32)
+                {
+                    if(header.pixelFormat.rBitMask == 0x000000ff && header.pixelFormat.gBitMask == 0x0000ff00
+                        && header.pixelFormat.bBitMask == 0x00ff0000
+                        && header.pixelFormat.aBitMask == 0xff000000)
+                    {
+                        format = DXGI_FORMAT_R8G8B8A8_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x00ff0000
+                        && header.pixelFormat.gBitMask == 0x0000ff00
+                        && header.pixelFormat.bBitMask == 0x000000ff
+                        && header.pixelFormat.aBitMask == 0xff000000)
+                    {
+                        format = DXGI_FORMAT_B8G8R8A8_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x00ff0000
+                        && header.pixelFormat.gBitMask == 0x0000ff00
+                        && header.pixelFormat.bBitMask == 0x000000ff
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_B8G8R8X8_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x000003ff
+                        && header.pixelFormat.gBitMask == 0x000ffc00
+                        && header.pixelFormat.bBitMask == 0x3ff00000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R10G10B10A2_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x0000ffff
+                        && header.pixelFormat.gBitMask == 0xffff0000
+                        && header.pixelFormat.bBitMask == 0x00000000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R16G16_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0xffffffff
+                        && header.pixelFormat.gBitMask == 0x00000000
+                        && header.pixelFormat.bBitMask == 0x00000000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R32_FLOAT;
+                    }
+                }
+                else if(header.pixelFormat.bitCount == 16)
+                {
+                    if(header.pixelFormat.rBitMask == 0x7c00
+                        && header.pixelFormat.gBitMask == 0x03e0
+                        && header.pixelFormat.bBitMask == 0x001f
+                        && header.pixelFormat.aBitMask == 0x8000)
+                    {
+                        format = DXGI_FORMAT_B5G5R5A1_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0xf800
+                        && header.pixelFormat.gBitMask == 0x07e0
+                        && header.pixelFormat.bBitMask == 0x001f
+                        && header.pixelFormat.aBitMask == 0x0000)
+                    {
+                        format = DXGI_FORMAT_B5G6R5_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x0f00
+                        && header.pixelFormat.gBitMask == 0x00f0
+                        && header.pixelFormat.bBitMask == 0x000f
+                        && header.pixelFormat.aBitMask == 0xf000)
+                    {
+                        format = DXGI_FORMAT_B4G4R4A4_UNORM;
+                    }
+                }
+            }
+            else if(header.pixelFormat.flags & DDSHeader::PixelFormat::Flags::Luminance)
+            {
+                if(header.pixelFormat.bitCount == 8)
+                {
+                    if(header.pixelFormat.rBitMask == 0x000000ff
+                        && header.pixelFormat.gBitMask == 0x00000000
+                        && header.pixelFormat.bBitMask == 0x00000000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R8_UNORM;
+                    }
+                }
+                else if(header.pixelFormat.bitCount == 16)
+                {
+                    if(header.pixelFormat.rBitMask == 0x0000ffff
+                        && header.pixelFormat.gBitMask == 0x00000000
+                        && header.pixelFormat.bBitMask == 0x00000000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R16_UNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x000000ff
+                        && header.pixelFormat.gBitMask == 0x0000ff00
+                        && header.pixelFormat.bBitMask == 0x00000000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R8G8_UNORM;
+                    }
+                }
+            }
+            else if(header.pixelFormat.flags & DDSHeader::PixelFormat::Flags::Alpha)
+            {
+                if(header.pixelFormat.bitCount == 8)
+                {
+                    format = DXGI_FORMAT_A8_UNORM;
+                }
+            }
+            else if(header.pixelFormat.flags & DDSHeader::PixelFormat::Flags::BumpDuDv)
+            {
+                if(header.pixelFormat.bitCount == 16)
+                {
+                    if(header.pixelFormat.rBitMask == 0x00ff
+                        && header.pixelFormat.gBitMask == 0xff00
+                        && header.pixelFormat.bBitMask == 0x0000
+                        && header.pixelFormat.aBitMask == 0x0000)
+                    {
+                        format = DXGI_FORMAT_R8G8_SNORM;
+                    }
+                }
+                else if(header.pixelFormat.bitCount == 32)
+                {
+                    if(header.pixelFormat.rBitMask == 0x000000ff
+                        && header.pixelFormat.gBitMask == 0x0000ff00
+                        && header.pixelFormat.bBitMask == 0x00ff0000
+                        && header.pixelFormat.aBitMask == 0xff000000)
+                    {
+                        format = DXGI_FORMAT_R8G8B8A8_SNORM;
+                    }
+                    else if(header.pixelFormat.rBitMask == 0x0000ffff
+                        && header.pixelFormat.gBitMask == 0xffff0000
+                        && header.pixelFormat.bBitMask == 0x00000000
+                        && header.pixelFormat.aBitMask == 0x00000000)
+                    {
+                        format = DXGI_FORMAT_R16G16_SNORM;
+                    }
+                }
+            }
+            else if(header.pixelFormat.flags & DDSHeader::PixelFormat::Flags::BumpLuminance)
+            {
+                if(header.pixelFormat.bitCount == 8)
+                {
+                    format = DXGI_FORMAT_R8_SINT;
+                }
+                else if(header.pixelFormat.bitCount == 16)
+                {
+                    format = DXGI_FORMAT_R16_SINT;
+                }
+                else if(header.pixelFormat.bitCount == 32)
+                {
+                    format = DXGI_FORMAT_R32_SINT;
+                }
+            }
+            else if(header.pixelFormat.flags & DDSHeader::PixelFormat::Flags::FourCC)
+            {
+                if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '1'))
+                {
+                    format = DXGI_FORMAT_BC1_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '3'))
+                {
+                    format = DXGI_FORMAT_BC2_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '5'))
+                {
+                    format = DXGI_FORMAT_BC3_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '4'))
+                {
+                    format = DXGI_FORMAT_BC2_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '5'))
+                {
+                    format = DXGI_FORMAT_BC3_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('A', 'T', 'I', '1'))
+                {
+                    format = DXGI_FORMAT_BC4_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '4', 'U'))
+                {
+                    format = DXGI_FORMAT_BC4_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '4', 'S'))
+                {
+                    format = DXGI_FORMAT_BC4_SNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('A', 'T', 'I', '2'))
+                {
+                    format = DXGI_FORMAT_BC5_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '5', 'U'))
+                {
+                    format = DXGI_FORMAT_BC5_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '5', 'S'))
+                {
+                    format = DXGI_FORMAT_BC5_SNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('R', 'G', 'B', 'G'))
+                {
+                    format = DXGI_FORMAT_R8G8_B8G8_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('G', 'R', 'G', 'B'))
+                {
+                    format = DXGI_FORMAT_G8R8_G8B8_UNORM;
+                }
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('Y', 'U', 'Y', '2'))
+                {
+                    format = DXGI_FORMAT_YUY2;
+                }
+                else
+                {
+                    switch(header.pixelFormat.fourCC)
+                    {
+                    case 36: format = DXGI_FORMAT_R16G16B16A16_UNORM; break;
+                    case 110: format = DXGI_FORMAT_R16G16B16A16_SNORM; break;
+                    case 111: format = DXGI_FORMAT_R16_FLOAT; break;
+                    case 112: format = DXGI_FORMAT_R16G16_FLOAT; break;
+                    case 113: format = DXGI_FORMAT_R16G16B16A16_FLOAT; break;
+                    case 114: format = DXGI_FORMAT_R32_FLOAT; break;
+                    case 115: format = DXGI_FORMAT_R32G32_FLOAT; break;
+                    case 116: format = DXGI_FORMAT_R32G32B32A32_FLOAT; break;
+                    }
+                }
+            }
+        }
+
+        if(format == DXGI_FORMAT_UNKNOWN)
+        {
+            std::fclose(file);
+            return GFX_SET_ERROR(
+                kGfxResult_InvalidOperation, "Unable to load image `%s' : Unknown or unsupported image format", asset_file);
+        }
+
+        if(numDimensions == 0)
+        {
+            if(static_cast<uint32_t>(header.flags) & static_cast<uint32_t>(DDSHeader::Flags::Depth))
+            {
+                numDimensions = 3;
+            }
+            else
+            {
+                auto caps2 = static_cast<uint32_t>(header.caps2)
+                           & static_cast<uint32_t>(DDSHeader::Caps2Flags::CubemapAllFaces);
+                if(caps2)
+                {
+                    if(caps2 != static_cast<uint32_t>(DDSHeader::Caps2Flags::CubemapAllFaces))
+                    {
+                        std::fclose(file);
+                        return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                            "Unable to load image `%s' : Partial cube maps are not supported", asset_file);
+                    }
+                    arraySize = 6;
+                    cubeMap   = true;
+                }
+                depth  = 1;
+                numDimensions = height > 1 ? 2 : 1;
+            }
+        }
+
+        if(numDimensions == 3 && (cubeMap || arraySize > 1))
+        {
+            std::fclose(file);
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                "Unable to load image `%s' : 3D textures cannot have arrays or cube maps", asset_file);
+        }
+
+        if(numDimensions != 2 || cubeMap || arraySize > 1)
+        {
+            std::fclose(file);
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                "Unable to load image `%s' : Only 2D textures are supported", asset_file);
+        }
+
+        uint32_t bitsPerPixel = GetBitsPerPixel(format);
+        auto     GetImageSize = [bitsPerPixel, format](uint32_t width, uint32_t height) {
+            uint32_t numBytes;
+            uint32_t rowBytes;
+            if(format >= DXGI_FORMAT_BC1_TYPELESS && format <= DXGI_FORMAT_BC7_UNORM_SRGB)
+            {
+                uint32_t numBlocksWide = GFX_MAX(1U, (width + 3) / 4);
+                uint32_t numBlocksHigh = GFX_MAX(1U, (height + 3) / 4);
+                rowBytes               = numBlocksWide * bitsPerPixel * 2;
+                numBytes               = rowBytes * numBlocksHigh;
+            }
+            else if(format == DXGI_FORMAT_R8G8_B8G8_UNORM || format == DXGI_FORMAT_G8R8_G8B8_UNORM
+                || format == DXGI_FORMAT_YUY2 || format == DXGI_FORMAT_Y210
+                || format == DXGI_FORMAT_Y216)
+            {
+                rowBytes = ((width + 1) >> 1) * (bitsPerPixel / 8);
+                numBytes = rowBytes * height;
+            }
+            else if(format == DXGI_FORMAT_NV11)
+            {
+                rowBytes = ((width + 3) >> 2) * 4;
+                numBytes = rowBytes + height * 2;
+            }
+            else if(format == DXGI_FORMAT_NV12 || format == DXGI_FORMAT_420_OPAQUE
+                || format == DXGI_FORMAT_P010 || format == DXGI_FORMAT_P016)
+            {
+                rowBytes = ((width + 1) >> 1) * (bitsPerPixel / 6);
+                numBytes = (rowBytes * height) + ((rowBytes * height + 1) >> 1);
+            }
+            else
+            {
+                rowBytes = (width * bitsPerPixel + 7) / 8;
+                numBytes = rowBytes * height;
+            }
+            return numBytes;
+        };
+        GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
+        size_t           dataSize  = GetImageSize(width, height) * arraySize;
+        if(mipCount > 1)
+        {
+            dataSize = ((dataSize * 4) / 3) + 32;
+        }
+        image_ref->data.resize(dataSize);
+        image_ref->width             = width;
+        image_ref->height            = height;
+        image_ref->channel_count     = GetNumChannels(format);
+        image_ref->bytes_per_channel = GFX_MAX((bitsPerPixel / 8) / image_ref->channel_count, 1U);
+        image_ref->format            = format;
+        uint8_t *data                = image_ref->data.data();
+        for(uint32_t j = 0; j < arraySize; j++)
+        {
+            uint32_t mipWidth = width;
+            uint32_t mipHeight = height;
+            uint32_t mipDepth = depth;
+            for(uint32_t i = 0; i < mipCount; i++)
+            {
+                uint32_t numBytes = GetImageSize(mipWidth, mipHeight) * mipDepth;
+                if(std::fread(data, numBytes, 1, file) != sizeof(numBytes))
+                {
+                    std::fclose(file);
+                    return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                        "Unable to load image `%s' : Corrupted image file", asset_file);
+                }
+                data += numBytes;
+                mipWidth = GFX_MAX(1U, mipWidth / 2);
+                mipHeight = GFX_MAX(1U, mipHeight / 2);
+                mipDepth = GFX_MAX(1U, mipDepth / 2);
+            }
+        }
+        image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_HasAlphaChannel);
+        image_ref->flags |= (mipCount > 1 ? kGfxImageFlag_HasMipLevels : 0);
+        GfxMetadata &image_metadata = image_metadata_[image_ref];
+        image_metadata.asset_file = asset_file; // set up metadata
+        char const *file_name = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
+        file_name = (file_name == nullptr ? asset_file : file_name + 1); // retrieve file name
+        image_metadata.object_name = file_name;
         return kGfxResult_NoError;
     }
 
