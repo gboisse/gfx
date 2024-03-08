@@ -249,6 +249,16 @@ static inline GfxResult GFX_SET_ERROR_IMPL(GfxResult result, char const *file_na
     return result;
 }
 
+static inline void* gfxMalloc(size_t size)
+{
+#ifdef _MSC_VER
+    _Notnull_ /* Silence msvc warnings about not checking allocation failure */
+#endif
+    void *ret = malloc(size);
+    GFX_ASSERT(ret != nullptr); // out of memory
+    return ret;
+}
+
 //!
 //! Sparse array container.
 //!
@@ -471,9 +481,9 @@ template<typename TYPE>
 void GfxArray<TYPE>::reserve(uint32_t capacity)
 {
     uint32_t const new_capacity = GFX_MAX(capacity_ + ((capacity_ + 2) >> 1), capacity);
-    TYPE *data = (TYPE *)malloc(new_capacity * sizeof(TYPE));
-    uint32_t *indices = (uint32_t *)malloc(new_capacity * sizeof(uint32_t));
-    uint32_t *packed_indices = (uint32_t *)malloc(new_capacity * sizeof(uint32_t));
+    TYPE *data = (TYPE *)gfxMalloc(new_capacity * sizeof(TYPE));
+    uint32_t *indices = (uint32_t *)gfxMalloc(new_capacity * sizeof(uint32_t));
+    uint32_t *packed_indices = (uint32_t *)gfxMalloc(new_capacity * sizeof(uint32_t));
     for(uint32_t i = 0; i < capacity_; ++i)
     {
         if(i < size_)
@@ -541,7 +551,7 @@ GfxFreelist::GfxFreelist()
 }
 
 GfxFreelist::GfxFreelist(char const *name)
-    : name_(name ? (char *)malloc(strlen(name) + 1) : nullptr)
+    : name_(name ? (char *)gfxMalloc(strlen(name) + 1) : nullptr)
     , slots_(nullptr)
     , slot_counts_(nullptr)
     , next_slot_(0xFFFFFFFFu)
@@ -672,9 +682,8 @@ void GfxFreelist::grow(uint32_t slot_count)
 {
     uint32_t size = size_ + slot_count;
     size += ((size + 2) >> 1);  // grow by half capacity
-    uint32_t *slots = (uint32_t *)malloc(size * sizeof(uint32_t));
-    uint32_t *slot_counts = (uint32_t *)malloc(size * sizeof(uint32_t));
-    GFX_ASSERT(slots != nullptr && slot_counts != nullptr); // out of memory
+    uint32_t *slots = (uint32_t *)gfxMalloc(size * sizeof(uint32_t));
+    uint32_t *slot_counts = (uint32_t *)gfxMalloc(size * sizeof(uint32_t));
     for(uint32_t i = 0; i < size; ++i)
         if(i < size_)
         {
@@ -733,7 +742,7 @@ GfxHandles::GfxHandles()
 }
 
 GfxHandles::GfxHandles(char const *name)
-    : name_(name ? (char *)malloc(strlen(name) + 1) : nullptr)
+    : name_(name ? (char *)gfxMalloc(strlen(name) + 1) : nullptr)
     , handles_(nullptr)
     , next_handle_(0xFFFFFFFFu)
     , capacity_(0)
@@ -831,7 +840,7 @@ void GfxHandles::grow(uint32_t handle_count)
     uint32_t previous_handle = 0xFFFFFFFFu;
     uint32_t capacity = capacity_ + handle_count;
     capacity += ((capacity + 2) >> 1);  // grow by half capacity
-    uint64_t *handles = (uint64_t *)malloc(capacity * sizeof(uint64_t));
+    uint64_t *handles = (uint64_t *)gfxMalloc(capacity * sizeof(uint64_t));
     memcpy(handles, handles_, capacity_ * sizeof(uint64_t));
     for(uint32_t i = capacity_; i < capacity; ++i)
         handles[i] = (1ull << 32) | static_cast<uint64_t>(i + 1 < capacity ? i + 1 : 0xFFFFFFFFu);
@@ -841,7 +850,10 @@ void GfxHandles::grow(uint32_t handle_count)
     if(previous_handle == 0xFFFFFFFFu)
         next_handle_ = capacity_;
     else
+    {
+        GFX_ASSERT(previous_handle < capacity);
         handles[previous_handle] = ((handles[previous_handle] >> 32) << 32) | capacity_;
+    }
     free(handles_);
     handles_ = handles;
     capacity_ = capacity;

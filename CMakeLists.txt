@@ -41,6 +41,12 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /experimental:external /external:anglebrackets /external:W0 /analyze:external->)
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd4324>) # structure was padded due to alignment specifier
+    target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd6387>) # param could be 0
+    target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd6262>) # Function uses alot of stack
+    target_compile_options(gfx PRIVATE $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Debug>>:/wd6011>) # Dereferencing NULL pointer
+    target_compile_options(gfx PRIVATE $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Debug>>:/wd28183>) # Variable could be '0'
+    target_compile_options(gfx PRIVATE $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Debug>>:/wd6385>) # Reading invalid data
+    target_compile_options(gfx PRIVATE $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Debug>>:/wd6386>) # Buffer overrun while writing
     target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
@@ -148,7 +154,7 @@ if(GFX_ENABLE_SCENE)
         GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
         GIT_TAG        v4.3.1
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
-    )   
+    )
     set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
     set(KTX_FEATURE_VULKAN OFF CACHE BOOL "")
     set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "")

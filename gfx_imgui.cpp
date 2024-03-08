@@ -24,11 +24,20 @@ SOFTWARE.
 
 #include "gfx_imgui.h"
 
+#ifdef _MSC_VER
+#    pragma warning(push)
+#    pragma warning(disable : 6011)  // Dereferencing NULL pointer
+#    pragma warning(disable : 28182) // Dereferencing NULL pointer
+#    pragma warning(disable : 6239)  // expression always evaluates to the result of <expression>
+#endif
 #include "imgui.cpp"
 #include "imgui_draw.cpp"
 #include "imgui_tables.cpp"
 #include "imgui_widgets.cpp"
 #include "backends/imgui_impl_win32.cpp"
+#ifdef _MSC_VER
+#    pragma warning(pop)
+#endif
 
 class GfxImGuiInternal
 {
@@ -74,7 +83,7 @@ public:
             float const font_size = (font_configs != nullptr && font_configs[i].SizePixels > 0.0f)
                                 ? font_configs[i].SizePixels
                                 : 16.0f;
-            io.Fonts->AddFontFromFileTTF(font_filenames[i], font_size, &font_configs[i]);
+            io.Fonts->AddFontFromFileTTF(font_filenames[i], font_size, font_configs != nullptr ? &font_configs[i] : nullptr);
         }
         io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
         GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
@@ -144,8 +153,8 @@ public:
         if(!imgui_program_ || !imgui_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
 
-        index_buffers_ = (GfxBuffer *)malloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
-        vertex_buffers_ = (GfxBuffer *)malloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
+        index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
+        vertex_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
         {
             new(&index_buffers_[i]) GfxBuffer();
