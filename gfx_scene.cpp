@@ -56,8 +56,10 @@ SOFTWARE.
 #elif defined(__GNUC__)
 #   pragma GCC diagnostic pop
 #endif
+#ifdef GFX_ENABLE_SCENE_KTX
 #include <ktx.h>
 #include <vulkan/vulkan.h>
+#endif
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
@@ -256,9 +258,11 @@ public:
             GFX_TRY(importGltf(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".hdr"))
             GFX_TRY(importHdr(scene, asset_file));
+#ifdef GFX_ENABLE_SCENE_KTX
         else if(CaseInsensitiveCompare(asset_extension, ".ktx2") ||
             CaseInsensitiveCompare(asset_extension, ".ktx"))
             GFX_TRY(importKtx(scene, asset_file));
+#endif
         else if(CaseInsensitiveCompare(asset_extension, ".exr"))
             GFX_TRY(importExr(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".bmp") ||

@@ -8,7 +8,7 @@ option(GFX_ENABLE_SCENE "Build gfx with scene loading support" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-add_library(gfx STATIC gfx.cpp gfx_window.cpp gfx_imgui.cpp gfx_scene.cpp)
+add_library(gfx STATIC gfx.cpp gfx_window.cpp)
 
 set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
 set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime)
@@ -20,10 +20,10 @@ endif()
 
 target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h)
 if(GFX_ENABLE_GUI)
-    target_sources(gfx PRIVATE gfx_imgui.h)
+    target_sources(gfx PRIVATE gfx_imgui.h gfx_imgui.cpp)
 endif()
 if(GFX_ENABLE_SCENE)
-    target_sources(gfx PRIVATE gfx_scene.h)
+    target_sources(gfx PRIVATE gfx_scene.h gfx_scene.cpp)
 endif()
 
 target_compile_options(gfx PRIVATE /bigobj)
@@ -99,6 +99,8 @@ if(GFX_ENABLE_GUI)
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_GUI)
 endif()
 if(GFX_ENABLE_SCENE)
+    option(GFX_ENABLE_SCENE_KTX "Build gfx with ktx image loading support" ON)
+
     include(FetchContent)
 
     FetchContent_Declare(
@@ -143,35 +145,44 @@ if(GFX_ENABLE_SCENE)
     set(TINYEXR_BUILD_SAMPLE OFF CACHE BOOL "")
     set(TINYEXR_USE_MINIZ OFF CACHE BOOL "")
 
-    FetchContent_Declare(
-        ktx
-        GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-        GIT_TAG        v4.3.1
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
-    )   
-    set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
-    set(KTX_FEATURE_VULKAN OFF CACHE BOOL "")
-    set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "")
-    set(KTX_FEATURE_VK_UPLOAD OFF CACHE BOOL "")
-    set(KTX_FEATURE_TOOLS OFF CACHE BOOL "")
-    set(KTX_FEATURE_DOC OFF CACHE BOOL "")
-    set(KTX_FEATURE_STATIC_LIBRARY ON CACHE BOOL "")
+    if(GFX_ENABLE_SCENE_KTX)
+        FetchContent_Declare(
+            ktx
+            GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
+            GIT_TAG        v4.3.1
+            SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
+        )
+        set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
+        set(KTX_FEATURE_VULKAN OFF CACHE BOOL "")
+        set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "")
+        set(KTX_FEATURE_VK_UPLOAD OFF CACHE BOOL "")
+        set(KTX_FEATURE_TOOLS OFF CACHE BOOL "")
+        set(KTX_FEATURE_DOC OFF CACHE BOOL "")
+        set(KTX_FEATURE_STATIC_LIBRARY ON CACHE BOOL "")
 
-    FetchContent_Declare(
-        vulkan-headers
-        GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-        GIT_TAG        v1.3.278
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/
-    )
+        FetchContent_Declare(
+            vulkan-headers
+            GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
+            GIT_TAG        v1.3.278
+            SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/
+        )
+    endif()
 
-    FetchContent_MakeAvailable(stb cgltf glm tinyobjloader tinyexr ktx vulkan-headers)
+    FetchContent_MakeAvailable(stb cgltf glm tinyobjloader tinyexr)
+    if(GFX_ENABLE_SCENE_KTX)
+        FetchContent_MakeAvailable(ktx vulkan-headers)
+    endif()
 
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf)
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
     target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr)
     target_link_libraries(gfx PUBLIC glm::glm)
-    target_link_libraries(gfx PRIVATE tinyobjloader ktx tinyexr)
+    target_link_libraries(gfx PRIVATE tinyobjloader tinyexr)
+    if(GFX_ENABLE_SCENE_KTX)
+        target_link_libraries(gfx PRIVATE ktx)
+        target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE_KTX)
+    endif()
 
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE)
     target_compile_definitions(gfx PRIVATE GLM_FORCE_XYZW_ONLY)
@@ -183,9 +194,11 @@ if(GFX_ENABLE_SCENE)
     set_target_properties(glm PROPERTIES FOLDER "third_party")
     set_target_properties(tinyobjloader PROPERTIES FOLDER "third_party")
     set_target_properties(tinyexr PROPERTIES FOLDER "third_party")
-    set_target_properties(ktx PROPERTIES FOLDER "third_party")
-    set_target_properties(astcenc-avx2-static PROPERTIES FOLDER "third_party/ktx_deps")
-    set_target_properties(ktx_version PROPERTIES FOLDER "third_party/ktx_deps")
+    if(GFX_ENABLE_SCENE_KTX)
+        set_target_properties(ktx PROPERTIES FOLDER "third_party")
+        set_target_properties(astcenc-avx2-static PROPERTIES FOLDER "third_party/ktx_deps")
+        set_target_properties(ktx_version PROPERTIES FOLDER "third_party/ktx_deps")
+    endif()
 endif()
 
 if(GFX_BUILD_EXAMPLES)
