@@ -8175,7 +8175,7 @@ private:
             "ps_",
             "lib_"
         };
-        uint32_t const shader_profile_count = (uint32_t)(sizeof(shader_profiles) / sizeof(*shader_profiles));
+        uint32_t const shader_profile_count = (uint32_t)std::size(shader_profiles);
         static_assert(shader_profile_count == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < shader_profile_count; ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
 
