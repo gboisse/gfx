@@ -12,10 +12,12 @@ add_library(gfx STATIC gfx.cpp gfx_window.cpp gfx_imgui.cpp gfx_scene.cpp)
 
 set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
 set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime)
+set(GFX_AGILITY_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/agility_sdk)
 
 if(NOT PROJECT_IS_TOP_LEVEL)
     set(GFX_DXC_PATH ${GFX_DXC_PATH} PARENT_SCOPE)
     set(GFX_PIX_PATH ${GFX_PIX_PATH} PARENT_SCOPE)
+    set(GFX_AGILITY_PATH ${GFX_AGILITY_PATH} PARENT_SCOPE)
 endif()
 
 target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h)
@@ -30,11 +32,12 @@ target_compile_options(gfx PRIVATE /bigobj)
 
 target_include_directories(gfx PRIVATE ${GFX_DXC_PATH})
 target_include_directories(gfx PRIVATE ${GFX_PIX_PATH}/include)
+target_include_directories(gfx PUBLIC ${GFX_AGILITY_PATH}/include)
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
 target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
 
-target_compile_features(gfx PUBLIC cxx_std_17)
+target_compile_features(gfx PUBLIC cxx_std_20)
 target_compile_definitions(gfx PRIVATE USE_PIX)
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -pedantic -Werror>)
@@ -65,6 +68,17 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     endif()
 endif()
 
+add_library(D3D12Core SHARED IMPORTED)
+set_target_properties(D3D12Core PROPERTIES
+    IMPORTED_LOCATION ${GFX_AGILITY_PATH}/lib/D3D12Core.dll
+    IMPORTED_IMPLIB ${GFX_AGILITY_PATH}/lib/dummy.lib
+)
+add_library(d3d12SDKLayers SHARED IMPORTED)
+set_target_properties(d3d12SDKLayers PROPERTIES
+    IMPORTED_LOCATION ${GFX_AGILITY_PATH}/lib/d3d12SDKLayers.dll
+    IMPORTED_IMPLIB ${GFX_AGILITY_PATH}/lib/dummy.lib
+)
+
 add_library(dxcompiler SHARED IMPORTED)
 set_target_properties(dxcompiler PROPERTIES
     IMPORTED_LOCATION ${GFX_DXC_PATH}/bin/x64/dxcompiler.dll
@@ -82,7 +96,7 @@ set_target_properties(WinPixEventRuntime PROPERTIES
     IMPORTED_IMPLIB ${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib
 )
 
-target_link_libraries(gfx PUBLIC d3d12.lib dxgi.lib dxcompiler dxil WinPixEventRuntime)
+target_link_libraries(gfx PRIVATE d3d12 D3D12Core d3d12SDKLayers dxgi dxcompiler dxil WinPixEventRuntime)
 
 if(GFX_ENABLE_GUI)
     include(FetchContent)
@@ -148,7 +162,7 @@ if(GFX_ENABLE_SCENE)
         GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
         GIT_TAG        v4.3.1
         SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
-    )   
+    )
     set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
     set(KTX_FEATURE_VULKAN OFF CACHE BOOL "")
     set(KTX_FEATURE_GL_UPLOAD OFF CACHE BOOL "")
