@@ -8175,8 +8175,9 @@ private:
             "ps_",
             "lib_"
         };
-        static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
-        for(uint32_t i = 0; i < ARRAYSIZE(shader_profiles); ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
+        uint32_t const shader_profile_count = (uint32_t)(sizeof(shader_profiles) / sizeof(*shader_profiles));
+        static_assert(shader_profile_count == kShaderType_Count, "An invalid number of shader profiles was supplied");
+        for(uint32_t i = 0; i < shader_profile_count; ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
 
         WCHAR wentry_point[2048], wshader_profile[16];
         mbstowcs(wentry_point, kernel.entry_point_.c_str(), ARRAYSIZE(wentry_point));
