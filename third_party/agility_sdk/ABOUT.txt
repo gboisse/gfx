@@ -1,0 +1,2 @@
+D3D12 version 1.613.0
+Downloaded from https://www.nuget.org/packages/Microsoft.Direct3D.D3D12/
