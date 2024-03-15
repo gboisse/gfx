@@ -249,7 +249,7 @@ static inline GfxResult GFX_SET_ERROR_IMPL(GfxResult result, char const *file_na
     return result;
 }
 
-static inline void* gfxMalloc(size_t size)
+static inline void *gfxMalloc(size_t size)
 {
 #ifdef _MSC_VER
     _Notnull_ /* Silence msvc warnings about not checking allocation failure */
