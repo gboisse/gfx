@@ -1,0 +1,2 @@
+DirectXShaderCompiler version 1.8.2403
+Downloaded from https://github.com/microsoft/DirectXShaderCompiler/releases
