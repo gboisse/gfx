@@ -68,6 +68,17 @@ SOFTWARE.
 #    pragma warning(pop)
 #endif
 
+extern "C"
+{
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 613;
+__declspec(dllexport) extern char8_t const *D3D12SDKPath = u8".\\";
+
+__declspec(dllexport) UINT GetD3D12SDKVersion()
+{
+    return D3D12SDKVersion;
+}
+}
+
 class GfxInternal
 {
     GFX_NON_COPYABLE(GfxInternal);
@@ -889,6 +900,8 @@ public:
 
     GfxResult initialize(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
+        if(GetD3D12SDKVersion() != 613)
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
         if(!window)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid window handle was supplied");
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
@@ -8141,8 +8154,9 @@ private:
             "ps_",
             "lib_"
         };
-        static_assert(ARRAYSIZE(shader_profiles) == kShaderType_Count, "An invalid number of shader profiles was supplied");
-        for(uint32_t i = 0; i < ARRAYSIZE(shader_profiles); ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
+        uint32_t const shader_profile_count = (uint32_t)std::size(shader_profiles);
+        static_assert(shader_profile_count == kShaderType_Count, "An invalid number of shader profiles was supplied");
+        for(uint32_t i = 0; i < shader_profile_count; ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
 
         WCHAR wentry_point[2048], wshader_profile[16];
         mbstowcs(wentry_point, kernel.entry_point_.c_str(), ARRAYSIZE(wentry_point));
@@ -9155,7 +9169,7 @@ GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxB
 GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return kGfxResult_InvalidParameter;
+    if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTextureToBuffer(dst, src);
 }
 
