@@ -258,7 +258,7 @@ public:
             GFX_TRY(importGltf(scene, asset_file));
         else if(CaseInsensitiveCompare(asset_extension, ".hdr"))
             GFX_TRY(importHdr(scene, asset_file));
-        else if (CaseInsensitiveCompare(asset_extension, ".dds"))
+        else if(CaseInsensitiveCompare(asset_extension, ".dds"))
             GFX_TRY(importDds(scene, asset_file));
 #ifdef GFX_ENABLE_SCENE_KTX
         else if(CaseInsensitiveCompare(asset_extension, ".ktx2") ||
@@ -647,7 +647,7 @@ private:
 
     inline static uint32_t GetBitsPerPixel(DXGI_FORMAT format)
     {
-        switch (format)
+        switch(format)
         {
         case DXGI_FORMAT_R32G32B32A32_TYPELESS:
         case DXGI_FORMAT_R32G32B32A32_FLOAT:
@@ -782,7 +782,7 @@ private:
 
     inline static uint32_t GetNumChannels(DXGI_FORMAT format)
     {
-        switch (format)
+        switch(format)
         {
         case DXGI_FORMAT_R32G32B32A32_TYPELESS:
         case DXGI_FORMAT_R32G32B32A32_FLOAT:

@@ -9189,7 +9189,7 @@ GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxB
 GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return kGfxResult_InvalidParameter;
+    if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTextureToBuffer(dst, src);
 }
 
