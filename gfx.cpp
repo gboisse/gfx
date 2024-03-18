@@ -248,15 +248,15 @@ class GfxInternal
         inline String() : data_(nullptr) {}
         inline String(char const *data) : data_(nullptr) { *this = data; }
         inline String(String &&other) : data_(other.data_) { other.data_ = nullptr; }
-        inline String &operator =(String &&other) { if(this != &other) { free(data_); data_ = other.data_; other.data_ = nullptr; } return *this; }
-        inline String &operator =(char const *data) { free(data_); if(!data) data_ = nullptr; else
+        inline String &operator =(String &&other) { if(this != &other) { gfxFree(data_); data_ = other.data_; other.data_ = nullptr; } return *this; }
+        inline String &operator =(char const *data) { gfxFree(data_); if(!data) data_ = nullptr; else
                                                                            { data_ = (char *)gfxMalloc(strlen(data) + 1); strcpy(data_, data); }
                                                       return *this; }
         inline operator char const *() const { return data_ ? data_ : ""; }
         inline size_t size() const { return data_ ? strlen(data_) : 0; }
         inline char const *c_str() const { return data_ ? data_ : ""; }
         inline operator bool() const { return data_ != nullptr; }
-        inline ~String() { free(data_); }
+        inline ~String() { gfxFree(data_); }
     };
 
     struct Garbage
@@ -572,11 +572,11 @@ class GfxInternal
                 switch(type_)
                 {
                 case kType_Image:
-                    free(data_.image_.textures_);
-                    free(data_.image_.mip_levels_);
+                    gfxFree(data_.image_.textures_);
+                    gfxFree(data_.image_.mip_levels_);
                     break;
                 case kType_Constants:
-                    free(data_.constants_);
+                    gfxFree(data_.constants_);
                     break;
                 default:
                     break;
@@ -887,7 +887,7 @@ class GfxInternal
             PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
             FreeSid(*ppSID);
             LocalFree(*ppACL);
-            free(security_descriptor_);
+            gfxFree(security_descriptor_);
         }
     };
 
@@ -1298,8 +1298,8 @@ public:
                 destroyBuffer(constant_buffer_pool_[i]);
                 constant_buffer_pool_[i].~GfxBuffer();
             }
-        free(constant_buffer_pool_);
-        free(constant_buffer_pool_cursors_);
+        gfxFree(constant_buffer_pool_);
+        gfxFree(constant_buffer_pool_cursors_);
 
         for(std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it)
         {
@@ -1350,7 +1350,7 @@ public:
                 destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
                 timestamp_query_heaps_[i].~TimestampQueryHeap();
             }
-        free(timestamp_query_heaps_);
+        gfxFree(timestamp_query_heaps_);
 
         forceGarbageCollection();
         freelist_descriptors_.clear();
@@ -1378,7 +1378,7 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(command_allocators_[i] != nullptr)
                     command_allocators_[i]->Release();
-        free(command_allocators_);
+        gfxFree(command_allocators_);
 
         if(fence_event_)
             CloseHandle(fence_event_);
@@ -1386,8 +1386,8 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(fences_[i] != nullptr)
                     fences_[i]->Release();
-        free(fence_values_);
-        free(fences_);
+        gfxFree(fence_values_);
+        gfxFree(fences_);
 
         if(dxc_utils_ != nullptr)
             dxc_utils_->Release();
@@ -1414,8 +1414,8 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
                     back_buffers_[i]->Release();
-        free(back_buffer_rtvs_);
-        free(back_buffers_);
+        gfxFree(back_buffer_rtvs_);
+        gfxFree(back_buffers_);
 
         return kGfxResult_NoError;
     }
@@ -2412,9 +2412,9 @@ public:
         if(!group_name || !*group_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
         Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        WCHAR wgroup_name[1024];
-        mbstowcs(wgroup_name, group_name, ARRAYSIZE(wgroup_name));
-        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name);
+        std::vector<WCHAR> wgroup_name(1024);
+        mbstowcs(wgroup_name.data(), group_name, wgroup_name.size());
+        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name.data());
         return kGfxResult_NoError;
     }
 
@@ -2613,11 +2613,11 @@ public:
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
         for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
-        WCHAR wgroup_name[1024];
+        std::vector<WCHAR> wgroup_name(1024);
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
-            mbstowcs(wgroup_name, local_root_signature_associations[i].shader_group_name, ARRAYSIZE(wgroup_name));
-            gfx_kernel.local_root_signature_associations_[wgroup_name] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
+            mbstowcs(wgroup_name.data(), local_root_signature_associations[i].shader_group_name, wgroup_name.size());
+            gfx_kernel.local_root_signature_associations_[wgroup_name.data()] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
         }
         gfx_kernel.num_threads_ = (uint32_t *)gfxMalloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i) gfx_kernel.sbt_record_stride_[i] = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
@@ -4496,23 +4496,23 @@ private:
     template<typename TYPE>
     static inline void SetObjectName(TYPE &object, char const *name)
     {
-        WCHAR buffer[1024];
+        std::vector<WCHAR> buffer(1024);
         GFX_ASSERT(name != nullptr);
         if(!*name || (object.Object::flags_ & Object::kFlag_Named) != 0)
             return; // no name or already named
-        mbstowcs(buffer, name, ARRAYSIZE(buffer));
+        mbstowcs(buffer.data(), name, buffer.size());
         object.Object::flags_ |= Object::kFlag_Named;
         GFX_ASSERT(object.resource_ != nullptr);
-        object.resource_->SetName(buffer);
+        object.resource_->SetName(buffer.data());
     }
 
     static inline void SetDebugName(ID3D12Object *object, char const *debug_name)
     {
-        WCHAR buffer[1024];
+        std::vector<WCHAR> buffer(1024);
         GFX_ASSERT(object != nullptr);
         debug_name = (debug_name ? debug_name : "");
-        mbstowcs(buffer, debug_name, ARRAYSIZE(buffer));
-        object->SetName(buffer);
+        mbstowcs(buffer.data(), debug_name, buffer.size());
+        object->SetName(buffer.data());
     }
 
     static inline D3D12_SHADER_BYTECODE GetShaderBytecode(IDxcBlob *shader_bytecode)
@@ -4917,8 +4917,8 @@ private:
         }
         collect(buffer.resource_);
         collect(buffer.allocation_);
-        free(buffer.resource_state_);
-        free(buffer.reference_count_);
+        gfxFree(buffer.resource_state_);
+        gfxFree(buffer.reference_count_);
     }
 
     void collect(Texture const &texture)
@@ -4990,7 +4990,7 @@ private:
 
     void collect(Kernel const &kernel)
     {
-        free(kernel.num_threads_);
+        gfxFree(kernel.num_threads_);
         collect(kernel.cs_bytecode_);
         collect(kernel.as_bytecode_);
         collect(kernel.ms_bytecode_);
@@ -5015,10 +5015,10 @@ private:
             freeDescriptor(kernel.parameters_[i].descriptor_slot_);
             for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
                 kernel.parameters_[i].variables_[j].~Variable();
-            free(kernel.parameters_[i].variables_);
+            gfxFree(kernel.parameters_[i].variables_);
             kernel.parameters_[i].~Parameter();
         }
-        free(kernel.parameters_);
+        gfxFree(kernel.parameters_);
     }
 
     void collect(DescriptorHeap const &descriptor_heap)
@@ -5208,7 +5208,7 @@ private:
         {
             GFX_NON_COPYABLE(MemoryReleaser);
             inline MemoryReleaser(std::vector<void *> &allocated_memory) : allocated_memory_(allocated_memory) {}
-            inline ~MemoryReleaser() { for(size_t i = 0; i < allocated_memory_.size(); ++i) free(allocated_memory_[i]); }
+            inline ~MemoryReleaser() { for(size_t i = 0; i < allocated_memory_.size(); ++i) gfxFree(allocated_memory_[i]); }
             std::vector<void *> allocated_memory_;
         };
         MemoryReleaser const memory_releaser(allocated_memory);
@@ -5767,20 +5767,19 @@ private:
         for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
             max_export_length = GFX_MAX(max_export_length, strlen(kernel.subobjects_[i].c_str()));
         max_export_length += 1;
-        char lib_export[1024];
-        WCHAR wexport[1024];
-        GFX_ASSERT(max_export_length < 1024);
+        std::vector<char> lib_export(max_export_length);
+        std::vector<WCHAR> wexport(max_export_length);
         for(size_t i = 0; i < kernel.exports_.size(); ++i)
         {
-            GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
-            mbstowcs(wexport, lib_export, max_export_length);
-            exports.push_back(wexport);
+            GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", kernel.exports_[i].c_str());
+            mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+            exports.push_back(wexport.data());
         }
         for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
         {
-            GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.subobjects_[i].c_str());
-            mbstowcs(wexport, lib_export, max_export_length);
-            exports.push_back(wexport);
+            GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", kernel.subobjects_[i].c_str());
+            mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+            exports.push_back(wexport.data());
         }
         for(size_t i = 0; i < exports.size(); ++i)
         {
@@ -7981,7 +7980,7 @@ private:
 
     GfxResult createKernel(Program const &program, Kernel &kernel)
     {
-        char buffer[2048];
+        std::vector<char> buffer(2048);
         char const *kernel_type = nullptr;
         GfxResult result = kGfxResult_NoError;
         GFX_ASSERT(kernel.num_threads_ != nullptr);
@@ -8041,13 +8040,13 @@ private:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Cannot create unsupported kernel type");
         if(kernel.root_signature_ != nullptr)
         {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
-            SetDebugName(kernel.root_signature_, buffer);
+            GFX_SNPRINTF(buffer.data(), buffer.size(), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
+            SetDebugName(kernel.root_signature_, buffer.data());
         }
         if(kernel.pipeline_state_ != nullptr)
         {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sPipelineSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
-            SetDebugName(kernel.pipeline_state_, buffer);
+            GFX_SNPRINTF(buffer.data(), buffer.size(), "%s::%s_%sPipelineSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
+            SetDebugName(kernel.pipeline_state_, buffer.data());
         }
         return result;
     }
@@ -8079,10 +8078,10 @@ private:
             freeDescriptor(kernel.parameters_[i].descriptor_slot_);
             for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
                 kernel.parameters_[i].variables_[j].~Variable();
-            free(kernel.parameters_[i].variables_);
+            gfxFree(kernel.parameters_[i].variables_);
             kernel.parameters_[i].~Parameter();
         }
-        free(kernel.parameters_);
+        gfxFree(kernel.parameters_);
         kernel.parameters_ = nullptr;
         kernel.parameter_count_ = 0;
         kernel.vertex_stride_ = 0;
@@ -8092,27 +8091,27 @@ private:
     template<typename REFLECTION_TYPE>
     void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, REFLECTION_TYPE *&reflection)
     {
-        char shader_file[4096];
+        std::vector<char> shader_file(4096);
         DxcBuffer shader_source = {};
         IDxcBlobEncoding *dxc_source = nullptr;
-        WCHAR wshader_file[ARRAYSIZE(shader_file)];
+        std::vector<WCHAR> wshader_file(shader_file.size());
         GFX_ASSERT(shader_type < kShaderType_Count);
 
         if(program.file_name_)
         {
-            GFX_SNPRINTF(shader_file, sizeof(shader_file), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
-            mbstowcs(wshader_file, shader_file, ARRAYSIZE(shader_file));
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
+            mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             // Check file existence before LoadFile call. LoadFile spams hlsl::Exception messages if file not found.
-            if(GetFileAttributesW(wshader_file) == INVALID_FILE_ATTRIBUTES) return;
-            dxc_utils_->LoadFile(wshader_file, nullptr, &dxc_source);
+            if(GetFileAttributesW(wshader_file.data()) == INVALID_FILE_ATTRIBUTES) return;
+            dxc_utils_->LoadFile(wshader_file.data(), nullptr, &dxc_source);
             if(!dxc_source) return; // failed to load source file
             shader_source.Ptr = dxc_source->GetBufferPointer();
             shader_source.Size = dxc_source->GetBufferSize();
         }
         else
         {
-            GFX_SNPRINTF(shader_file, sizeof(shader_file), "%s%s", program.file_path_.c_str(), shader_extensions_[shader_type]);
-            mbstowcs(wshader_file, shader_file, ARRAYSIZE(shader_file));
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s%s", program.file_path_.c_str(), shader_extensions_[shader_type]);
+            mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             switch(shader_type)
             {
             case kShaderType_CS:
@@ -8158,16 +8157,17 @@ private:
         static_assert(shader_profile_count == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < shader_profile_count; ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
 
-        WCHAR wentry_point[2048], wshader_profile[16];
-        mbstowcs(wentry_point, kernel.entry_point_.c_str(), ARRAYSIZE(wentry_point));
-        mbstowcs(wshader_profile, shader_profiles[shader_type], ARRAYSIZE(wshader_profile));
+        std::vector<WCHAR> wentry_point(mbstowcs(nullptr, kernel.entry_point_.c_str(), 0) + 1);
+        mbstowcs(wentry_point.data(), kernel.entry_point_.c_str(), wentry_point.size());
+        std::vector<WCHAR> wshader_profile(mbstowcs(nullptr, shader_profiles[shader_type], 0) + 1);
+        mbstowcs(wshader_profile.data(), shader_profiles[shader_type], wshader_profile.size());
 
         std::vector<LPCWSTR> shader_args;
-        shader_args.push_back(wshader_file);
+        shader_args.push_back(wshader_file.data());
         if(dxr_device_ != nullptr)
             shader_args.push_back(L"-enable-16bit-types");
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
-        shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+        shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
 
         std::vector<std::wstring> exports;
@@ -8179,14 +8179,13 @@ private:
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
                     max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
                 max_export_length += 1;
-                char lib_export[1024];
-                WCHAR wexport[1024];
-                GFX_ASSERT(max_export_length < 1024);
+                std::vector<char> lib_export(max_export_length);
+                std::vector<WCHAR> wexport(max_export_length);
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
                 {
-                    GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
-                    mbstowcs(wexport, lib_export, max_export_length);
-                    exports.push_back(wexport);
+                    GFX_SNPRINTF(lib_export.data(), lib_export.size(), "%s", kernel.exports_[i].c_str());
+                    mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+                    exports.push_back(wexport.data());
                 }
                 for(size_t i = 0; i < exports.size(); ++i)
                 {
@@ -8198,7 +8197,7 @@ private:
         }
         else
         {
-            shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
+            shader_args.push_back(L"-E"); shader_args.push_back(wentry_point.data());
         }
 
         if(debug_shaders_)
@@ -8242,7 +8241,7 @@ private:
         if(FAILED(result_code))
         {
             bool const has_errors = (dxc_error != nullptr && dxc_error->GetBufferPointer() != nullptr);
-            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file, kernel.entry_point_.c_str(), has_errors ? ":\r\n" : "", has_errors ? (char const *)dxc_error->GetBufferPointer() : "");
+            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file.data(), kernel.entry_point_.c_str(), has_errors ? ":\r\n" : "", has_errors ? (char const *)dxc_error->GetBufferPointer() : "");
             if(dxc_error) dxc_error->Release(); dxc_result->Release();
             return; // failed to compile
         }
@@ -8250,7 +8249,7 @@ private:
         {
             bool const has_warnings = (dxc_error->GetBufferPointer() != nullptr);
             if(has_warnings)
-                GFX_PRINTLN("Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file, kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
+                GFX_PRINTLN("Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file.data(), kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
             dxc_error->Release();
         }
 
@@ -8273,12 +8272,12 @@ private:
         }
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
-            char pdb_name[1024];
             static bool created_shader_pdb_directory;
             char const *shader_pdb_directory = "./shader_pdb";
             std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
-            wcstombs(pdb_name, wpdb_name.c_str(), ARRAYSIZE(pdb_name)); // retrieve PDB file name
-            GFX_SNPRINTF(shader_file, ARRAYSIZE(shader_file), "%s/%s", shader_pdb_directory, pdb_name);
+            std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
+            wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory, pdb_name.data());
             if(!created_shader_pdb_directory)
             {
                 int32_t const result = _mkdir(shader_pdb_directory);
@@ -8286,7 +8285,7 @@ private:
                     GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory);
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
-            FILE *fd = fopen(shader_file, "wb");
+            FILE *fd = fopen(shader_file.data(), "wb");
             if(fd != nullptr)
             {
                 fwrite(dxc_pdb->GetBufferPointer(), dxc_pdb->GetBufferSize(), 1, fd);

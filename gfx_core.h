@@ -259,6 +259,11 @@ static inline void *gfxMalloc(size_t size)
     return ret;
 }
 
+inline static void gfxFree(void *pointer)
+{
+    free(pointer);
+}
+
 //!
 //! Sparse array container.
 //!
@@ -317,9 +322,9 @@ GfxArray<TYPE>::~GfxArray()
 {
     for(uint32_t i = 0; i < size_; ++i)
         data_[i].~TYPE();
-    free(data_);
-    free(indices_);
-    free(packed_indices_);
+    gfxFree(data_);
+    gfxFree(indices_);
+    gfxFree(packed_indices_);
 }
 
 template<typename TYPE>
@@ -499,9 +504,9 @@ void GfxArray<TYPE>::reserve(uint32_t capacity)
         indices[i] = 0;
         packed_indices[i] = 0xFFFFFFFFu;
     }
-    free(data_);
-    free(indices_);
-    free(packed_indices_);
+    gfxFree(data_);
+    gfxFree(indices_);
+    gfxFree(packed_indices_);
     data_ = data;
     indices_ = indices;
     packed_indices_ = packed_indices;

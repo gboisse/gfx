@@ -192,8 +192,8 @@ public:
                 }
             GFX_TRY(gfxDestroyProgram(gfx_, imgui_program_));
             GFX_TRY(gfxDestroyKernel(gfx_, imgui_kernel_));
-            free(vertex_buffers_);
-            free(index_buffers_);
+            gfxFree(vertex_buffers_);
+            gfxFree(index_buffers_);
         }
         return kGfxResult_NoError;
     }
