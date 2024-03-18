@@ -6492,10 +6492,12 @@ private:
             did_type_str = "uint3";
             break;
         case GfxTexture::kType_3D:
-        default:
             texture_type_str = "RWTexture3D";
             did_type_str = "uint3";
             break;
+        default:
+            GFX_ASSERT(0);
+            break;  // should never get here
         }
         switch(channels)
         {
@@ -6512,10 +6514,12 @@ private:
             select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
         case 4:
-        default:
             channel_type_str = "float4";
             select_string = "float3 select(bool3 a, float3 b, float3 c){return a ? b : c;}";
             break;
+        default:
+            GFX_ASSERT(0);
+            break;  // should never get here
         }
         std::string texture_type_combined = texture_type_str;
         texture_type_combined += '<';
@@ -7132,11 +7136,11 @@ private:
     {
         bool const invalidate_descriptor = parameter.parameter_ != nullptr && (invalidate_descriptors || parameter.id_ != parameter.parameter_->id_);
         if(parameter.parameter_ != nullptr) parameter.id_ = parameter.parameter_->id_;
-        GFX_ASSERT(parameter.parameter_ != nullptr || parameter.variable_size_ > 0);
         switch(parameter.type_)
         {
         case Kernel::Parameter::kType_Buffer:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
@@ -7200,6 +7204,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWBuffer:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
@@ -7268,6 +7273,7 @@ private:
             break;
         case Kernel::Parameter::kType_Texture2D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -7328,6 +7334,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture2D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
@@ -7391,6 +7398,7 @@ private:
             break;
         case Kernel::Parameter::kType_Texture2DArray:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
@@ -7452,6 +7460,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture2DArray:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
@@ -7516,6 +7525,7 @@ private:
             break;
         case Kernel::Parameter::kType_Texture3D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
@@ -7576,6 +7586,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture3D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
@@ -7640,6 +7651,7 @@ private:
             break;
         case Kernel::Parameter::kType_TextureCube:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -7700,6 +7712,7 @@ private:
             break;
         case Kernel::Parameter::kType_AccelerationStructure:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 if(parameter.parameter_->type_ != Program::Parameter::kType_AccelerationStructure)
                 {
                     GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected an acceleration structure object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
@@ -7751,68 +7764,73 @@ private:
                     if(data != nullptr) populateRootConstants(program, program.parameters_, parameter, (uint32_t *)data);
                     cbv_desc.SizeInBytes = GFX_ALIGN(parameter.variable_size_, 256);
                 }
-                else if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
-                {
-                    cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
-                    if(data != nullptr) memcpy(data, parameter.parameter_->data_.constants_, parameter.parameter_->data_size_);
-                    cbv_desc.SizeInBytes = GFX_ALIGN(parameter.parameter_->data_size_, 256);
-                }
-                else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
-                {
-                    if(parameter.parameter_->data_.buffer_.buffer_count > 1)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        break;  // user set an invalid buffer object
-                    }
-                    if(parameter.parameter_->data_.buffer_.buffer_count < 1)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        break;  // user set an invalid buffer object
-                    }
-                    GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
-                    if(!buffer_handles_.has_handle(buffer.handle))
-                    {
-                        if(buffer.handle != 0)
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        descriptor_slot = dummy_descriptors_[parameter.type_];
-                        freeDescriptor(parameter.descriptor_slot_);
-                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                        break;  // user set an invalid buffer object
-                    }
-                    if(buffer.cpu_access != kGfxCpuAccess_Write)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that does not have write CPU access as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        descriptor_slot = dummy_descriptors_[parameter.type_];
-                        freeDescriptor(parameter.descriptor_slot_);
-                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                        break;  // user set an invalid buffer object
-                    }
-                    if(buffer.size > 0xFFFFFFFFull)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that's larger than 4GiB as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        descriptor_slot = dummy_descriptors_[parameter.type_];
-                        freeDescriptor(parameter.descriptor_slot_);
-                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                        break;  // constant buffer is too large
-                    }
-                    Buffer &gfx_buffer = buffers_[buffer];
-                    SetObjectName(gfx_buffer, buffer.name);
-                    GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
-                    GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
-                    cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
-                    cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
-                }
                 else
                 {
-                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected constant or buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                    descriptor_slot = dummy_descriptors_[parameter.type_];
-                    freeDescriptor(parameter.descriptor_slot_);
-                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                    break;  // user set an unrelated parameter type
+                    GFX_ASSERT(parameter.parameter_ != nullptr);
+                    if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
+                    {
+                        cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
+                        if(data != nullptr) memcpy(data, parameter.parameter_->data_.constants_, parameter.parameter_->data_size_);
+                        cbv_desc.SizeInBytes = GFX_ALIGN(parameter.parameter_->data_size_, 256);
+                    }
+                    else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
+                    {
+                        if(parameter.parameter_->data_.buffer_.buffer_count > 1)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            break;  // user set an invalid buffer object
+                        }
+                        if(parameter.parameter_->data_.buffer_.buffer_count < 1)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str (),    program.file_name_.c_str());
+                            break;  // user set an invalid buffer object
+                        }
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
+                        if(!buffer_handles_.has_handle(buffer.handle))
+                        {
+                            if(buffer.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an invalid buffer object
+                        }
+                        if(buffer.cpu_access != kGfxCpuAccess_Write)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that does not have write CPU access as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an invalid buffer object
+                        }
+                        if(buffer.size > 0xFFFFFFFFull)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that's larger than 4GiB as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str (),  program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // constant buffer is too large
+                        }
+                        Buffer &gfx_buffer = buffers_[buffer];
+                        SetObjectName(gfx_buffer, buffer.name);
+                        GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
+                        GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
+                        cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+                        cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
+                    }
+                    else
+                    {
+                        GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected constant or buffer object", parameter.parameter_->getTypeName(),   parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        descriptor_slot = dummy_descriptors_[parameter.type_];
+                        freeDescriptor(parameter.descriptor_slot_);
+                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                        break;  // user set an unrelated parameter type
+                    }
                 }
                 if(cbv_desc.BufferLocation == 0)
                 {
-                    GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate constant memory for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    if(parameter.parameter_ != nullptr)
+                        GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate constant memory for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                     descriptor_slot = dummy_descriptors_[parameter.type_];
                     freeDescriptor(parameter.descriptor_slot_);
                     parameter.descriptor_slot_ = 0xFFFFFFFFu;

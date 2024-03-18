@@ -110,9 +110,9 @@ enum GfxConstant
 #ifdef _DEBUG
 
 #undef GFX_ASSERT
-#define GFX_ASSERT(X)               \
-    GFX_MULTI_LINE_MACRO_BEGIN      \
-        if(!(X)) GFX_BREAKPOINT;    \
+#define GFX_ASSERT(X)                           \
+    GFX_MULTI_LINE_MACRO_BEGIN                  \
+        if(!(X)) { GFX_BREAKPOINT; exit(0); }   \
     GFX_MULTI_LINE_MACRO_END
 
 #undef GFX_ASSERTMSG
