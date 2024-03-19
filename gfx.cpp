@@ -105,6 +105,7 @@ class GfxInternal
     uint64_t *fence_values_ = nullptr;
 
     bool debug_shaders_ = false;
+    bool experimental_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -939,6 +940,16 @@ public:
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
         DXGIFactoryReleaser const factory_releaser(factory);
+
+        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
+        {
+            IID features[] = { D3D12ExperimentalShaderModels };
+            if(!IsDeveloperModeEnabled())
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
+            if(!SUCCEEDED(D3D12EnableExperimentalFeatures( 1, features, nullptr, nullptr )))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
+            experimental_shaders_ = true;
+        }
 
         if(adapter != nullptr)
         {
@@ -8190,6 +8201,11 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
         shader_args.push_back(L"-HV 2021");
+        if(experimental_shaders_ == true)
+        {
+            shader_args.push_back(L"-Vd");
+            shader_args.push_back(L"-select-validator internal");
+        }
 
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
