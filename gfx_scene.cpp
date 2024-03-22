@@ -1728,7 +1728,7 @@ private:
                         for(size_t k = 0; k < accessors.indices->count; ++k)
                         {
                             cgltf_uint gltf_index = 0;
-                            cgltf_bool read = cgltf_accessor_read_uint(accessors.indices, k, &gltf_index, sizeof(cgltf_uint));
+                            cgltf_bool read = cgltf_accessor_read_uint(accessors.indices, k, &gltf_index, 1);
                             GFX_ASSERT(read); (void)read;
                             std::map<cgltf_uint, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
                             if(it2 != indices.end())
@@ -1842,7 +1842,7 @@ private:
                     ((type == kGltfAnimationChannelType_Weights) && (num_components == 1)));
                 animation_channel.values_.resize(num_components * output_buffer->count);
                 for(uint32_t k = 0; k < output_buffer->count; ++k)
-                    cgltf_accessor_read_float(output_buffer, k, (float*)&animation_channel.values_[num_components * k], num_components * sizeof(float));
+                    cgltf_accessor_read_float(output_buffer, k, (float*)&animation_channel.values_[num_components * k], num_components);
                 animation_channel.node_ = animated_node_handle;
                 animation_channel.mode_ = mode;
                 animation_channel.type_ = type;
