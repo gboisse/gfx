@@ -736,6 +736,7 @@ class GfxInternal
         std::vector<String> defines_;
         std::vector<String> exports_;
         std::vector<String> subobjects_;
+        std::vector<String> include_paths_;
         std::map<std::wstring, LocalRootSignatureAssociation> local_root_signature_associations_;
         uint64_t descriptor_heap_id_ = 0;
         uint32_t *num_threads_ = nullptr;
@@ -1263,7 +1264,7 @@ public:
         GfxProgramDesc clear_buffer_program_desc = {};
         clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr);
-        clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
+        clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0, nullptr, 0);
         if(!clear_buffer_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the compute kernel for clearing buffer objects");
 
@@ -1274,7 +1275,7 @@ public:
             copy_to_backbuffer_program_desc.vs = "float4 main(in uint idx : SV_VertexID) : SV_POSITION { return 1.0f - float4(4.0f * (idx & 1), 4.0f * (idx >> 1), 1.0f, 0.0f); }";
             copy_to_backbuffer_program_desc.ps = "Texture2D InputBuffer; float4 main(in float4 pos : SV_Position) : SV_Target { return InputBuffer.Load(int3(pos.xy, 0)); }";
             copy_to_backbuffer_program_ = createProgram(copy_to_backbuffer_program_desc, "gfx_CopyToBackBufferProgram", nullptr);
-            copy_to_backbuffer_kernel_ = createGraphicsKernel(copy_to_backbuffer_program_, default_draw_state, "main", nullptr, 0);
+            copy_to_backbuffer_kernel_ = createGraphicsKernel(copy_to_backbuffer_program_, default_draw_state, "main", nullptr, 0, nullptr, 0);
             if(!copy_to_backbuffer_kernel_)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the graphics kernel for copying to the backbuffer");
         }
@@ -2472,7 +2473,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxKernel createMeshKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+    GfxKernel createMeshKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
     {
         GfxKernel mesh_kernel = {};
         if(mesh_device_ == nullptr)
@@ -2504,6 +2505,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Mesh;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        for (uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         createKernel(gfx_program, gfx_kernel);  // create mesh kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
@@ -2516,7 +2518,7 @@ public:
         return mesh_kernel;
     }
 
-    GfxKernel createComputeKernel(GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
+    GfxKernel createComputeKernel(GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
     {
         GfxKernel compute_kernel = {};
         if(!program_handles_.has_handle(program.handle))
@@ -2535,6 +2537,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Compute;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        for(uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
         createKernel(gfx_program, gfx_kernel);  // create compute kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
@@ -2547,7 +2550,7 @@ public:
         return compute_kernel;
     }
 
-    GfxKernel createGraphicsKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+    GfxKernel createGraphicsKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
     {
         GfxResult result;
         GfxKernel graphics_kernel = {};
@@ -2575,6 +2578,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Graphics;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
+        for (uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         result = createKernel(gfx_program, gfx_kernel); // create graphics kernel
         if(result != kGfxResult_NoError)
@@ -2597,7 +2601,8 @@ public:
         GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
         char const **exports, uint32_t export_count,
         char const **subobjects, uint32_t subobject_count,
-        char const **defines, uint32_t define_count)
+        char const **defines, uint32_t define_count,
+        char const **include_paths, uint32_t include_path_count)
     {
         GfxKernel raytracing_kernel = {};
         if(dxr_device_ == nullptr)
@@ -2623,6 +2628,7 @@ public:
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
         for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
+        for (uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         WCHAR wgroup_name[1024];
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
@@ -6643,7 +6649,7 @@ private:
         GfxProgramDesc mip_program_desc = {};
         mip_program_desc.cs = mip_program_source.c_str();
         mip_kernels.mip_program_ = createProgram(mip_program_desc, "gfx_GenerateMipsProgram", nullptr);
-        mip_kernels.mip_kernel_ = createComputeKernel(mip_kernels.mip_program_, "main", nullptr, 0);
+        mip_kernels.mip_kernel_ = createComputeKernel(mip_kernels.mip_program_, "main", nullptr, 0, nullptr, 0);
         return mip_kernels;
     }
 
@@ -6916,11 +6922,11 @@ private:
         scan_program_desc.cs = scan_program_source.c_str();
         char const *scan_add_defines[] = { "PARTIAL_RESULT" };
         scan_kernels.scan_program_ = createProgram(scan_program_desc, "gfx_ScanProgram", nullptr);
-        scan_kernels.reduce_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockReduce", nullptr, 0);
-        scan_kernels.scan_add_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", scan_add_defines, ARRAYSIZE(scan_add_defines));
-        scan_kernels.scan_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", nullptr, 0);
+        scan_kernels.reduce_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockReduce", nullptr, 0, nullptr, 0);
+        scan_kernels.scan_add_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", scan_add_defines, ARRAYSIZE(scan_add_defines), nullptr, 0);
+        scan_kernels.scan_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", nullptr, 0, nullptr, 0);
         if(count != nullptr)
-            scan_kernels.args_kernel_ = createComputeKernel(scan_kernels.scan_program_, "GenerateDispatches", nullptr, 0);
+            scan_kernels.args_kernel_ = createComputeKernel(scan_kernels.scan_program_, "GenerateDispatches", nullptr, 0, nullptr, 0);
         return scan_kernels;
     }
 
@@ -7118,10 +7124,10 @@ private:
         sort_program_desc.cs = sort_program_source.c_str();
         char const *sort_values_defines[] = { "SORT_VALUES" };
         sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram", nullptr);
-        sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0);
-        sort_kernels.scatter_kernel_ = createComputeKernel(sort_kernels.sort_program_, "Scatter", sort_values_defines, sort_values ? 1 : 0);
+        sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0, nullptr, 0);
+        sort_kernels.scatter_kernel_ = createComputeKernel(sort_kernels.sort_program_, "Scatter", sort_values_defines, sort_values ? 1 : 0, nullptr, 0);
         if(count != nullptr)
-            sort_kernels.args_kernel_ = createComputeKernel(sort_kernels.sort_program_, "GenerateDispatches", nullptr, 0);
+            sort_kernels.args_kernel_ = createComputeKernel(sort_kernels.sort_program_, "GenerateDispatches", nullptr, 0, nullptr, 0);
         return sort_kernels;
     }
 
@@ -8250,6 +8256,25 @@ private:
             }
         }
 
+        std::vector<std::wstring> include_paths;
+        if (!kernel.include_paths_.empty())
+        {
+            include_paths.reserve(kernel.include_paths_.size());
+            for (size_t i = 0; i < kernel.include_paths_.size(); ++i)
+            {
+                size_t const path_length = std::strlen(kernel.include_paths_[i]);
+                std::wstring include_path(path_length, L' ');
+                include_path.resize(std::mbstowcs(include_path.data(), kernel.include_paths_[i], path_length));
+
+                include_paths.push_back(include_path);
+            }
+            for (size_t i = 0; i < include_paths.size(); ++i)
+            {
+                shader_args.push_back(L"-I");
+                shader_args.push_back(include_paths[i].c_str());
+            }
+        }
+
         IDxcResult *dxc_result = nullptr;
         dxc_compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), dxc_include_handler_, IID_PPV_ARGS(&dxc_result));
         if(dxc_source) dxc_source->Release();
@@ -9054,52 +9079,53 @@ GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
         callable_shader_table);
 }
 
-GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
 {
     GfxDrawState const default_draw_state = {};
-    return gfxCreateMeshKernel(context, program, default_draw_state, entry_point, defines, define_count);
+    return gfxCreateMeshKernel(context, program, default_draw_state, entry_point, defines, define_count, include_paths, include_path_count);
 }
 
-GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
 {
     GfxKernel const mesh_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return mesh_kernel;    // invalid context
-    return gfx->createMeshKernel(program, draw_state, entry_point, defines, define_count);
+    return gfx->createMeshKernel(program, draw_state, entry_point, defines, define_count, include_paths, include_path_count);
 }
 
-GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
 {
     GfxKernel const compute_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return compute_kernel; // invalid context
-    return gfx->createComputeKernel(program, entry_point, defines, define_count);
+    return gfx->createComputeKernel(program, entry_point, defines, define_count, include_paths, include_path_count);
 }
 
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
 {
     GfxDrawState const default_draw_state = {};
-    return gfxCreateGraphicsKernel(context, program, default_draw_state, entry_point, defines, define_count);
+    return gfxCreateGraphicsKernel(context, program, default_draw_state, entry_point, defines, define_count, include_paths, include_path_count);
 }
 
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count, char const **include_paths, uint32_t include_path_count)
 {
     GfxKernel const graphics_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return graphics_kernel;    // invalid context
-    return gfx->createGraphicsKernel(program, draw_state, entry_point, defines, define_count);
+    return gfx->createGraphicsKernel(program, draw_state, entry_point, defines, define_count, include_paths, include_path_count);
 }
 
 GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
     char const **exports, uint32_t export_count,
     char const **subobjects, uint32_t subobject_count,
-    char const **defines, uint32_t define_count)
+    char const **defines, uint32_t define_count,
+    char const **include_paths, uint32_t include_path_count)
 {
     GfxKernel const raytracing_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_kernel;    // invalid context
-    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count);
+    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count, include_paths, include_path_count);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
