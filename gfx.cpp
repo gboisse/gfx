@@ -96,13 +96,13 @@ class GfxInternal
     ID3D12GraphicsCommandList *command_list_ = nullptr;
     ID3D12GraphicsCommandList4 *dxr_command_list_ = nullptr;
     ID3D12GraphicsCommandList6 *mesh_command_list_ = nullptr;
-    ID3D12CommandAllocator **command_allocators_ = nullptr;
+    ID3D12CommandAllocator *command_allocators_[kGfxConstant_MaxBackBufferCount] = {};
     std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
     uint32_t fence_index_ = 0;
-    ID3D12Fence **fences_ = nullptr;
-    uint64_t *fence_values_ = nullptr;
+    ID3D12Fence *fences_[kGfxConstant_MaxBackBufferCount] = {};
+    uint64_t fence_values_[kGfxConstant_MaxBackBufferCount] = {};
 
     bool debug_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
@@ -117,8 +117,10 @@ class GfxInternal
     ID3D12CommandSignature *dispatch_rays_signature_ = nullptr;
     ID3D12CommandSignature *draw_mesh_signature_ = nullptr;
     std::vector<D3D12_RESOURCE_BARRIER> resource_barriers_;
-    ID3D12Resource **back_buffers_ = nullptr;
-    uint32_t *back_buffer_rtvs_ = nullptr;
+    ID3D12Resource *back_buffers_[kGfxConstant_MaxBackBufferCount] = {};
+    D3D12MA::Allocation *back_buffer_allocations_[kGfxConstant_MaxBackBufferCount] = {};
+    uint32_t back_buffer_rtvs_[kGfxConstant_MaxBackBufferCount] = {};
+    bool is_interop_ = false;
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
@@ -132,8 +134,8 @@ class GfxInternal
     bool force_install_vertex_buffer_ = false;
     bool force_install_draw_id_buffer_ = false;
     GfxBuffer raytracing_scratch_buffer_ = {};
-    GfxBuffer *constant_buffer_pool_ = nullptr;
-    uint64_t *constant_buffer_pool_cursors_ = nullptr;
+    GfxBuffer constant_buffer_pool_[kGfxConstant_MaxBackBufferCount] = {};
+    uint64_t constant_buffer_pool_cursors_[kGfxConstant_MaxBackBufferCount] = {};
     std::vector<GfxRaytracingPrimitive> active_raytracing_primitives_;
 
     struct RenderTarget
@@ -796,7 +798,7 @@ class GfxInternal
         std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>> timestamp_queries_;
     };
     uint64_t timestamp_query_ticks_per_second_ = 0;
-    TimestampQueryHeap *timestamp_query_heaps_ = nullptr;
+    TimestampQueryHeap timestamp_query_heaps_[kGfxConstant_MaxBackBufferCount] = {};
 
     struct Sbt
     {
@@ -910,10 +912,95 @@ public:
 
     GfxResult initialize(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
-        if(GetD3D12SDKVersion() != 613)
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
         if(!window)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid window handle was supplied");
+
+        IDXGIFactory4 *factory = nullptr;
+        if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+
+        struct DXGIFactoryReleaser
+        {
+            IDXGIFactory4 *factory;
+            GFX_NON_COPYABLE(DXGIFactoryReleaser);
+            DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
+            ~DXGIFactoryReleaser() { factory->Release(); }
+        };
+        DXGIFactoryReleaser const factory_releaser(factory);
+
+        GFX_TRY(initializeDevice(flags, adapter, factory));
+
+        window_ = window;
+        RECT window_rect = {};
+        GetClientRect(window_, &window_rect);
+        window_width_ = window_rect.right - window_rect.left;
+        window_height_ = window_rect.bottom - window_rect.top;
+
+        DXGI_SWAP_CHAIN_DESC1
+        swap_chain_desc                  = {};
+        swap_chain_desc.Width            = window_width_;
+        swap_chain_desc.Height           = window_height_;
+        swap_chain_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+        swap_chain_desc.BufferCount      = max_frames_in_flight_;
+        swap_chain_desc.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+        swap_chain_desc.SampleDesc.Count = 1;
+        swap_chain_desc.Flags            = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+        IDXGISwapChain1 *swap_chain = nullptr;
+        if(!SUCCEEDED(factory->CreateSwapChainForHwnd(command_queue_, window_, &swap_chain_desc, nullptr, nullptr, &swap_chain)))
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create swap chain");
+        swap_chain->QueryInterface(IID_PPV_ARGS(&swap_chain_)); swap_chain->Release();
+        if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
+        fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+
+        GFX_TRY(acquireSwapChainBuffers());
+        GFX_TRY(createBackBufferRTVs());
+
+        D3D12_RESOURCE_BARRIER resource_barrier = {};
+        resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+        resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+        resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+        resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        command_list_->ResourceBarrier(1, &resource_barrier);
+
+        return initializeCommon(context);
+    }
+
+    GfxResult initialize(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
+    {
+        IDXGIFactory4 *factory = nullptr;
+        if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+
+        struct DXGIFactoryReleaser
+        {
+            IDXGIFactory4 *factory;
+            GFX_NON_COPYABLE(DXGIFactoryReleaser);
+            DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
+            ~DXGIFactoryReleaser() { factory->Release(); }
+        };
+        DXGIFactoryReleaser const factory_releaser(factory);
+
+        GFX_TRY(initializeDevice(flags, adapter, factory));
+
+        window_ = nullptr;
+        window_width_ = width;
+        window_height_ = height;
+
+        fence_index_ = 0;
+
+        GFX_TRY(initializeCommon(context));
+
+        GFX_TRY(createBackBuffers());
+        return createBackBufferRTVs();
+    }
+
+    GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
+    {
+        if(GetD3D12SDKVersion() != 613)
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
             ID3D12Debug1 *debug_controller = nullptr;
@@ -927,18 +1014,6 @@ public:
                 debug_controller->Release();
             }
         }
-        IDXGIFactory4 *factory = nullptr;
-        if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
-
-        struct DXGIFactoryReleaser
-        {
-            IDXGIFactory4 *factory;
-            GFX_NON_COPYABLE(DXGIFactoryReleaser);
-            DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
-            ~DXGIFactoryReleaser() { factory->Release(); }
-        };
-        DXGIFactoryReleaser const factory_releaser(factory);
 
         if(adapter != nullptr)
         {
@@ -1056,32 +1131,8 @@ public:
         command_queue_->GetTimestampFrequency(&timestamp_query_ticks_per_second_);
         SetDebugName(command_queue_, "gfx_CommandQueue");
 
-        window_ = window;
-        RECT window_rect = {};
-        GetClientRect(window_, &window_rect);
-        window_width_ = window_rect.right - window_rect.left;
-        window_height_ = window_rect.bottom - window_rect.top;
         max_frames_in_flight_ = kGfxConstant_BackBufferCount;
 
-        DXGI_SWAP_CHAIN_DESC1
-        swap_chain_desc                  = {};
-        swap_chain_desc.Width            = window_width_;
-        swap_chain_desc.Height           = window_height_;
-        swap_chain_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
-        swap_chain_desc.BufferCount      = max_frames_in_flight_;
-        swap_chain_desc.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-        swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-        swap_chain_desc.SampleDesc.Count = 1;
-        swap_chain_desc.Flags            = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-        IDXGISwapChain1 *swap_chain = nullptr;
-        if(!SUCCEEDED(factory->CreateSwapChainForHwnd(command_queue_, window_, &swap_chain_desc, nullptr, nullptr, &swap_chain)))
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create swap chain");
-        swap_chain->QueryInterface(IID_PPV_ARGS(&swap_chain_)); swap_chain->Release();
-        if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
-        fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
-
-        command_allocators_ = (ID3D12CommandAllocator **)malloc(max_frames_in_flight_ * sizeof(ID3D12CommandAllocator *));
         for(uint32_t j = 0; j < max_frames_in_flight_; ++j)
         {
             char buffer[256];
@@ -1101,7 +1152,6 @@ public:
         fence_event_ = CreateEvent(nullptr, false, false, nullptr);
         if(!fence_event_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create event handle");
-        fences_ = (ID3D12Fence **)malloc(max_frames_in_flight_ * sizeof(ID3D12Fence *));
         for(uint32_t j = 0; j < max_frames_in_flight_; ++j)
         {
             char buffer[256];
@@ -1110,22 +1160,8 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create fence object");
             SetDebugName(fences_[j], buffer);
         }
-        fence_values_ = (uint64_t *)malloc(max_frames_in_flight_ * sizeof(uint64_t));
-        memset(fence_values_, 0, max_frames_in_flight_ * sizeof(uint64_t));
 
-        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
-        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
-        GFX_TRY(acquireSwapChainBuffers());
-
-        D3D12_RESOURCE_BARRIER resource_barrier = {};
-        resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        resource_barrier.Transition.pResource = back_buffers_[fence_index_];
-        resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-        resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-        resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-        command_list_->ResourceBarrier(1, &resource_barrier);
-
-        return initializeCommon(context);
+        return kGfxResult_NoError;
     }
 
     GfxResult initialize(ID3D12Device *device, uint32_t max_frames_in_flight, GfxContext &context)
@@ -1139,8 +1175,9 @@ public:
         if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to find interop adapter");
 
+        is_interop_ = true;
         device_ = device;
-        max_frames_in_flight_ = GFX_MAX(max_frames_in_flight, 1u);
+        max_frames_in_flight_ = GFX_MIN(GFX_MAX(max_frames_in_flight, 1u), (uint32_t)kGfxConstant_MaxBackBufferCount);
         device->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         device->QueryInterface(IID_PPV_ARGS(&mesh_device_));
         device->AddRef();   // retain device
@@ -1195,15 +1232,6 @@ public:
         }
         populateDummyDescriptors();
 
-        constant_buffer_pool_ = (GfxBuffer *)malloc(max_frames_in_flight_ * sizeof(GfxBuffer));
-        constant_buffer_pool_cursors_ = (uint64_t *)malloc(max_frames_in_flight_ * sizeof(uint64_t));
-        timestamp_query_heaps_ = (TimestampQueryHeap *)malloc(max_frames_in_flight_ * sizeof(TimestampQueryHeap));
-        memset(constant_buffer_pool_cursors_, 0, max_frames_in_flight_ * sizeof(uint64_t));
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-        {
-            new(&constant_buffer_pool_[i]) GfxBuffer();
-            new(&timestamp_query_heaps_[i]) TimestampQueryHeap();
-        }
         if(!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils_))) ||
            !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
            !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
@@ -1302,14 +1330,10 @@ public:
         destroyBuffer(raytracing_scratch_buffer_);
         destroyBuffer(sort_scratch_buffer_);
 
-        if(constant_buffer_pool_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            {
-                destroyBuffer(constant_buffer_pool_[i]);
-                constant_buffer_pool_[i].~GfxBuffer();
-            }
-        free(constant_buffer_pool_);
-        free(constant_buffer_pool_cursors_);
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+        {
+            destroyBuffer(constant_buffer_pool_[i]);
+        }
 
         for(std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it)
         {
@@ -1353,14 +1377,11 @@ public:
             collect(kernels_.data()[i]);
         for(uint32_t i = 0; i < programs_.size(); ++i)
             collect(programs_.data()[i]);
-        if(timestamp_query_heaps_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            {
-                collect(timestamp_query_heaps_[i].query_heap_);
-                destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
-                timestamp_query_heaps_[i].~TimestampQueryHeap();
-            }
-        free(timestamp_query_heaps_);
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+        {
+            collect(timestamp_query_heaps_[i].query_heap_);
+            destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
+        }
 
         forceGarbageCollection();
         freelist_descriptors_.clear();
@@ -1384,20 +1405,15 @@ public:
             dxr_command_list_->Release();
         if(mesh_command_list_ != nullptr)
             mesh_command_list_->Release();
-        if(command_allocators_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-                if(command_allocators_[i] != nullptr)
-                    command_allocators_[i]->Release();
-        free(command_allocators_);
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            if(command_allocators_[i] != nullptr)
+                command_allocators_[i]->Release();
 
         if(fence_event_)
             CloseHandle(fence_event_);
-        if(fences_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-                if(fences_[i] != nullptr)
-                    fences_[i]->Release();
-        free(fence_values_);
-        free(fences_);
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            if(fences_[i] != nullptr)
+                fences_[i]->Release();
 
         if(dxc_utils_ != nullptr)
             dxc_utils_->Release();
@@ -1406,8 +1422,23 @@ public:
         if(dxc_include_handler_ != nullptr)
             dxc_include_handler_->Release();
 
-        if(swap_chain_ != nullptr)
+        if (swap_chain_)
+        {
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+                if(back_buffers_[i] != nullptr)
+                    back_buffers_[i]->Release();
             swap_chain_->Release();
+        }
+        else
+        {
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+                if(back_buffers_[i] != nullptr)
+                {
+                    back_buffers_[i]->Release();
+                    back_buffer_allocations_[i]->Release();
+                }
+        }
+
         if(mem_allocator_ != nullptr)
             mem_allocator_->Release();
         if(dispatch_signature_ != nullptr)
@@ -1420,12 +1451,6 @@ public:
             dispatch_rays_signature_->Release();
         if(draw_mesh_signature_ != nullptr)
             draw_mesh_signature_->Release();
-        if(back_buffers_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-                if(back_buffers_[i] != nullptr)
-                    back_buffers_[i]->Release();
-        free(back_buffer_rtvs_);
-        free(back_buffers_);
 
         return kGfxResult_NoError;
     }
@@ -2788,6 +2813,9 @@ public:
     {
         if(isInterop())
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using an interop context");
+        // No swap chain - no back buffer
+        if(!swap_chain_)
+            return kGfxResult_NoError;
         float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
         D3D12_RECT
         rect        = {};
@@ -3956,14 +3984,6 @@ public:
             fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
         else
         {
-            RECT window_rect = {};
-            GetClientRect(window_, &window_rect);
-            D3D12_RESOURCE_BARRIER resource_barrier = {};
-            resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            resource_barrier.Transition.pResource = back_buffers_[fence_index_];
-            resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
-            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty())
             {
                 for(std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>>::const_iterator it = timestamp_query_heaps_[fence_index_].timestamp_queries_.begin(); it != timestamp_query_heaps_[fence_index_].timestamp_queries_.end(); ++it)
@@ -3981,28 +4001,54 @@ public:
                 command_list_->ResolveQueryData(timestamp_query_heaps_[fence_index_].query_heap_,
                     D3D12_QUERY_TYPE_TIMESTAMP, 0, 2 * timestamp_query_count, query_buffer.resource_, query_buffer.data_offset_);
             }
-            command_list_->ResourceBarrier(1, &resource_barrier);
-            command_list_->Close(); // close command list for submit
-            ID3D12CommandList *const command_lists[] = { command_list_ };
-            command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
-            command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
-            swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING);
-            uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
-            uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
-            fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
-            if(window_width != window_width_ || window_height != window_height_)
-                resizeCallback(window_width, window_height);    // reset fence index
-            if(fences_[fence_index_]->GetCompletedValue() < fence_values_[fence_index_])
+            if (swap_chain_)
             {
-                fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
-                WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
+                RECT window_rect = {};
+                GetClientRect(window_, &window_rect);
+                D3D12_RESOURCE_BARRIER resource_barrier = {};
+                resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+                resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
+                resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                command_list_->ResourceBarrier(1, &resource_barrier);
+                command_list_->Close(); // close command list for submit
+                ID3D12CommandList *const command_lists[] = { command_list_ };
+                command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
+                command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
+                swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING);
+                uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
+                uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
+                fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+                if(window_width != window_width_ || window_height != window_height_)
+                    resizeCallback(window_width, window_height);    // reset fence index
+                if(fences_[fence_index_]->GetCompletedValue() < fence_values_[fence_index_])
+                {
+                    fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
+                    WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
+                }
+                command_allocators_[fence_index_]->Reset();
+                command_list_->Reset(command_allocators_[fence_index_], nullptr);
+                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+                resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+                resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                command_list_->ResourceBarrier(1, &resource_barrier);
             }
-            command_allocators_[fence_index_]->Reset();
-            command_list_->Reset(command_allocators_[fence_index_], nullptr);
-            resource_barrier.Transition.pResource = back_buffers_[fence_index_];
-            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-            resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            command_list_->ResourceBarrier(1, &resource_barrier);
+            else
+            {
+                command_list_->Close(); // close command list for submit
+                ID3D12CommandList *const command_lists[] = { command_list_ };
+                command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
+                command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
+                fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+                if(fences_[fence_index_]->GetCompletedValue() < fence_values_[fence_index_])
+                {
+                    fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
+                    WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
+                }
+                command_allocators_[fence_index_]->Reset();
+                command_list_->Reset(command_allocators_[fence_index_], nullptr);
+            }
             if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty())
             {
                 double const ticks_per_milliseconds = timestamp_query_ticks_per_second_ / 1000.0;
@@ -4363,7 +4409,7 @@ public:
         bound_depth_stencil_target_ = {};
     }
 
-    inline bool isInterop() const { return (swap_chain_ != nullptr ? false : true); }
+    inline bool isInterop() const { return is_interop_; }
 
     inline bool isInterop(GfxAccelerationStructure const &acceleration_structure) const
     {
@@ -8472,11 +8518,48 @@ private:
             SetDebugName(back_buffers_[i], buffer);
         }
 
+        return kGfxResult_NoError;
+    }
+
+    GfxResult createBackBuffers()
+    {
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+        {
+            char buffer[256];
+            GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
+
+            D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            D3D12_RESOURCE_DESC
+            resource_desc                  = {};
+            resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+            resource_desc.Width            = window_width_;
+            resource_desc.Height           = window_height_;
+            resource_desc.DepthOrArraySize = 1;
+            resource_desc.MipLevels        = 1;
+            resource_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+            resource_desc.SampleDesc.Count = 1;
+            resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
+            D3D12MA::ALLOCATION_DESC allocation_desc = {};
+            allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
+            float const clear_value[4] = {};
+
+            GFX_TRY(createResource(allocation_desc, resource_desc, resource_state, clear_value,
+                &back_buffer_allocations_[i], IID_PPV_ARGS(&back_buffers_[i])));
+
+            SetDebugName(back_buffers_[i], buffer);
+        }
+
+        return kGfxResult_NoError;
+    }
+
+    GfxResult createBackBufferRTVs()
+    {
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
             back_buffer_rtvs_[i] = allocateRTVDescriptor();
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
+            GFX_ASSERT(back_buffers_[i]);
             device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
@@ -8499,6 +8582,7 @@ private:
 
     GfxResult resizeCallback(uint32_t window_width, uint32_t window_height)
     {
+        GFX_ASSERT(swap_chain_);
         if(!IsWindow(window_)) return kGfxResult_NoError;   // can't resize past window tear down
         for(uint32_t i = 0; i < textures_.size(); ++i)
         {
@@ -8536,16 +8620,21 @@ private:
             }
             texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i) { collect(back_buffers_[i]); back_buffers_[i] = nullptr; }
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i) { freeRTVDescriptor(back_buffer_rtvs_[i]); back_buffer_rtvs_[i] = 0xFFFFFFFFu; }
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+        {
+            collect(back_buffers_[i]);
+            back_buffers_[i] = nullptr;
+            freeRTVDescriptor(back_buffer_rtvs_[i]);
+        }
         sync(); // make sure the GPU is done with the previous swap chain before resizing
+        window_width_  = window_width;
+        window_height_ = window_height;
         HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         if(!SUCCEEDED(hr))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to resize the swap chain buffers");
-        window_width_  = window_width;
-        window_height_ = window_height;
+        GFX_TRY(createBackBufferRTVs());
         return kGfxResult_NoError;
     }
 };
@@ -8572,6 +8661,22 @@ GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags, IDXGIAdapt
     GfxInternal *gfx = new GfxInternal(context);
     if(!gfx) return context;    // out of memory
     result = gfx->initialize(window, flags, adapter, context);
+    if(result != kGfxResult_NoError)
+    {
+        delete gfx;
+        context = {};
+        GFX_PRINT_ERROR(result, "Failed to create graphics context");
+    }
+    return context;
+}
+
+GfxContext gfxCreateContext(uint32_t window_width, uint32_t window_height, GfxCreateContextFlags flags, IDXGIAdapter *adapter)
+{
+    GfxResult result;
+    GfxContext context = {};
+    GfxInternal *gfx = new GfxInternal(context);
+    if(!gfx) return context;    // out of memory
+    result = gfx->initialize(window_width, window_height, flags, adapter, context);
     if(result != kGfxResult_NoError)
     {
         delete gfx;

@@ -48,7 +48,8 @@ enum GfxCreateContextFlag
 };
 typedef uint32_t GfxCreateContextFlags;
 
-GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags = 0, IDXGIAdapter *adapter = nullptr);
+GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter = nullptr);
+GfxContext gfxCreateContext(uint32_t window_width, uint32_t window_height, GfxCreateContextFlags flags, IDXGIAdapter *adapter = nullptr);
 GfxResult gfxDestroyContext(GfxContext context);
 
 uint32_t gfxGetBackBufferWidth(GfxContext context);
