@@ -2412,7 +2412,7 @@ public:
         if(!group_name || !*group_name)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
         Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        std::vector<WCHAR> wgroup_name(1024);
+        std::vector<WCHAR> wgroup_name(mbstowcs(nullptr, group_name, 0) + 1);
         mbstowcs(wgroup_name.data(), group_name, wgroup_name.size());
         gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name.data());
         return kGfxResult_NoError;
@@ -2613,11 +2613,12 @@ public:
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
         for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
-        std::vector<WCHAR> wgroup_name(1024);
+        std::wstring wgroup_name;
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
+            wgroup_name.resize(mbstowcs(nullptr, local_root_signature_associations[i].shader_group_name, 0) + 1);
             mbstowcs(wgroup_name.data(), local_root_signature_associations[i].shader_group_name, wgroup_name.size());
-            gfx_kernel.local_root_signature_associations_[wgroup_name.data()] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
+            gfx_kernel.local_root_signature_associations_[wgroup_name] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
         }
         gfx_kernel.num_threads_ = (uint32_t *)gfxMalloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i) gfx_kernel.sbt_record_stride_[i] = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
@@ -4496,10 +4497,10 @@ private:
     template<typename TYPE>
     static inline void SetObjectName(TYPE &object, char const *name)
     {
-        std::vector<WCHAR> buffer(1024);
         GFX_ASSERT(name != nullptr);
         if(!*name || (object.Object::flags_ & Object::kFlag_Named) != 0)
             return; // no name or already named
+        std::vector<WCHAR> buffer(mbstowcs(nullptr, name, 0) + 1);
         mbstowcs(buffer.data(), name, buffer.size());
         object.Object::flags_ |= Object::kFlag_Named;
         GFX_ASSERT(object.resource_ != nullptr);
@@ -4508,9 +4509,9 @@ private:
 
     static inline void SetDebugName(ID3D12Object *object, char const *debug_name)
     {
-        std::vector<WCHAR> buffer(1024);
         GFX_ASSERT(object != nullptr);
         debug_name = (debug_name ? debug_name : "");
+        std::vector<WCHAR> buffer(mbstowcs(nullptr, debug_name, 0) + 1);
         mbstowcs(buffer.data(), debug_name, buffer.size());
         object->SetName(buffer.data());
     }
@@ -7998,7 +7999,6 @@ private:
 
     GfxResult createKernel(Program const &program, Kernel &kernel)
     {
-        std::vector<char> buffer(2048);
         char const *kernel_type = nullptr;
         GfxResult result = kGfxResult_NoError;
         GFX_ASSERT(kernel.num_threads_ != nullptr);
@@ -8056,6 +8056,7 @@ private:
         }
         else
             return GFX_SET_ERROR(kGfxResult_InternalError, "Cannot create unsupported kernel type");
+        std::vector<char> buffer((program.file_name_ ? program.file_name_.size() : program.file_path_.size() + kernel.entry_point_.size() + strlen(kernel_type)) + 21);
         if(kernel.root_signature_ != nullptr)
         {
             GFX_SNPRINTF(buffer.data(), buffer.size(), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
@@ -8109,15 +8110,16 @@ private:
     template<typename REFLECTION_TYPE>
     void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, REFLECTION_TYPE *&reflection)
     {
-        std::vector<char> shader_file(4096);
         DxcBuffer shader_source = {};
         IDxcBlobEncoding *dxc_source = nullptr;
-        std::vector<WCHAR> wshader_file(shader_file.size());
+        std::vector<char> shader_file(program.file_path_.size() + program.file_name_.size() + strlen(shader_extensions_[shader_type]) + 2);
+        std::vector<WCHAR> wshader_file;
         GFX_ASSERT(shader_type < kShaderType_Count);
 
         if(program.file_name_)
         {
             GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
+            wshader_file.resize(mbstowcs(nullptr, shader_file.data(), 0) + 1);
             mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             // Check file existence before LoadFile call. LoadFile spams hlsl::Exception messages if file not found.
             if(GetFileAttributesW(wshader_file.data()) == INVALID_FILE_ATTRIBUTES) return;
@@ -8129,6 +8131,7 @@ private:
         else
         {
             GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s%s", program.file_path_.c_str(), shader_extensions_[shader_type]);
+            wshader_file.resize(mbstowcs(nullptr, shader_file.data(), 0) + 1);
             mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             switch(shader_type)
             {
