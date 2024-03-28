@@ -2505,7 +2505,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Mesh;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        for (uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
+        for(uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         createKernel(gfx_program, gfx_kernel);  // create mesh kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
@@ -2578,7 +2578,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Graphics;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        for (uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
+        for(uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         result = createKernel(gfx_program, gfx_kernel); // create graphics kernel
         if(result != kGfxResult_NoError)
@@ -2628,7 +2628,7 @@ public:
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
         for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
-        for (uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
+        for(uint32_t i = 0; i < include_path_count; ++i) gfx_kernel.include_paths_.push_back(include_paths[i]);
         WCHAR wgroup_name[1024];
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
