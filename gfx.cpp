@@ -96,13 +96,13 @@ class GfxInternal
     ID3D12GraphicsCommandList *command_list_ = nullptr;
     ID3D12GraphicsCommandList4 *dxr_command_list_ = nullptr;
     ID3D12GraphicsCommandList6 *mesh_command_list_ = nullptr;
-    ID3D12CommandAllocator *command_allocators_[kGfxConstant_MaxBackBufferCount] = {};
+    ID3D12CommandAllocator **command_allocators_ = nullptr;
     std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
     uint32_t fence_index_ = 0;
-    ID3D12Fence *fences_[kGfxConstant_MaxBackBufferCount] = {};
-    uint64_t fence_values_[kGfxConstant_MaxBackBufferCount] = {};
+    ID3D12Fence **fences_ = nullptr;
+    uint64_t *fence_values_ = nullptr;
 
     bool debug_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
@@ -117,9 +117,9 @@ class GfxInternal
     ID3D12CommandSignature *dispatch_rays_signature_ = nullptr;
     ID3D12CommandSignature *draw_mesh_signature_ = nullptr;
     std::vector<D3D12_RESOURCE_BARRIER> resource_barriers_;
-    ID3D12Resource *back_buffers_[kGfxConstant_MaxBackBufferCount] = {};
-    D3D12MA::Allocation *back_buffer_allocations_[kGfxConstant_MaxBackBufferCount] = {};
-    uint32_t back_buffer_rtvs_[kGfxConstant_MaxBackBufferCount] = {};
+    ID3D12Resource **back_buffers_ = nullptr;
+    D3D12MA::Allocation **back_buffer_allocations_ = nullptr;
+    uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
 
     GfxKernel bound_kernel_ = {};
@@ -134,8 +134,8 @@ class GfxInternal
     bool force_install_vertex_buffer_ = false;
     bool force_install_draw_id_buffer_ = false;
     GfxBuffer raytracing_scratch_buffer_ = {};
-    GfxBuffer constant_buffer_pool_[kGfxConstant_MaxBackBufferCount] = {};
-    uint64_t constant_buffer_pool_cursors_[kGfxConstant_MaxBackBufferCount] = {};
+    GfxBuffer *constant_buffer_pool_ = nullptr;
+    uint64_t *constant_buffer_pool_cursors_ = nullptr;
     std::vector<GfxRaytracingPrimitive> active_raytracing_primitives_;
 
     struct RenderTarget
@@ -798,7 +798,7 @@ class GfxInternal
         std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>> timestamp_queries_;
     };
     uint64_t timestamp_query_ticks_per_second_ = 0;
-    TimestampQueryHeap timestamp_query_heaps_[kGfxConstant_MaxBackBufferCount] = {};
+    TimestampQueryHeap *timestamp_query_heaps_ = nullptr;
 
     struct Sbt
     {
@@ -954,7 +954,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
 
+        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
+        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
 
         D3D12_RESOURCE_BARRIER resource_barrier = {};
@@ -993,7 +995,10 @@ public:
 
         GFX_TRY(initializeCommon(context));
 
+        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
+        back_buffer_allocations_ = (D3D12MA::Allocation **)malloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
         GFX_TRY(createBackBuffers());
+        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
         return createBackBufferRTVs();
     }
 
@@ -1133,6 +1138,7 @@ public:
 
         max_frames_in_flight_ = kGfxConstant_BackBufferCount;
 
+        command_allocators_ = (ID3D12CommandAllocator **)malloc(max_frames_in_flight_ * sizeof(ID3D12CommandAllocator *));
         for(uint32_t j = 0; j < max_frames_in_flight_; ++j)
         {
             char buffer[256];
@@ -1152,6 +1158,7 @@ public:
         fence_event_ = CreateEvent(nullptr, false, false, nullptr);
         if(!fence_event_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create event handle");
+        fences_ = (ID3D12Fence **)malloc(max_frames_in_flight_ * sizeof(ID3D12Fence *));
         for(uint32_t j = 0; j < max_frames_in_flight_; ++j)
         {
             char buffer[256];
@@ -1160,6 +1167,8 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create fence object");
             SetDebugName(fences_[j], buffer);
         }
+        fence_values_ = (uint64_t *)malloc(max_frames_in_flight_ * sizeof(uint64_t));
+        memset(fence_values_, 0, max_frames_in_flight_ * sizeof(uint64_t));
 
         return kGfxResult_NoError;
     }
@@ -1175,9 +1184,8 @@ public:
         if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to find interop adapter");
 
-        is_interop_ = true;
         device_ = device;
-        max_frames_in_flight_ = GFX_MIN(GFX_MAX(max_frames_in_flight, 1u), (uint32_t)kGfxConstant_MaxBackBufferCount);
+        max_frames_in_flight_ = GFX_MAX(max_frames_in_flight, 1u);
         device->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         device->QueryInterface(IID_PPV_ARGS(&mesh_device_));
         device->AddRef();   // retain device
@@ -1232,6 +1240,15 @@ public:
         }
         populateDummyDescriptors();
 
+        constant_buffer_pool_ = (GfxBuffer *)malloc(max_frames_in_flight_ * sizeof(GfxBuffer));
+        constant_buffer_pool_cursors_ = (uint64_t *)malloc(max_frames_in_flight_ * sizeof(uint64_t));
+        timestamp_query_heaps_ = (TimestampQueryHeap *)malloc(max_frames_in_flight_ * sizeof(TimestampQueryHeap));
+        memset(constant_buffer_pool_cursors_, 0, max_frames_in_flight_ * sizeof(uint64_t));
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+        {
+            new(&constant_buffer_pool_[i]) GfxBuffer();
+            new(&timestamp_query_heaps_[i]) TimestampQueryHeap();
+        }
         if(!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils_))) ||
            !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
            !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
@@ -1330,10 +1347,14 @@ public:
         destroyBuffer(raytracing_scratch_buffer_);
         destroyBuffer(sort_scratch_buffer_);
 
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-        {
-            destroyBuffer(constant_buffer_pool_[i]);
-        }
+        if(constant_buffer_pool_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                destroyBuffer(constant_buffer_pool_[i]);
+                constant_buffer_pool_[i].~GfxBuffer();
+            }
+        free(constant_buffer_pool_);
+        free(constant_buffer_pool_cursors_);
 
         for(std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it)
         {
@@ -1377,11 +1398,14 @@ public:
             collect(kernels_.data()[i]);
         for(uint32_t i = 0; i < programs_.size(); ++i)
             collect(programs_.data()[i]);
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-        {
-            collect(timestamp_query_heaps_[i].query_heap_);
-            destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
-        }
+        if(timestamp_query_heaps_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                collect(timestamp_query_heaps_[i].query_heap_);
+                destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
+                timestamp_query_heaps_[i].~TimestampQueryHeap();
+            }
+        free(timestamp_query_heaps_);
 
         forceGarbageCollection();
         freelist_descriptors_.clear();
@@ -1405,15 +1429,20 @@ public:
             dxr_command_list_->Release();
         if(mesh_command_list_ != nullptr)
             mesh_command_list_->Release();
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            if(command_allocators_[i] != nullptr)
-                command_allocators_[i]->Release();
+        if(command_allocators_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+                if(command_allocators_[i] != nullptr)
+                    command_allocators_[i]->Release();
+        free(command_allocators_);
 
         if(fence_event_)
             CloseHandle(fence_event_);
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            if(fences_[i] != nullptr)
-                fences_[i]->Release();
+        if(fences_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+                if(fences_[i] != nullptr)
+                    fences_[i]->Release();
+        free(fence_values_);
+        free(fences_);
 
         if(dxc_utils_ != nullptr)
             dxc_utils_->Release();
@@ -1424,20 +1453,22 @@ public:
 
         if (swap_chain_)
         {
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-                if(back_buffers_[i] != nullptr)
-                    back_buffers_[i]->Release();
             swap_chain_->Release();
         }
         else
         {
+            if(back_buffer_allocations_ != nullptr)
+                for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+                    if(back_buffer_allocations_[i] != nullptr)
+                        back_buffer_allocations_[i]->Release();
+            free(back_buffer_allocations_);
+        }
+        if(back_buffers_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
-                {
                     back_buffers_[i]->Release();
-                    back_buffer_allocations_[i]->Release();
-                }
-        }
+        free(back_buffer_rtvs_);
+        free(back_buffers_);
 
         if(mem_allocator_ != nullptr)
             mem_allocator_->Release();
