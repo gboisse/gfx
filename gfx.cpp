@@ -2365,7 +2365,7 @@ public:
         shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_5" : "6_0");
         Program &gfx_program = programs_.insert(program);
         gfx_program.shader_model_ = shader_model;
-        gfx_program.file_path_ = program.name;
+        gfx_program.file_path_ = (name != nullptr ? name : program.name);
         gfx_program.cs_ = program_desc.cs;
         gfx_program.as_ = program_desc.as;
         gfx_program.ms_ = program_desc.ms;
@@ -9325,7 +9325,7 @@ GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxB
 GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return kGfxResult_InvalidParameter;
+    if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTextureToBuffer(dst, src);
 }
 
