@@ -646,6 +646,7 @@ class GfxInternal
         String file_path_;
         String shader_model_;
         Parameters parameters_;
+        std::vector<String> include_paths_;
     };
     GfxArray<Program> programs_;
     GfxHandles program_handles_;
@@ -1262,7 +1263,7 @@ public:
 
         GfxProgramDesc clear_buffer_program_desc = {};
         clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
-        clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr);
+        clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the compute kernel for clearing buffer objects");
@@ -1273,7 +1274,7 @@ public:
             GfxProgramDesc copy_to_backbuffer_program_desc = {};
             copy_to_backbuffer_program_desc.vs = "float4 main(in uint idx : SV_VertexID) : SV_POSITION { return 1.0f - float4(4.0f * (idx & 1), 4.0f * (idx >> 1), 1.0f, 0.0f); }";
             copy_to_backbuffer_program_desc.ps = "Texture2D InputBuffer; float4 main(in float4 pos : SV_Position) : SV_Target { return InputBuffer.Load(int3(pos.xy, 0)); }";
-            copy_to_backbuffer_program_ = createProgram(copy_to_backbuffer_program_desc, "gfx_CopyToBackBufferProgram", nullptr);
+            copy_to_backbuffer_program_ = createProgram(copy_to_backbuffer_program_desc, "gfx_CopyToBackBufferProgram", nullptr, nullptr, 0);
             copy_to_backbuffer_kernel_ = createGraphicsKernel(copy_to_backbuffer_program_, default_draw_state, "main", nullptr, 0);
             if(!copy_to_backbuffer_kernel_)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create the graphics kernel for copying to the backbuffer");
@@ -2280,7 +2281,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model)
+    GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
     {
         GfxProgram program = {};
         if(!file_name)
@@ -2295,10 +2296,11 @@ public:
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_name_ = file_name;
         gfx_program.file_path_ = file_path;
+        for(uint32_t i = 0; i < include_path_count; ++i) gfx_program.include_paths_.push_back(include_paths[i]);
         return program;
     }
 
-    GfxProgram createProgram(GfxProgramDesc const &program_desc, char const *name, char const *shader_model)
+    GfxProgram createProgram(GfxProgramDesc const &program_desc, char const *name, char const *shader_model, char const **include_paths, uint32_t include_path_count)
     {
         GfxProgram program = {};
         program.handle = program_handles_.allocate_handle();
@@ -2317,6 +2319,7 @@ public:
         gfx_program.gs_ = program_desc.gs;
         gfx_program.ps_ = program_desc.ps;
         gfx_program.lib_ = program_desc.lib;
+        for(uint32_t i = 0; i < include_path_count; ++i) gfx_program.include_paths_.push_back(include_paths[i]);
         return program;
     }
 
@@ -6642,7 +6645,7 @@ private:
         MipKernels& mip_kernels = mip_kernels_[key];
         GfxProgramDesc mip_program_desc = {};
         mip_program_desc.cs = mip_program_source.c_str();
-        mip_kernels.mip_program_ = createProgram(mip_program_desc, "gfx_GenerateMipsProgram", nullptr);
+        mip_kernels.mip_program_ = createProgram(mip_program_desc, "gfx_GenerateMipsProgram", nullptr, nullptr, 0);
         mip_kernels.mip_kernel_ = createComputeKernel(mip_kernels.mip_program_, "main", nullptr, 0);
         return mip_kernels;
     }
@@ -6915,7 +6918,7 @@ private:
         GfxProgramDesc scan_program_desc = {};
         scan_program_desc.cs = scan_program_source.c_str();
         char const *scan_add_defines[] = { "PARTIAL_RESULT" };
-        scan_kernels.scan_program_ = createProgram(scan_program_desc, "gfx_ScanProgram", nullptr);
+        scan_kernels.scan_program_ = createProgram(scan_program_desc, "gfx_ScanProgram", nullptr, nullptr, 0);
         scan_kernels.reduce_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockReduce", nullptr, 0);
         scan_kernels.scan_add_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", scan_add_defines, ARRAYSIZE(scan_add_defines));
         scan_kernels.scan_kernel_ = createComputeKernel(scan_kernels.scan_program_, "BlockScan", nullptr, 0);
@@ -7117,7 +7120,7 @@ private:
         GfxProgramDesc sort_program_desc = {};
         sort_program_desc.cs = sort_program_source.c_str();
         char const *sort_values_defines[] = { "SORT_VALUES" };
-        sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram", nullptr);
+        sort_kernels.sort_program_ = createProgram(sort_program_desc, "gfx_SortProgram", nullptr, nullptr, 0);
         sort_kernels.histogram_kernel_ = createComputeKernel(sort_kernels.sort_program_, "BitHistogram", nullptr, 0);
         sort_kernels.scatter_kernel_ = createComputeKernel(sort_kernels.sort_program_, "Scatter", sort_values_defines, sort_values ? 1 : 0);
         if(count != nullptr)
@@ -8250,6 +8253,25 @@ private:
             }
         }
 
+        std::vector<std::wstring> include_paths;
+        if(!program.include_paths_.empty())
+        {
+            include_paths.reserve(program.include_paths_.size());
+            for(size_t i = 0; i < program.include_paths_.size(); ++i)
+            {
+                size_t const path_length = std::strlen(program.include_paths_[i]);
+                std::wstring include_path(path_length, L' ');
+                include_path.resize(std::mbstowcs(include_path.data(), program.include_paths_[i], path_length));
+
+                include_paths.push_back(include_path);
+            }
+            for(size_t i = 0; i < include_paths.size(); ++i)
+            {
+                shader_args.push_back(L"-I");
+                shader_args.push_back(include_paths[i].c_str());
+            }
+        }
+
         IDxcResult *dxc_result = nullptr;
         dxc_compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), dxc_include_handler_, IID_PPV_ARGS(&dxc_result));
         if(dxc_source) dxc_source->Release();
@@ -8938,20 +8960,20 @@ GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blen
     return GfxInternal::SetDrawStateBlendMode(draw_state, src_blend, dst_blend, blend_op, src_blend_alpha, dst_blend_alpha, blend_op_alpha);
 }
 
-GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path, char const *shader_model)
+GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
 {
     GfxProgram const program = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return program;    // invalid context
-    return gfx->createProgram(file_name, file_path, shader_model);
+    return gfx->createProgram(file_name, file_path, shader_model, include_paths, include_path_count);
 }
 
-GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, char const *name, char const *shader_model)
+GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, char const *name, char const *shader_model, char const **include_paths, uint32_t include_path_count)
 {
     GfxProgram const program = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return program;    // invalid context
-    return gfx->createProgram(program_desc, name, shader_model);
+    return gfx->createProgram(program_desc, name, shader_model, include_paths, include_path_count);
 }
 
 GfxResult gfxDestroyProgram(GfxContext context, GfxProgram program)
