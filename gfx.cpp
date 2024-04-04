@@ -914,7 +914,6 @@ public:
     {
         if(!window)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid window handle was supplied");
-
         IDXGIFactory4 *factory = nullptr;
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
@@ -927,7 +926,6 @@ public:
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
         DXGIFactoryReleaser const factory_releaser(factory);
-
         GFX_TRY(initializeDevice(flags, adapter, factory));
 
         window_ = window;
@@ -946,6 +944,7 @@ public:
         swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         swap_chain_desc.SampleDesc.Count = 1;
         swap_chain_desc.Flags            = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+
         IDXGISwapChain1 *swap_chain = nullptr;
         if(!SUCCEEDED(factory->CreateSwapChainForHwnd(command_queue_, window_, &swap_chain_desc, nullptr, nullptr, &swap_chain)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create swap chain");
@@ -984,13 +983,11 @@ public:
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
         DXGIFactoryReleaser const factory_releaser(factory);
-
         GFX_TRY(initializeDevice(flags, adapter, factory));
 
         window_ = nullptr;
         window_width_ = width;
         window_height_ = height;
-
         fence_index_ = 0;
 
         GFX_TRY(initializeCommon(context));
@@ -999,7 +996,9 @@ public:
         back_buffer_allocations_ = (D3D12MA::Allocation **)malloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
         GFX_TRY(createBackBuffers());
         back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
-        return createBackBufferRTVs();
+        GFX_TRY(createBackBufferRTVs());
+
+        return kGfxResult_NoError;
     }
 
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
@@ -1185,6 +1184,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to find interop adapter");
 
         device_ = device;
+        is_interop_ = true;
         max_frames_in_flight_ = GFX_MAX(max_frames_in_flight, 1u);
         device->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         device->QueryInterface(IID_PPV_ARGS(&mesh_device_));
@@ -1451,10 +1451,8 @@ public:
         if(dxc_include_handler_ != nullptr)
             dxc_include_handler_->Release();
 
-        if (swap_chain_)
-        {
+        if(swap_chain_ != nullptr)
             swap_chain_->Release();
-        }
         else
         {
             if(back_buffer_allocations_ != nullptr)
@@ -2844,9 +2842,8 @@ public:
     {
         if(isInterop())
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using an interop context");
-        // No swap chain - no back buffer
-        if(!swap_chain_)
-            return kGfxResult_NoError;
+        if(swap_chain_ == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using a headless context");
         float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
         D3D12_RECT
         rect        = {};
@@ -4032,7 +4029,7 @@ public:
                 command_list_->ResolveQueryData(timestamp_query_heaps_[fence_index_].query_heap_,
                     D3D12_QUERY_TYPE_TIMESTAMP, 0, 2 * timestamp_query_count, query_buffer.resource_, query_buffer.data_offset_);
             }
-            if (swap_chain_)
+            if(swap_chain_ != nullptr)
             {
                 RECT window_rect = {};
                 GetClientRect(window_, &window_rect);
@@ -8590,7 +8587,7 @@ private:
             back_buffer_rtvs_[i] = allocateRTVDescriptor();
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
-            GFX_ASSERT(back_buffers_[i]);
+            GFX_ASSERT(back_buffers_[i] != nullptr);
             device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
@@ -8613,8 +8610,8 @@ private:
 
     GfxResult resizeCallback(uint32_t window_width, uint32_t window_height)
     {
-        GFX_ASSERT(swap_chain_);
         if(!IsWindow(window_)) return kGfxResult_NoError;   // can't resize past window tear down
+        GFX_ASSERT(swap_chain_ != nullptr);
         for(uint32_t i = 0; i < textures_.size(); ++i)
         {
             Texture &texture = textures_.data()[i];
