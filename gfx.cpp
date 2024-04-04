@@ -8698,13 +8698,13 @@ GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags, IDXGIAdapt
     return context;
 }
 
-GfxContext gfxCreateContext(uint32_t window_width, uint32_t window_height, GfxCreateContextFlags flags, IDXGIAdapter *adapter)
+GfxContext gfxCreateContext(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter)
 {
     GfxResult result;
     GfxContext context = {};
     GfxInternal *gfx = new GfxInternal(context);
     if(!gfx) return context;    // out of memory
-    result = gfx->initialize(window_width, window_height, flags, adapter, context);
+    result = gfx->initialize(width, height, flags, adapter, context);
     if(result != kGfxResult_NoError)
     {
         delete gfx;
