@@ -24,8 +24,10 @@ SOFTWARE.
 #if !defined(GFX_INCLUDE_GFX_IMGUI_H) && defined(GFX_ENABLE_GUI)
 #define GFX_INCLUDE_GFX_IMGUI_H
 
-// Required to support unicode values above 0x10000: https://github.com/gboisse/gfx/pull/71
+#ifndef IMGUI_USE_WCHAR32
+// Required to support unicode values above 0x10000
 #define IMGUI_USE_WCHAR32
+#endif
 #define IMGUI_DEFINE_MATH_OPERATORS
 
 #include "gfx.h"

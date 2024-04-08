@@ -24,11 +24,15 @@ SOFTWARE.
 
 #include "gfx_imgui.h"
 
+#ifdef GFX_IMGUI_SOURCE
 #include "imgui.cpp"
 #include "imgui_draw.cpp"
 #include "imgui_tables.cpp"
 #include "imgui_widgets.cpp"
 #include "backends/imgui_impl_win32.cpp"
+#else
+#include "imgui_impl_win32.h"
+#endif
 
 class GfxImGuiInternal
 {
@@ -283,16 +287,7 @@ public:
             gfxCommandSetScissorRect(gfx_); // reset scissor test
         }
 
-        ImGui_ImplWin32_Data* bd = ImGui_ImplWin32_GetBackendData();
-        if(bd != nullptr && bd->hWnd != 0)
-        {
-            POINT pos = {};
-            GetCursorPos(&pos);
-            ImGui_ImplWin32_NewFrame();
-            ScreenToClient(bd->hWnd, &pos);
-            io.MousePos.x = (float)GFX_MIN(GFX_MAX(pos.x, (LONG)0), (LONG)gfxGetBackBufferWidth(gfx_)  - 1);
-            io.MousePos.y = (float)GFX_MIN(GFX_MAX(pos.y, (LONG)0), (LONG)gfxGetBackBufferHeight(gfx_) - 1);
-        }
+        ImGui_ImplWin32_NewFrame();
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         ImGui::NewFrame();  // can start recording new commands again

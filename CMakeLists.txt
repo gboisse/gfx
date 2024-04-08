@@ -8,7 +8,7 @@ option(GFX_ENABLE_SCENE "Build gfx with scene loading support" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-add_library(gfx STATIC gfx.cpp gfx_window.cpp)
+add_library(gfx STATIC)
 
 set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
 set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime)
@@ -20,7 +20,7 @@ if(NOT PROJECT_IS_TOP_LEVEL)
     set(GFX_AGILITY_PATH ${GFX_AGILITY_PATH} PARENT_SCOPE)
 endif()
 
-target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h)
+target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h gfx.cpp gfx_window.cpp)
 if(GFX_ENABLE_GUI)
     target_sources(gfx PRIVATE gfx_imgui.h gfx_imgui.cpp)
 endif()
@@ -105,11 +105,20 @@ if(GFX_ENABLE_GUI)
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
         GIT_TAG        v1.90.4
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/
+        SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
+        FIND_PACKAGE_ARGS NAMES imgui
     )
+    if(imgui_FOUND)
+        set(IMGUI_BUILD_WIN32_BINDING OFF CACHE BOOL "")
+    endif()
     FetchContent_MakeAvailable(imgui)
-
-    target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui)
+    
+    if(imgui_FOUND)
+        target_link_libraries(gfx PUBLIC imgui::imgui)
+    else()
+        target_include_directories(gfx PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui")
+        target_compile_definitions(gfx PRIVATE GFX_IMGUI_SOURCE)
+    endif()
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_GUI)
 endif()
 if(GFX_ENABLE_SCENE)
@@ -195,7 +204,7 @@ if(GFX_ENABLE_SCENE)
     target_link_libraries(gfx PRIVATE tinyobjloader tinyexr)
     if(GFX_ENABLE_SCENE_KTX)
         target_link_libraries(gfx PRIVATE ktx)
-        target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE_KTX)
+        target_compile_definitions(gfx PRIVATE GFX_ENABLE_SCENE_KTX)
     endif()
 
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE)
