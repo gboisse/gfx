@@ -943,9 +943,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
 
-        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
+        back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
-        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
+        back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
 
         D3D12_RESOURCE_BARRIER resource_barrier = {};
@@ -982,10 +982,10 @@ public:
 
         GFX_TRY(initializeCommon(context));
 
-        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
-        back_buffer_allocations_ = (D3D12MA::Allocation **)malloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
+        back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
+        back_buffer_allocations_ = (D3D12MA::Allocation **)gfxMalloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
         GFX_TRY(createBackBuffers());
-        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
+        back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
 
         return kGfxResult_NoError;
@@ -1449,14 +1449,14 @@ public:
                 for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                     if(back_buffer_allocations_[i] != nullptr)
                         back_buffer_allocations_[i]->Release();
-            free(back_buffer_allocations_);
+            gfxFree(back_buffer_allocations_);
         }
         if(back_buffers_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
                     back_buffers_[i]->Release();
-        free(back_buffer_rtvs_);
-        free(back_buffers_);
+        gfxFree(back_buffer_rtvs_);
+        gfxFree(back_buffers_);
 
         if(mem_allocator_ != nullptr)
             mem_allocator_->Release();
@@ -8539,7 +8539,7 @@ private:
     {
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
-            char buffer[256];
+            char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
             if(!SUCCEEDED(swap_chain_->GetBuffer(i, IID_PPV_ARGS(&back_buffers_[i]))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to acquire back buffer");
@@ -8553,7 +8553,7 @@ private:
     {
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
-            char buffer[256];
+            char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
 
             D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
