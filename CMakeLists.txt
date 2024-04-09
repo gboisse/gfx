@@ -10,16 +10,6 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 add_library(gfx STATIC)
 
-set(GFX_DXC_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/dxc)
-set(GFX_PIX_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime)
-set(GFX_AGILITY_PATH ${CMAKE_CURRENT_SOURCE_DIR}/third_party/agility_sdk)
-
-if(NOT PROJECT_IS_TOP_LEVEL)
-    set(GFX_DXC_PATH ${GFX_DXC_PATH} PARENT_SCOPE)
-    set(GFX_PIX_PATH ${GFX_PIX_PATH} PARENT_SCOPE)
-    set(GFX_AGILITY_PATH ${GFX_AGILITY_PATH} PARENT_SCOPE)
-endif()
-
 target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h gfx.cpp gfx_window.cpp)
 if(GFX_ENABLE_GUI)
     target_sources(gfx PRIVATE gfx_imgui.h gfx_imgui.cpp)
@@ -29,13 +19,6 @@ if(GFX_ENABLE_SCENE)
 endif()
 
 target_compile_options(gfx PRIVATE /bigobj)
-
-target_include_directories(gfx PRIVATE ${GFX_DXC_PATH})
-target_include_directories(gfx PRIVATE ${GFX_PIX_PATH}/include)
-target_include_directories(gfx PUBLIC ${GFX_AGILITY_PATH}/include)
-target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/include)
-target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/src)
 
 target_compile_features(gfx PUBLIC cxx_std_20)
 target_compile_definitions(gfx PRIVATE USE_PIX)
@@ -68,39 +51,111 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     endif()
 endif()
 
-add_library(D3D12Core SHARED IMPORTED)
-set_target_properties(D3D12Core PROPERTIES
-    IMPORTED_LOCATION ${GFX_AGILITY_PATH}/lib/D3D12Core.dll
-    IMPORTED_IMPLIB ${GFX_AGILITY_PATH}/lib/dummy.lib
-)
-add_library(d3d12SDKLayers SHARED IMPORTED)
-set_target_properties(d3d12SDKLayers PROPERTIES
-    IMPORTED_LOCATION ${GFX_AGILITY_PATH}/lib/d3d12SDKLayers.dll
-    IMPORTED_IMPLIB ${GFX_AGILITY_PATH}/lib/dummy.lib
-)
+include(FetchContent)
+if(PROJECT_IS_TOP_LEVEL)
+    set(GFX_TP_FOLDER "third_party")
+else()
+    set(GFX_TP_FOLDER "third_party/gfx_deps")
+endif()
 
-add_library(dxcompiler SHARED IMPORTED)
-set_target_properties(dxcompiler PROPERTIES
-    IMPORTED_LOCATION ${GFX_DXC_PATH}/bin/x64/dxcompiler.dll
-    IMPORTED_IMPLIB ${GFX_DXC_PATH}/lib/x64/dxcompiler.lib
-)
-add_library(dxil SHARED IMPORTED)
-set_target_properties(dxil PROPERTIES
-    IMPORTED_LOCATION ${GFX_DXC_PATH}/bin/x64/dxil.dll
-    IMPORTED_IMPLIB ${GFX_DXC_PATH}/lib/x64/dxcompiler.lib
-)
+target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(gfx PRIVATE d3d12 dxgi)
 
+set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
+FetchContent_Declare(
+    D3D12MemoryAllocator
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
+    GIT_TAG        v2.0.1
+    SOURCE_DIR     "${GFX_D3D12MA_PATH}"
+    FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
+)
+FetchContent_MakeAvailable(D3D12MemoryAllocator)
+if(NOT D3D12MemoryAllocator_FOUND)
+    target_include_directories(gfx PRIVATE "${GFX_D3D12MA_PATH}/include")
+    target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
+    set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+else()
+    target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator::D3D12MemoryAllocator)
+endif()
+
+set(CMAKE_LIBRARY_PATH $ENV{WindowsSdkDir}) # Needed to find d3d12
+set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
+FetchContent_Declare(
+    DirectX12-Agility
+    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.613.2"
+    SOURCE_DIR     "${GFX_AGILITY_PATH}"
+    FIND_PACKAGE_ARGS NAMES DirectX12-Agility
+)
+FetchContent_MakeAvailable(DirectX12-Agility)
+if(NOT DirectX12-Agility_FOUND)
+    target_include_directories(gfx PUBLIC "${GFX_AGILITY_PATH}/build/native/include")
+    find_library(D3D12_LIB NAMES d3d12)
+    add_library(D3D12Core SHARED IMPORTED)
+    set_target_properties(D3D12Core PROPERTIES
+        IMPORTED_LOCATION "${GFX_AGILITY_PATH}/build/native/bin/x64/D3D12Core.dll"
+        IMPORTED_IMPLIB "${D3D12_LIB}"
+    )
+    add_library(d3d12SDKLayers SHARED IMPORTED)
+    set_target_properties(d3d12SDKLayers PROPERTIES
+        IMPORTED_LOCATION "${GFX_AGILITY_PATH}/build/native/bin/x64/d3d12SDKLayers.dll"
+        IMPORTED_IMPLIB "${D3D12_LIB}"
+    )
+    target_link_libraries(gfx PRIVATE D3D12Core d3d12SDKLayers)
+else()
+    find_package(directx-headers CONFIG REQUIRED)
+    target_link_libraries(gfx PRIVATE Microsoft::DirectX-Headers Microsoft::DirectX12-Agility)
+endif()
+
+set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
+FetchContent_Declare(
+    directx-dxc
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2212.1/dxc_2023_03_01.zip"
+    SOURCE_DIR     "${GFX_DXC_PATH}"
+    FIND_PACKAGE_ARGS NAMES directx-dxc
+)
+FetchContent_MakeAvailable(directx-dxc)
+if(NOT directx-dxc_FOUND)
+    target_include_directories(gfx PRIVATE "${GFX_DXC_PATH}/inc")
+    find_library(D3D12_LIB NAMES d3d12)
+    add_library(dxcompiler SHARED IMPORTED)
+    set_target_properties(dxcompiler PROPERTIES
+        IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxcompiler.dll"
+        IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
+    )
+    add_library(dxil SHARED IMPORTED)
+    set_target_properties(dxil PROPERTIES
+        IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxil.dll"
+        IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
+    )
+    target_link_libraries(gfx PRIVATE dxcompiler dxil)
+else()
+    target_link_libraries(gfx PRIVATE Microsoft::DirectXShaderCompiler)
+endif()
+
+set(GFX_PIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime")
+set(GFX_PIX_AMD_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/AmdDxExt")
+FetchContent_Declare(
+    WinPixEventRuntime
+    URL            "https://www.nuget.org/api/v2/package/WinPixEventRuntime/1.0.240308001"
+    SOURCE_DIR     "${GFX_PIX_PATH}"
+)
+FetchContent_MakeAvailable(WinPixEventRuntime)
+file(READ "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" PIXE_FILE_CONTENTS)
+string(REPLACE "#define PIX_CONTEXT_EMIT_CPU_EVENTS" "# define PIX_CONTEXT_EMIT_CPU_EVENTS\n# include \"AmdPix3.h\"\n# define PIX_AMD_EXT\n" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+string(REPLACE " PIXBeginEventOnContextCpu(destination" " RgpPIXBeginEventOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+string(REPLACE " PIXSetMarkerOnContextCpu(destination" " RgpPIXSetMarkerOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+string(REPLACE "destination = PIXEndEventOnContextCpu(" "RgpPIXEndEventOnContextCpu(destination, " PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+file(WRITE "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" "${PIXE_FILE_CONTENTS}")
+target_include_directories(gfx PRIVATE "${GFX_PIX_PATH}/include")
+target_include_directories(gfx PRIVATE "${GFX_PIX_AMD_PATH}")
 add_library(WinPixEventRuntime SHARED IMPORTED)
 set_target_properties(WinPixEventRuntime PROPERTIES
-    IMPORTED_LOCATION ${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll
-    IMPORTED_IMPLIB ${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib
+    IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
+    IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
 )
-
-target_link_libraries(gfx PRIVATE d3d12 D3D12Core d3d12SDKLayers dxgi dxcompiler dxil WinPixEventRuntime)
+target_link_libraries(gfx PRIVATE WinPixEventRuntime)
 
 if(GFX_ENABLE_GUI)
-    include(FetchContent)
-
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -110,7 +165,7 @@ if(GFX_ENABLE_GUI)
     )
     set(IMGUI_BUILD_WIN32_BINDING OFF CACHE BOOL "")
     FetchContent_MakeAvailable(imgui)
-    
+
     if(imgui_FOUND)
         target_link_libraries(gfx PUBLIC imgui::imgui)
     else()
