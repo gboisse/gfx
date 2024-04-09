@@ -108,9 +108,7 @@ if(GFX_ENABLE_GUI)
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
-    if(imgui_FOUND)
-        set(IMGUI_BUILD_WIN32_BINDING OFF CACHE BOOL "")
-    endif()
+    set(IMGUI_BUILD_WIN32_BINDING OFF CACHE BOOL "")
     FetchContent_MakeAvailable(imgui)
     
     if(imgui_FOUND)
@@ -122,58 +120,101 @@ if(GFX_ENABLE_GUI)
     target_compile_definitions(gfx PUBLIC GFX_ENABLE_GUI)
 endif()
 if(GFX_ENABLE_SCENE)
+    target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE)
+
     option(GFX_ENABLE_SCENE_KTX "Build gfx with ktx image loading support" ON)
 
     include(FetchContent)
 
-    FetchContent_Declare(
-        stb
-        GIT_REPOSITORY https://github.com/nothings/stb.git
-        GIT_TAG        ae721c50eaf761660b4f90cc590453cdb0c2acd0
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/
-    )
+    find_package(Stb QUIET)
+    if(NOT Stb_FOUND)
+        FetchContent_Declare(
+            Stb
+            GIT_REPOSITORY https://github.com/nothings/stb.git
+            GIT_TAG        ae721c50eaf761660b4f90cc590453cdb0c2acd0
+            SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/"
+        )
+        FetchContent_MakeAvailable(Stb)
+        target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb")
+    else()
+        target_include_directories(gfx PRIVATE "${Stb_INCLUDE_DIR}")
+    endif()
 
-    FetchContent_Declare(
-        cgltf
-        GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-        GIT_TAG        v1.13
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/
-    )
+    find_path(CGLTF_INCLUDE_DIRS "cgltf.h")
+    if("${CGLTF_INCLUDE_DIRS}" STREQUAL "CGLTF_INCLUDE_DIRS-NOTFOUND")
+        FetchContent_Declare(
+            cgltf
+            GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
+            GIT_TAG        v1.13
+            SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/"
+        )
+        FetchContent_MakeAvailable(cgltf)
+        target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf")
+    else()
+        target_include_directories(gfx PRIVATE "${CGLTF_INCLUDE_DIRS}")
+    endif()
 
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
         GIT_TAG        1.0.0
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/
+        SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
+        FIND_PACKAGE_ARGS NAMES glm
     )
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
         set(GLM_ENABLE_SIMD_AVX2 ON CACHE BOOL "")
     endif()
     set(GLM_ENABLE_CXX_17 ON CACHE BOOL "")
     set(GLM_QUIET ON CACHE BOOL "")
+    FetchContent_MakeAvailable(glm)
+    target_compile_definitions(gfx PRIVATE GLM_FORCE_XYZW_ONLY)
+    target_link_libraries(gfx PUBLIC glm::glm)
+    if(NOT glm_FOUND)
+        set_target_properties(glm PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+    endif()
 
     FetchContent_Declare(
         tinyobjloader
         GIT_REPOSITORY https://github.com/tinyobjloader/tinyobjloader.git
         GIT_TAG        v2.0.0rc13
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/
+        SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyobjloader/"
+        FIND_PACKAGE_ARGS NAMES tinyobjloader
     )
+    FetchContent_MakeAvailable(tinyobjloader)
+    if(NOT tinyobjloader_FOUND)
+        target_link_libraries(gfx PRIVATE tinyobjloader)
+        set_target_properties(tinyobjloader PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+    else()
+        target_link_libraries(gfx PRIVATE tinyobjloader::tinyobjloader)
+    endif()
 
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
         GIT_TAG        v1.0.8
-        SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/
+        SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/"
+        FIND_PACKAGE_ARGS NAMES tinyexr
     )
     set(TINYEXR_BUILD_SAMPLE OFF CACHE BOOL "")
     set(TINYEXR_USE_MINIZ OFF CACHE BOOL "")
+    FetchContent_MakeAvailable(tinyexr)
+    if(NOT tinyexr_FOUND)
+        #tinyexr cmake is currently broken when not using miniz
+        target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
+        target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr")
+        target_link_libraries(gfx PRIVATE tinyexr)
+        set_target_properties(tinyexr PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+    else()
+        target_link_libraries(gfx PRIVATE unofficial::tinyexr::tinyexr)
+    endif()
 
     if(GFX_ENABLE_SCENE_KTX)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
             GIT_TAG        v4.3.1
-            SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/
+            SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
+            FIND_PACKAGE_ARGS NAMES Ktx
         )
         set(KTX_FEATURE_TESTS OFF CACHE BOOL "")
         set(KTX_FEATURE_VULKAN OFF CACHE BOOL "")
@@ -187,41 +228,22 @@ if(GFX_ENABLE_SCENE)
             vulkan-headers
             GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
             GIT_TAG        v1.3.278
-            SOURCE_DIR     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/
+            SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/"
+            FIND_PACKAGE_ARGS NAMES VulkanHeaders
         )
-    endif()
-
-    FetchContent_MakeAvailable(stb cgltf glm tinyobjloader tinyexr)
-    if(GFX_ENABLE_SCENE_KTX)
         FetchContent_MakeAvailable(ktx vulkan-headers)
-    endif()
-
-    target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
-    target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf)
-    target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/include)
-    target_include_directories(gfx PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr)
-    target_link_libraries(gfx PUBLIC glm::glm)
-    target_link_libraries(gfx PRIVATE tinyobjloader tinyexr)
-    if(GFX_ENABLE_SCENE_KTX)
-        target_link_libraries(gfx PRIVATE ktx)
+        target_link_libraries(gfx PRIVATE Vulkan::Headers)
+        if(NOT ktx_FOUND)
+            target_link_libraries(gfx PRIVATE ktx)
+            set_target_properties(ktx PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+            set_target_properties(astcenc-avx2-static PROPERTIES FOLDER "${GFX_TP_FOLDER}/ktx_deps")
+            set_target_properties(ktx_version PROPERTIES FOLDER "${GFX_TP_FOLDER}/ktx_deps")
+        else()
+            target_link_libraries(gfx PRIVATE KTX::ktx)
+        endif()
         target_compile_definitions(gfx PRIVATE GFX_ENABLE_SCENE_KTX)
     endif()
 
-    target_compile_definitions(gfx PUBLIC GFX_ENABLE_SCENE)
-    target_compile_definitions(gfx PRIVATE GLM_FORCE_XYZW_ONLY)
-
-    #tinyexr cmake is currently broken when not using miniz
-    target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
-
-    # Organize third party projects
-    set_target_properties(glm PROPERTIES FOLDER "third_party")
-    set_target_properties(tinyobjloader PROPERTIES FOLDER "third_party")
-    set_target_properties(tinyexr PROPERTIES FOLDER "third_party")
-    if(GFX_ENABLE_SCENE_KTX)
-        set_target_properties(ktx PROPERTIES FOLDER "third_party")
-        set_target_properties(astcenc-avx2-static PROPERTIES FOLDER "third_party/ktx_deps")
-        set_target_properties(ktx_version PROPERTIES FOLDER "third_party/ktx_deps")
-    endif()
 endif()
 
 if(GFX_BUILD_EXAMPLES)
