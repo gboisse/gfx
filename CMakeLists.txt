@@ -67,7 +67,7 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
     GIT_TAG        v2.0.1
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
-    FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
+    FIND_PACKAGE_ARGS NAMES d3d12-memory-allocator
 )
 FetchContent_MakeAvailable(D3D12MemoryAllocator)
 if(NOT D3D12MemoryAllocator_FOUND)
@@ -75,7 +75,7 @@ if(NOT D3D12MemoryAllocator_FOUND)
     target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
     set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
 else()
-    target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator::D3D12MemoryAllocator)
+    target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator)
 endif()
 
 set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} $ENV{WindowsSdkDir}) # Needed to find d3d12
