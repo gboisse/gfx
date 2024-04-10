@@ -163,7 +163,6 @@ if(GFX_ENABLE_GUI)
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
-    set(IMGUI_BUILD_WIN32_BINDING OFF CACHE BOOL "")
     FetchContent_MakeAvailable(imgui)
 
     if(imgui_FOUND)
