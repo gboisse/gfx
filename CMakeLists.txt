@@ -78,7 +78,7 @@ else()
     target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator::D3D12MemoryAllocator)
 endif()
 
-set(CMAKE_LIBRARY_PATH $ENV{WindowsSdkDir}) # Needed to find d3d12
+set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} $ENV{WindowsSdkDir}) # Needed to find d3d12
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 FetchContent_Declare(
     DirectX12-Agility
@@ -88,17 +88,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(DirectX12-Agility)
 if(NOT DirectX12-Agility_FOUND)
-    target_include_directories(gfx PUBLIC "${GFX_AGILITY_PATH}/build/native/include")
-    find_library(D3D12_LIB NAMES d3d12)
     add_library(D3D12Core SHARED IMPORTED)
     set_target_properties(D3D12Core PROPERTIES
         IMPORTED_LOCATION "${GFX_AGILITY_PATH}/build/native/bin/x64/D3D12Core.dll"
-        IMPORTED_IMPLIB "${D3D12_LIB}"
+        IMPORTED_IMPLIB d3d12.lib
+        INTERFACE_INCLUDE_DIRECTORIES "${GFX_AGILITY_PATH}/build/native/include"
     )
     add_library(d3d12SDKLayers SHARED IMPORTED)
     set_target_properties(d3d12SDKLayers PROPERTIES
         IMPORTED_LOCATION "${GFX_AGILITY_PATH}/build/native/bin/x64/d3d12SDKLayers.dll"
-        IMPORTED_IMPLIB "${D3D12_LIB}"
+        IMPORTED_IMPLIB d3d12.lib
     )
     target_link_libraries(gfx PRIVATE D3D12Core d3d12SDKLayers)
 else()
@@ -115,12 +114,12 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(directx-dxc)
 if(NOT directx-dxc_FOUND)
-    target_include_directories(gfx PRIVATE "${GFX_DXC_PATH}/inc")
     find_library(D3D12_LIB NAMES d3d12)
     add_library(dxcompiler SHARED IMPORTED)
     set_target_properties(dxcompiler PROPERTIES
         IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxcompiler.dll"
         IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${GFX_DXC_PATH}/inc"
     )
     add_library(dxil SHARED IMPORTED)
     set_target_properties(dxil PROPERTIES
@@ -146,12 +145,11 @@ string(REPLACE " PIXBeginEventOnContextCpu(destination" " RgpPIXBeginEventOnCont
 string(REPLACE " PIXSetMarkerOnContextCpu(destination" " RgpPIXSetMarkerOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
 string(REPLACE "destination = PIXEndEventOnContextCpu(" "RgpPIXEndEventOnContextCpu(destination, " PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
 file(WRITE "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" "${PIXE_FILE_CONTENTS}")
-target_include_directories(gfx PRIVATE "${GFX_PIX_PATH}/include")
-target_include_directories(gfx PRIVATE "${GFX_PIX_AMD_PATH}")
 add_library(WinPixEventRuntime SHARED IMPORTED)
 set_target_properties(WinPixEventRuntime PROPERTIES
     IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
     IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
+    INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include;${GFX_PIX_AMD_PATH}"
 )
 target_link_libraries(gfx PRIVATE WinPixEventRuntime)
 
