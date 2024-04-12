@@ -256,8 +256,8 @@ class GfxProgramDesc { public: inline GfxProgramDesc() : cs(nullptr), as(nullptr
                        char const *ps;
                        char const *lib; };
 
-GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path = nullptr, char const *shader_model = nullptr);
-GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, char const *name = nullptr, char const *shader_model = nullptr);
+GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path = nullptr, char const *shader_model = nullptr, char const **include_paths = nullptr, uint32_t include_path_count = 0);
+GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, char const *name = nullptr, char const *shader_model = nullptr, char const **include_paths = nullptr, uint32_t include_path_count = 0);
 GfxResult gfxDestroyProgram(GfxContext context, GfxProgram program);
 
 GfxResult gfxProgramSetBuffer(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer buffer);
