@@ -30,8 +30,9 @@ SOFTWARE.
 #include <direct.h>             // _mkdir()
 #include <aclapi.h>             // SetEntriesInAcl()
 #include <accctrl.h>            // EXPLICIT_ACCESS
-#include <inc/dxcapi.h>         // shader compiler
-#include <inc/d3d12shader.h>    // shader reflection
+#include <dxcapi.h>             // shader compiler
+#include <d3d12shader.h>        // shader reflection
+#include <D3D12MemAlloc.h>
 
 #ifdef __clang__
 #   pragma clang diagnostic push
@@ -58,7 +59,6 @@ SOFTWARE.
 #   pragma warning(disable:4189)   // local variable is initialized but not referenced
 #   pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
 #endif
-#include <D3D12MemAlloc.cpp>    // D3D12MemoryAllocator
 #include <WinPixEventRuntime/pix3.h>
 #ifdef __clang__
 #    pragma clang diagnostic pop
