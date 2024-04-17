@@ -3055,6 +3055,51 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult encodeCopyBufferToCubeFace(GfxTexture const& dst, GfxBuffer const& src, uint32_t face)
+    {
+        if(command_list_ == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(!texture_handles_.has_handle(dst.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy to an invalid texture object");
+        if(!buffer_handles_.has_handle(src.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid buffer object");
+        if(dst.type != GfxTexture::kType_Cube)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-Cube texture object");
+        if(src.cpu_access == kGfxCpuAccess_Read)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from a buffer object with read CPU access");
+        Texture &gfx_texture = textures_[dst];
+        SetObjectName(gfx_texture, dst.name);
+        uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
+        uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
+        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
+        device_->GetCopyableFootprints(&resource_desc, face * dst.mip_levels, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
+        uint64_t buffer_offset = 0;
+        uint32_t const bytes_per_pixel = GetBytesPerPixel(dst.format);
+        if(bytes_per_pixel == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to texture object of unsupported format");
+        Buffer &gfx_buffer = buffers_[src];
+        SetObjectName(gfx_buffer, src.name);
+        if(src.cpu_access == kGfxCpuAccess_None)
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
+        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST);
+        for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
+        {
+            uint32_t subresource_index = face * dst.mip_levels + mip_level;
+            uint64_t const buffer_row_pitch = row_sizes[mip_level];
+            uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
+            if(buffer_offset + buffer_size > src.size)
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to mip level %u from buffer object with insufficient storage", mip_level);
+            D3D12_TEXTURE_COPY_LOCATION dst_location = {gfx_texture.resource_, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, subresource_index};
+            D3D12_TEXTURE_COPY_LOCATION src_location = {gfx_buffer.resource_, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, subresource_footprints[mip_level]};
+            command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
+            buffer_offset += buffer_size;
+            if(buffer_offset >= src.size)
+                break;
+        }
+        return kGfxResult_NoError;
+    }
+
     GfxResult encodeCopyTextureToBuffer(GfxBuffer const &dst, GfxTexture const &src)
     {
         if(command_list_ == nullptr)
@@ -9339,6 +9384,13 @@ GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxB
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyBufferToTexture(dst, src);
+}
+
+GfxResult gfxCommandCopyBufferToCubeFace(GfxContext context, GfxTexture dst, GfxBuffer src, uint32_t face)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeCopyBufferToCubeFace(dst, src, face);
 }
 
 GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src)
