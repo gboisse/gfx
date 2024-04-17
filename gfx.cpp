@@ -1065,7 +1065,7 @@ public:
                     }
                 for(j = 0; j < i; ++j)
                     if(adapter_score > adapter_scores[j] ||
-                      (adapter_score == adapter_scores[j] && adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory))
+                       adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory)
                         break;
                 for(uint32_t k = i; k > j; --k)
                 {
