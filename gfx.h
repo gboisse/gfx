@@ -367,6 +367,7 @@ GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t 
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
+GfxResult gfxCommandCopyBufferToCubeFace(GfxContext context, GfxTexture dst, GfxBuffer src, uint32_t face);
 GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src);
 GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture);   // expects mip level 0 to be populated, generates the others
 
