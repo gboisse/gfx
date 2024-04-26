@@ -3055,7 +3055,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeCopyBufferToCubeFace(GfxTexture const& dst, GfxBuffer const& src, uint32_t face)
+    GfxResult encodeCopyBufferToCubeFace(GfxTexture const &dst, GfxBuffer const &src, uint32_t face)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3064,7 +3064,7 @@ public:
         if(!buffer_handles_.has_handle(src.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid buffer object");
         if(dst.type != GfxTexture::kType_Cube)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-Cube texture object");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-cube texture object");
         if(src.cpu_access == kGfxCpuAccess_Read)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from a buffer object with read CPU access");
         Texture &gfx_texture = textures_[dst];
@@ -3085,6 +3085,8 @@ public:
         transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST);
         for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
         {
+            if(buffer_offset >= src.size)
+                break;  // further mips aren't available
             uint32_t subresource_index = face * dst.mip_levels + mip_level;
             uint64_t const buffer_row_pitch = row_sizes[mip_level];
             uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
@@ -3093,9 +3095,7 @@ public:
             D3D12_TEXTURE_COPY_LOCATION dst_location = {gfx_texture.resource_, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, subresource_index};
             D3D12_TEXTURE_COPY_LOCATION src_location = {gfx_buffer.resource_, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, subresource_footprints[mip_level]};
             command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
-            buffer_offset += buffer_size;
-            if(buffer_offset >= src.size)
-                break;
+            buffer_offset += buffer_size;   // advance the buffer offset
         }
         return kGfxResult_NoError;
     }
