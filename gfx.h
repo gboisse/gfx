@@ -333,6 +333,10 @@ GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
 GfxResult gfxKernelReloadAll(GfxContext context);   // hot-reloads all kernel objects
 
+//!
+//! Shader binding tables.
+//!
+
 class GfxSbt { GFX_INTERNAL_HANDLE(GfxSbt); public: };
 
 GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count]);
