@@ -2137,7 +2137,7 @@ public:
                 raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
                 break;
             default:
-                GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid raytracing primitive object");
+                GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
                 return cloned_raytracing_primitive; // invalid raytracing primitive type
             }
         }
@@ -2156,7 +2156,7 @@ public:
         for(uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
             gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
         gfx_acceleration_structure.raytracing_primitives_.push_back(cloned_raytracing_primitive);
-        gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
+        gfx_raytracing_primitive.instance_id_ = cloned_raytracing_primitive.getIndex();
         gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Instance;
         gfx_raytracing_primitive.instance_.parent_ = raytracing_primitive;
         gfx_acceleration_structure.needs_rebuild_ = true;
