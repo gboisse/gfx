@@ -203,7 +203,7 @@ typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveInstance(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);   // instantiates the raytracing primitive
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
@@ -213,7 +213,6 @@ GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingP
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
 GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
 uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);    // in bytes
-bool gfxRaytracingPrimitiveIsInstance(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 
@@ -335,6 +334,10 @@ GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
 GfxResult gfxKernelReloadAll(GfxContext context);   // hot-reloads all kernel objects
 
+//!
+//! Shader binding tables.
+//!
+
 class GfxSbt { GFX_INTERNAL_HANDLE(GfxSbt); public: };
 
 GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count]);
@@ -365,6 +368,7 @@ GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t 
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src);
+GfxResult gfxCommandCopyBufferToCubeFace(GfxContext context, GfxTexture dst, GfxBuffer src, uint32_t face);
 GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src);
 GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture);   // expects mip level 0 to be populated, generates the others
 
