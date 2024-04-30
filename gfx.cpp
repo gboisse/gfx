@@ -2141,8 +2141,8 @@ public:
                 return cloned_raytracing_primitive; // invalid raytracing primitive type
             }
         }
-        RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(parent_raytracing_primitive);
+        RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GFX_ASSERT(!isInterop(acceleration_structure)); // should never happen
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
