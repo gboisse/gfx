@@ -2170,7 +2170,7 @@ public:
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid raytracing primitive object");
         RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        GfxAccelerationStructure const& acceleration_structure = getRaytracingPrimitiveAccelerationStructure(gfx_raytracing_primitive);
+        GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(gfx_raytracing_primitive);
         if(acceleration_structure_handles_.has_handle(acceleration_structure.handle))
             acceleration_structures_[acceleration_structure].needs_rebuild_ = true;
         collect(gfx_raytracing_primitive);  // release resources
