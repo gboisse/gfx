@@ -219,6 +219,7 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxRaytracingProceduralPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index); // Useful when iterating over primitives when using `gfxAccelerationStructureGetRaytracingPrimitiveCount`
+bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
 //! Draw state manipulation.

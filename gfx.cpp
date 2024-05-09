@@ -452,7 +452,7 @@ class GfxInternal
         {
             kType_Triangles = 0,
             kType_Instance,
-            kType_AABB,
+            kType_Procedural,
         }
         type_;
         struct
@@ -2082,7 +2082,7 @@ public:
 
     bool getRaytracingPrimitiveIsProcedural(GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr) return false;    // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
@@ -2092,7 +2092,20 @@ public:
         auto const &primitive = gfx_acceleration_structure.raytracing_primitives_[primitive_index];
 
         RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[primitive];
-        return gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_AABB;
+        return gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural;
+    }
+
+    bool getRaytracingPrimitiveIsProcedural(GfxRaytracingPrimitive const &raytracing_primitive)
+    {
+        if(dxr_device_ == nullptr)
+            return false; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+        {
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot get an invalid raytracing primitive object");
+            return false;
+        }
+        RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        return gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural;
     }
 
     GfxRaytracingPrimitive const *getAccelerationStructureRaytracingPrimitives(GfxAccelerationStructure const &acceleration_structure)
@@ -2207,7 +2220,7 @@ public:
         gfx_acceleration_structure.raytracing_primitives_.push_back(raytracing_primitive);
         gfx_raytracing_primitive.aabb_.acceleration_structure_ = acceleration_structure;
         gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
-        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_AABB;
+        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Procedural;
         gfx_acceleration_structure.needs_rebuild_ = true;
         return raytracing_primitive;
     }
@@ -2296,7 +2309,7 @@ public:
         gfx_raytracing_primitive.aabb_.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.aabb_.aabb_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
         gfx_raytracing_primitive.aabb_.aabb_stride_ = aabb_stride;
-        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_AABB;
+        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Procedural;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
@@ -2365,7 +2378,7 @@ public:
         {
         case RaytracingPrimitive::kType_Triangles:
             return gfx_raytracing_primitive.triangles_.bvh_data_size_;
-        case RaytracingPrimitive::kType_AABB:
+        case RaytracingPrimitive::kType_Procedural:
             return gfx_raytracing_primitive.aabb_.bvh_data_size_;
         default:
             break;
@@ -5280,7 +5293,7 @@ private:
             break;
         case RaytracingPrimitive::kType_Instance:
             break;  // nothing to collect on instanced primitives
-        case RaytracingPrimitive::kType_AABB:
+        case RaytracingPrimitive::kType_Procedural:
             destroyBuffer(raytracing_primitive.aabb_.aabb_buffer_);
             break;
         default:
@@ -6790,7 +6803,7 @@ private:
 
     GfxResult buildRaytracingPrimitive_AABB(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
-        GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_AABB); // should never happen
+        GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural); // should never happen
         if(!buffer_handles_.has_handle(gfx_raytracing_primitive.aabb_.aabb_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid AABB buffer object");
         GFX_ASSERT(gfx_raytracing_primitive.aabb_.aabb_stride_ > 0 && gfx_raytracing_primitive.aabb_.aabb_buffer_.size / gfx_raytracing_primitive.aabb_.aabb_stride_ <= 0xFFFFFFFFull);
@@ -6863,7 +6876,7 @@ private:
     {
         if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
             return buildRaytracingPrimitive_Triangle(raytracing_primitive, gfx_raytracing_primitive, update);
-        else if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_AABB)
+        else if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural)
             return buildRaytracingPrimitive_AABB(raytracing_primitive, gfx_raytracing_primitive, update);
         
         GFX_ASSERT(false);
@@ -6905,7 +6918,7 @@ private:
                 GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
                 return parent_raytracing_primitive.triangles_.bvh_buffer_;
             }
-        case RaytracingPrimitive::kType_AABB:
+        case RaytracingPrimitive::kType_Procedural:
             return raytracing_primitive.aabb_.bvh_buffer_;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
@@ -6929,7 +6942,7 @@ private:
                 GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
                 return parent_raytracing_primitive.triangles_.acceleration_structure_;
             }
-        case RaytracingPrimitive::kType_AABB:
+        case RaytracingPrimitive::kType_Procedural:
             return raytracing_primitive.aabb_.acceleration_structure_;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
@@ -9322,6 +9335,13 @@ bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxAccelerationStruc
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getRaytracingPrimitiveIsProcedural(acceleration_structure, primitive_index);
+}
+
+bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0;  // invalid context
+    return gfx->getRaytracingPrimitiveIsProcedural(raytracing_primitive);
 }
 
 GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure)
