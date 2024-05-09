@@ -451,7 +451,8 @@ class GfxInternal
         enum
         {
             kType_Triangles = 0,
-            kType_Instance
+            kType_Instance,
+            kType_AABB,
         }
         type_;
         struct
@@ -471,6 +472,16 @@ class GfxInternal
             GfxRaytracingPrimitive parent_ = {};
         }
         instance_;
+        struct
+        {
+            uint32_t build_flags_ = 0;
+            GfxBuffer bvh_buffer_ = {};
+            uint64_t bvh_data_size_ = 0;
+            uint32_t aabb_stride_ = 0;
+            GfxBuffer aabb_buffer_ = {};
+            GfxAccelerationStructure acceleration_structure_ = {};
+        }
+        aabb_;
     };
     GfxArray<RaytracingPrimitive> raytracing_primitives_;
     GfxHandles raytracing_primitive_handles_;
@@ -769,6 +780,10 @@ class GfxInternal
         Parameter *parameters_ = nullptr;
         uint32_t parameter_count_ = 0;
         uint32_t vertex_stride_ = 0;
+
+        // These two params are used for RT pipelines. If one of them is set, the other one must be set as well
+        uint32_t max_payload_size_ = 0;
+        uint32_t max_attribute_size_ = 0;
     };
     GfxArray<Kernel> kernels_;
     GfxHandles kernel_handles_;
@@ -2065,6 +2080,21 @@ public:
         return (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
     }
 
+    bool getRaytracingPrimitiveIsProcedural(GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index)
+    {
+        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
+            return 0;
+        }
+        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+        auto const &primitive = gfx_acceleration_structure.raytracing_primitives_[primitive_index];
+
+        RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[primitive];
+        return gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_AABB;
+    }
+
     GfxRaytracingPrimitive const *getAccelerationStructureRaytracingPrimitives(GfxAccelerationStructure const &acceleration_structure)
     {
         if(dxr_device_ == nullptr) return nullptr;  // avoid spamming console output
@@ -2153,6 +2183,35 @@ public:
         return cloned_raytracing_primitive;
     }
 
+    GfxRaytracingPrimitive createRaytracingProceduralPrimitive(GfxAccelerationStructure const &acceleration_structure)
+    {
+        GfxRaytracingPrimitive raytracing_primitive = {};
+        if(dxr_device_ == nullptr)
+            return raytracing_primitive;    // avoid spamming console output
+        if(isInterop(acceleration_structure))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a raytracing primitive using an interop acceleration structure object");
+            return raytracing_primitive;
+        }
+        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
+            return raytracing_primitive;
+        }
+        raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(raytracing_primitive);
+        AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+        gfx_raytracing_primitive.index_ = (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
+        for (uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
+            gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
+        gfx_acceleration_structure.raytracing_primitives_.push_back(raytracing_primitive);
+        gfx_raytracing_primitive.aabb_.acceleration_structure_ = acceleration_structure;
+        gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
+        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_AABB;
+        gfx_acceleration_structure.needs_rebuild_ = true;
+        return raytracing_primitive;
+    }
+
     GfxResult destroyRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
     {
         if(!raytracing_primitive)
@@ -2217,6 +2276,27 @@ public:
         gfx_raytracing_primitive.triangles_.index_stride_ = index_stride;
         gfx_raytracing_primitive.triangles_.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.triangles_.vertex_stride_ = vertex_stride;
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
+    }
+
+    GfxResult buildRaytracingProceduralPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
+        if(!buffer_handles_.has_handle(aabb_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build a raytracing primitive using an invalid AABB buffer object");
+        aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
+        if(aabb_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with an AABB buffer object of stride `0'");
+        if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion AABBs");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        gfx_raytracing_primitive.aabb_.build_flags_ = (uint32_t)build_flags;
+        gfx_raytracing_primitive.aabb_.aabb_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
+        gfx_raytracing_primitive.aabb_.aabb_stride_ = aabb_stride;
+        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_AABB;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
@@ -2285,6 +2365,8 @@ public:
         {
         case RaytracingPrimitive::kType_Triangles:
             return gfx_raytracing_primitive.triangles_.bvh_data_size_;
+        case RaytracingPrimitive::kType_AABB:
+            return gfx_raytracing_primitive.aabb_.bvh_data_size_;
         default:
             break;
         }
@@ -2333,6 +2415,25 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
+    GfxResult updateRaytracingProceduralPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
+        if(!buffer_handles_.has_handle(aabb_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update a raytracing primitive using an invalid AABB buffer object");
+        aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
+        if(aabb_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with an AABB buffer object of stride `0'");
+        if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with a buffer object containing more than 4 billion AABBs");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        destroyBuffer(gfx_raytracing_primitive.aabb_.aabb_buffer_);
+        gfx_raytracing_primitive.aabb_.aabb_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
+        gfx_raytracing_primitive.aabb_.aabb_stride_ = aabb_stride;
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
+    }
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
     {
         GfxProgram program = {};
@@ -2595,7 +2696,8 @@ public:
         GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
         char const **exports, uint32_t export_count,
         char const **subobjects, uint32_t subobject_count,
-        char const **defines, uint32_t define_count)
+        char const **defines, uint32_t define_count,
+        uint32_t max_payload_size, uint32_t max_attribute_size)
     {
         GfxKernel raytracing_kernel = {};
         if(dxr_device_ == nullptr)
@@ -2616,6 +2718,8 @@ public:
         gfx_kernel.program_ = program;
         gfx_kernel.entry_point_ = "";
         gfx_kernel.type_ = Kernel::kType_Raytracing;
+        gfx_kernel.max_payload_size_ = max_payload_size;
+        gfx_kernel.max_attribute_size_ = max_attribute_size;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         GFX_ASSERT(local_root_signature_association_count == 0 || local_root_signature_associations != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
@@ -5176,6 +5280,9 @@ private:
             break;
         case RaytracingPrimitive::kType_Instance:
             break;  // nothing to collect on instanced primitives
+        case RaytracingPrimitive::kType_AABB:
+            destroyBuffer(raytracing_primitive.aabb_.aabb_buffer_);
+            break;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
             break;  // invalid raytracing primitive type
@@ -6010,6 +6117,15 @@ private:
         subobjects.reserve(kernel.local_root_signature_associations_.size() + 2);
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &global_root_signature});
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_desc });
+
+        D3D12_RAYTRACING_SHADER_CONFIG shader_config = {};
+        if(kernel.max_payload_size_ > 0 && kernel.max_attribute_size_ > 0)
+        {
+            shader_config.MaxPayloadSizeInBytes = kernel.max_payload_size_;
+            shader_config.MaxAttributeSizeInBytes = kernel.max_attribute_size_;
+            subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shader_config });
+        }
+
         std::vector<D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION> local_root_signature_associations;
         std::vector<D3D12_LOCAL_ROOT_SIGNATURE> local_root_signatures;
         std::vector<LPCWSTR> local_root_signature_associated_exports;
@@ -6587,7 +6703,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    GfxResult buildRaytracingPrimitive_Triangle(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles); // should never happen
         if(gfx_raytracing_primitive.triangles_.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.index_buffer_.handle))
@@ -6672,6 +6788,88 @@ private:
         return kGfxResult_NoError;
     }
 
+    GfxResult buildRaytracingPrimitive_AABB(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    {
+        GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_AABB); // should never happen
+        if(!buffer_handles_.has_handle(gfx_raytracing_primitive.aabb_.aabb_buffer_.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid AABB buffer object");
+        GFX_ASSERT(gfx_raytracing_primitive.aabb_.aabb_stride_ > 0 && gfx_raytracing_primitive.aabb_.aabb_buffer_.size / gfx_raytracing_primitive.aabb_.aabb_stride_ <= 0xFFFFFFFFull);
+        GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
+        if(gfx_raytracing_primitive.aabb_.aabb_buffer_.size == 0)
+        {
+            destroyBuffer(gfx_raytracing_primitive.aabb_.bvh_buffer_);
+            gfx_raytracing_primitive.aabb_.bvh_buffer_ = {};
+            return kGfxResult_NoError;
+        }
+        D3D12_RAYTRACING_GEOMETRY_DESC geometry_desc = {};
+        geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+        if((gfx_raytracing_primitive.aabb_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Opaque) != 0)
+            geometry_desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+        Buffer &gfx_aabb_buffer = buffers_[gfx_raytracing_primitive.aabb_.aabb_buffer_];
+        SetObjectName(gfx_aabb_buffer, gfx_raytracing_primitive.aabb_.aabb_buffer_.name);
+        geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+        geometry_desc.AABBs.AABBCount = 1;
+        geometry_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+        geometry_desc.AABBs.AABBs.StartAddress = gfx_aabb_buffer.resource_->GetGPUVirtualAddress() + gfx_aabb_buffer.data_offset_;
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
+        blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        blas_inputs.NumDescs = 1;
+        blas_inputs.pGeometryDescs = &geometry_desc;
+        if(update)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
+        dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
+        uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
+        GFX_TRY(allocateRaytracingScratch(scratch_data_size));  // ensure scratch is large enough
+        uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
+        if(bvh_data_size > gfx_raytracing_primitive.aabb_.bvh_buffer_.size)
+        {
+            if(!gfx_raytracing_primitive.aabb_.bvh_buffer_)
+            {
+                GfxAccelerationStructure const &acceleration_structure = gfx_raytracing_primitive.aabb_.acceleration_structure_;
+                GFX_ASSERT(acceleration_structure_handles_.has_handle(acceleration_structure.handle));  // checked in `updateRaytracingPrimitive()'
+                AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+                gfx_acceleration_structure.needs_rebuild_ = true;   // raytracing primitive has been built, rebuild the acceleration structure
+            }
+            destroyBuffer(gfx_raytracing_primitive.aabb_.bvh_buffer_);
+            blas_inputs.Flags &= ~D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+            gfx_raytracing_primitive.aabb_.bvh_buffer_ = createBuffer(bvh_data_size, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+            if(!gfx_raytracing_primitive.aabb_.bvh_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create raytracing primitive buffer");
+        }
+        gfx_raytracing_primitive.aabb_.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
+        GFX_ASSERT(buffer_handles_.has_handle(gfx_raytracing_primitive.aabb_.bvh_buffer_.handle));
+        GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
+
+        Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.aabb_.bvh_buffer_];
+        Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
+        SetObjectName(gfx_buffer, raytracing_primitive.name);
+        transitionResource(buffers_[gfx_raytracing_primitive.aabb_.aabb_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        submitPipelineBarriers();   // ensure scratch is not in use
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
+        build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+        build_desc.Inputs = blas_inputs;
+        if((blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
+            build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+        build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
+        GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
+        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    {
+        if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
+            return buildRaytracingPrimitive_Triangle(raytracing_primitive, gfx_raytracing_primitive, update);
+        else if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_AABB)
+            return buildRaytracingPrimitive_AABB(raytracing_primitive, gfx_raytracing_primitive, update);
+        
+        GFX_ASSERT(false);
+        return kGfxResult_InvalidOperation;
+    }
+
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive)
     {
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(gfx_raytracing_primitive);
@@ -6707,6 +6905,8 @@ private:
                 GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
                 return parent_raytracing_primitive.triangles_.bvh_buffer_;
             }
+        case RaytracingPrimitive::kType_AABB:
+            return raytracing_primitive.aabb_.bvh_buffer_;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
             break;  // invalid raytracing primitive type
@@ -6729,6 +6929,8 @@ private:
                 GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
                 return parent_raytracing_primitive.triangles_.acceleration_structure_;
             }
+        case RaytracingPrimitive::kType_AABB:
+            return raytracing_primitive.aabb_.acceleration_structure_;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
             break;  // invalid raytracing primitive type
@@ -9115,6 +9317,13 @@ uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context,
     return gfx->getAccelerationStructureRaytracingPrimitiveCount(acceleration_structure);
 }
 
+bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0;  // invalid context
+    return gfx->getRaytracingPrimitiveIsProcedural(acceleration_structure, primitive_index);
+}
+
 GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9128,6 +9337,14 @@ GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccel
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_primitive;   // invalid context
     return gfx->createRaytracingPrimitive(acceleration_structure);
+}
+
+GfxRaytracingPrimitive gfxCreateRaytracingProceduralPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure)
+{
+    GfxRaytracingPrimitive const raytracing_primitive = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return raytracing_primitive;   // invalid context
+    return gfx->createRaytracingProceduralPrimitive(acceleration_structure);
 }
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
@@ -9157,6 +9374,13 @@ GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->buildRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, build_flags);
+}
+
+GfxResult gfxRaytracingProceduralPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->buildRaytracingProceduralPrimitive(raytracing_primitive, aabb_buffer, aabb_stride, build_flags);
 }
 
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform)
@@ -9206,6 +9430,13 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride);
+}
+
+GfxResult gfxRaytracingProceduralPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->updateRaytracingProceduralPrimitive(raytracing_primitive, aabb_buffer, aabb_stride);
 }
 
 GfxDrawState::GfxDrawState()
@@ -9391,12 +9622,13 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
     char const **exports, uint32_t export_count,
     char const **subobjects, uint32_t subobject_count,
-    char const **defines, uint32_t define_count)
+    char const **defines, uint32_t define_count,
+    uint32_t max_payload_size, uint32_t max_attribute_size)
 {
     GfxKernel const raytracing_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_kernel;    // invalid context
-    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count);
+    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count, max_payload_size, max_attribute_size);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)

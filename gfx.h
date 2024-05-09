@@ -203,11 +203,13 @@ typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
+GfxRaytracingPrimitive gfxCreateRaytracingProceduralPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);   // instantiates the raytracing primitive
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
+GfxResult gfxRaytracingProceduralPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
@@ -215,6 +217,8 @@ GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContex
 uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);    // in bytes
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
+GfxResult gfxRaytracingProceduralPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
+bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index); // Useful when iterating over primitives when using `gfxAccelerationStructureGetRaytracingPrimitiveCount`
 
 //!
 //! Draw state manipulation.
@@ -328,7 +332,8 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     GfxLocalRootSignatureAssociation const *local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0,
     char const **exports = nullptr, uint32_t export_count = 0,
     char const **subobjects = nullptr, uint32_t subobject_count = 0,
-    char const **defines = nullptr, uint32_t define_count = 0);
+    char const **defines = nullptr, uint32_t define_count = 0,
+    uint32_t max_payload_size = 0, uint32_t max_attribute_size = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
