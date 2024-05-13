@@ -2198,7 +2198,7 @@ private:
         }
         // Check DDS magic number identifier
         uint32_t magic;
-        if((std::fread(&magic, sizeof(uint32_t), 1, file) != sizeof(uint32_t))
+        if((std::fread(&magic, sizeof(uint32_t), 1, file) != 1)
             || (magic != MAKE_FOURCC('D', 'D', 'S', ' ')))
         {
             std::fclose(file);
@@ -2208,7 +2208,7 @@ private:
 
         // Read and validate header
         DDSHeader header;
-        if(std::fread(&header, sizeof(DDSHeader), 1, file) != sizeof(DDSHeader)
+        if(std::fread(&header, sizeof(DDSHeader), 1, file) != 1
             || header.size != sizeof(DDSHeader) || header.pixelFormat.size != sizeof(DDSHeader::PixelFormat))
         {
             std::fclose(file);
@@ -2230,7 +2230,7 @@ private:
             && (header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', '1', '0')))
         {
             DDSHeaderDX10 header10;
-            if(std::fread(&header10, sizeof(DDSHeaderDX10), 1, file) != sizeof(DDSHeaderDX10))
+            if(std::fread(&header10, sizeof(DDSHeaderDX10), 1, file) != 1)
             {
                 std::fclose(file);
                 return GFX_SET_ERROR(
@@ -2589,10 +2589,19 @@ private:
             return numBytes;
         };
         GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
-        size_t           dataSize  = GetImageSize(width, height) * arraySize;
+        size_t           dataSize  = GetImageSize(width, height) * arraySize * depth;
         if(mipCount > 1)
         {
-            dataSize = ((dataSize * 4) / 3) + 32;
+            uint32_t mipWidth  = GFX_MAX(1U, width / 2);
+            uint32_t mipHeight = GFX_MAX(1U, height / 2);
+            uint32_t mipDepth  = GFX_MAX(1U, depth / 2);
+            for(uint32_t i = 1; i < mipCount; i++)
+            {
+                dataSize += GetImageSize(mipWidth, mipHeight) * mipDepth;
+                mipWidth  = GFX_MAX(1U, mipWidth / 2);
+                mipHeight = GFX_MAX(1U, mipHeight / 2);
+                mipDepth  = GFX_MAX(1U, mipDepth / 2);
+            }
         }
         image_ref->data.resize(dataSize);
         image_ref->width             = width;
@@ -2609,7 +2618,7 @@ private:
             for(uint32_t i = 0; i < mipCount; i++)
             {
                 uint32_t numBytes = GetImageSize(mipWidth, mipHeight) * mipDepth;
-                if(std::fread(data, numBytes, 1, file) != sizeof(numBytes))
+                if(std::fread(data, numBytes, 1, file) != 1)
                 {
                     std::fclose(file);
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation,
