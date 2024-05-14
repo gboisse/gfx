@@ -1391,10 +1391,14 @@ private:
                     std::string  roughness_map_file;
                     if(asset_file_ext != std::string::npos)
                     {
-                        std::string const asset_file_name =
+                        std::string asset_file_name =
                             image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
                         std::string const asset_file_extension =
                             image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
+                        if(auto const pos = asset_file_name.rfind(".metalrough"); pos != std::string::npos)
+                        {
+                            asset_file_name = asset_file_name.substr(0, pos);
+                        }
                         metallicity_map_file =
                             asset_file_name + ".metallicity" + asset_file_extension;
                         roughness_map_file =
