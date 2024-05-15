@@ -1990,12 +1990,10 @@ private:
             uint64_t node_handle = VisitNode(gltf_scene.nodes[i], glm::mat4(1.0), {}, 0);
             scene_gltf_nodes_.push_back(node_handle);
         }
-        for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
+        for(auto const &skin_data : skins)
         {
-            cgltf_skin const &gltf_skin = gltf_model->skins[i];
-            std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
-            if(it == skins.end()) continue;
-            GltfSkin &skin = gltf_skins_.insert(GetObjectIndex((*it).second));
+            cgltf_skin const &gltf_skin = *skin_data.first;
+            GltfSkin &skin = gltf_skins_.insert(GetObjectIndex(skin_data.second));
             skin.joints_.resize(gltf_skin.joints_count);
             for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
             {
@@ -2019,16 +2017,15 @@ private:
             std::set<uint64_t> dependent_skinned_nodes;
             animation_object.dependent_skins_.reserve(gltf_model->skins_count);
             for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
+            for(auto const &skin_data : skins)
             {
-                GltfSkin &skin = *gltf_skins_.at((std::uint32_t)i);
-                cgltf_skin const &gltf_skin = gltf_model->skins[i];
-                std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
-                if(it == skins.end()) continue;
+                GltfSkin &skin = *gltf_skins_.at(GetObjectIndex(skin_data.second));
+                cgltf_skin const &gltf_skin = *skin_data.first;
                 for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
                 {
                     if(animated_nodes.find(skin.joints_[j]) != animated_nodes.end())
                     {
-                        animation_object.dependent_skins_.push_back(it->second);
+                        animation_object.dependent_skins_.push_back(skin_data.second);
                         break;
                     }
                 }
