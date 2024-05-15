@@ -2022,7 +2022,7 @@ private:
             animation_object.dependent_skins_.reserve(gltf_model->skins_count);
             for(auto const &skin_data : skins)
             {
-                GltfSkin &skin = *gltf_skins_.at(GetObjectIndex(skin_data.second));
+                GltfSkin const &skin = *gltf_skins_.at(GetObjectIndex(skin_data.second));
                 cgltf_skin const &gltf_skin = *skin_data.first;
                 for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
                 {
