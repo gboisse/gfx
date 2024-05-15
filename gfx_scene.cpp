@@ -2016,7 +2016,6 @@ private:
                 animated_nodes.insert(channel.node_);
             std::set<uint64_t> dependent_skinned_nodes;
             animation_object.dependent_skins_.reserve(gltf_model->skins_count);
-            for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
             for(auto const &skin_data : skins)
             {
                 GltfSkin &skin = *gltf_skins_.at(GetObjectIndex(skin_data.second));
