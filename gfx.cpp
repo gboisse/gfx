@@ -6030,7 +6030,7 @@ private:
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_desc });
 
         D3D12_RAYTRACING_SHADER_CONFIG shader_config = {};
-        if (kernel.max_payload_size_ > 0 && kernel.max_attribute_size_ > 0)
+        if(kernel.max_payload_size_ > 0 && kernel.max_attribute_size_ > 0)
         {
             shader_config.MaxPayloadSizeInBytes = kernel.max_payload_size_;
             shader_config.MaxAttributeSizeInBytes = kernel.max_attribute_size_;
