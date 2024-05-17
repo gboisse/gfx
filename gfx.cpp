@@ -779,6 +779,10 @@ class GfxInternal
         Parameter *parameters_ = nullptr;
         uint32_t parameter_count_ = 0;
         uint32_t vertex_stride_ = 0;
+
+        // These two params are used for RT pipelines. If one of them is set, the other one must be set as well
+        uint32_t max_payload_size_ = 0;
+        uint32_t max_attribute_size_ = 0;
     };
     GfxArray<Kernel> kernels_;
     GfxHandles kernel_handles_;
@@ -2734,7 +2738,8 @@ public:
         GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
         char const **exports, uint32_t export_count,
         char const **subobjects, uint32_t subobject_count,
-        char const **defines, uint32_t define_count)
+        char const **defines, uint32_t define_count,
+        uint32_t max_payload_size, uint32_t max_attribute_size)
     {
         GfxKernel raytracing_kernel = {};
         if(dxr_device_ == nullptr)
@@ -2755,6 +2760,8 @@ public:
         gfx_kernel.program_ = program;
         gfx_kernel.entry_point_ = "";
         gfx_kernel.type_ = Kernel::kType_Raytracing;
+        gfx_kernel.max_payload_size_ = max_payload_size;
+        gfx_kernel.max_attribute_size_ = max_attribute_size;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         GFX_ASSERT(local_root_signature_association_count == 0 || local_root_signature_associations != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
@@ -6021,6 +6028,15 @@ private:
         subobjects.reserve(kernel.local_root_signature_associations_.size() + 2);
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &global_root_signature});
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_desc });
+
+        D3D12_RAYTRACING_SHADER_CONFIG shader_config = {};
+        if (kernel.max_payload_size_ > 0 && kernel.max_attribute_size_ > 0)
+        {
+            shader_config.MaxPayloadSizeInBytes = kernel.max_payload_size_;
+            shader_config.MaxAttributeSizeInBytes = kernel.max_attribute_size_;
+            subobjects.push_back({ D3D12_STATE_SUBOBJECT_TYPE_RAYTRACING_SHADER_CONFIG, &shader_config });
+        }
+
         std::vector<D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION> local_root_signature_associations;
         std::vector<D3D12_LOCAL_ROOT_SIGNATURE> local_root_signatures;
         std::vector<LPCWSTR> local_root_signature_associated_exports;
@@ -9437,12 +9453,13 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
     char const **exports, uint32_t export_count,
     char const **subobjects, uint32_t subobject_count,
-    char const **defines, uint32_t define_count)
+    char const **defines, uint32_t define_count,
+    uint32_t max_payload_size, uint32_t max_attribute_size)
 {
     GfxKernel const raytracing_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_kernel;    // invalid context
-    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count);
+    return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count, max_payload_size, max_attribute_size);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
