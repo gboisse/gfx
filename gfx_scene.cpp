@@ -1391,10 +1391,14 @@ private:
                     std::string  roughness_map_file;
                     if(asset_file_ext != std::string::npos)
                     {
-                        std::string const asset_file_name =
+                        std::string asset_file_name =
                             image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
                         std::string const asset_file_extension =
                             image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
+                        if(auto const pos = asset_file_name.rfind(".metalrough"); pos != std::string::npos)
+                        {
+                            asset_file_name = asset_file_name.substr(0, pos);
+                        }
                         metallicity_map_file =
                             asset_file_name + ".metallicity" + asset_file_extension;
                         roughness_map_file =
@@ -1990,12 +1994,10 @@ private:
             uint64_t node_handle = VisitNode(gltf_scene.nodes[i], glm::mat4(1.0), {}, 0);
             scene_gltf_nodes_.push_back(node_handle);
         }
-        for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
+        for(auto const &skin_data : skins)
         {
-            cgltf_skin const &gltf_skin = gltf_model->skins[i];
-            std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
-            if(it == skins.end()) continue;
-            GltfSkin &skin = gltf_skins_.insert(GetObjectIndex((*it).second));
+            cgltf_skin const &gltf_skin = *skin_data.first;
+            GltfSkin &skin = gltf_skins_.insert(GetObjectIndex(skin_data.second));
             skin.joints_.resize(gltf_skin.joints_count);
             for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
             {
@@ -2018,17 +2020,15 @@ private:
                 animated_nodes.insert(channel.node_);
             std::set<uint64_t> dependent_skinned_nodes;
             animation_object.dependent_skins_.reserve(gltf_model->skins_count);
-            for(cgltf_size i = 0; i < gltf_model->skins_count; ++i)
+            for(auto const &skin_data : skins)
             {
-                GltfSkin &skin = *gltf_skins_.at((std::uint32_t)i);
-                cgltf_skin const &gltf_skin = gltf_model->skins[i];
-                std::map<cgltf_skin const *, GfxConstRef<GfxSkin>>::const_iterator const it = skins.find(&gltf_skin);
-                if(it == skins.end()) continue;
+                GltfSkin const &skin = *gltf_skins_.at(GetObjectIndex(skin_data.second));
+                cgltf_skin const &gltf_skin = *skin_data.first;
                 for(cgltf_size j = 0; j < gltf_skin.joints_count; ++j)
                 {
                     if(animated_nodes.find(skin.joints_[j]) != animated_nodes.end())
                     {
-                        animation_object.dependent_skins_.push_back(it->second);
+                        animation_object.dependent_skins_.push_back(skin_data.second);
                         break;
                     }
                 }
@@ -2198,7 +2198,7 @@ private:
         }
         // Check DDS magic number identifier
         uint32_t magic;
-        if((std::fread(&magic, sizeof(uint32_t), 1, file) != sizeof(uint32_t))
+        if((std::fread(&magic, sizeof(uint32_t), 1, file) != 1)
             || (magic != MAKE_FOURCC('D', 'D', 'S', ' ')))
         {
             std::fclose(file);
@@ -2208,7 +2208,7 @@ private:
 
         // Read and validate header
         DDSHeader header;
-        if(std::fread(&header, sizeof(DDSHeader), 1, file) != sizeof(DDSHeader)
+        if(std::fread(&header, sizeof(DDSHeader), 1, file) != 1
             || header.size != sizeof(DDSHeader) || header.pixelFormat.size != sizeof(DDSHeader::PixelFormat))
         {
             std::fclose(file);
@@ -2230,7 +2230,7 @@ private:
             && (header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', '1', '0')))
         {
             DDSHeaderDX10 header10;
-            if(std::fread(&header10, sizeof(DDSHeaderDX10), 1, file) != sizeof(DDSHeaderDX10))
+            if(std::fread(&header10, sizeof(DDSHeaderDX10), 1, file) != 1)
             {
                 std::fclose(file);
                 return GFX_SET_ERROR(
@@ -2589,10 +2589,19 @@ private:
             return numBytes;
         };
         GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
-        size_t           dataSize  = GetImageSize(width, height) * arraySize;
+        size_t           dataSize  = GetImageSize(width, height) * arraySize * depth;
         if(mipCount > 1)
         {
-            dataSize = ((dataSize * 4) / 3) + 32;
+            uint32_t mipWidth  = GFX_MAX(1U, width / 2);
+            uint32_t mipHeight = GFX_MAX(1U, height / 2);
+            uint32_t mipDepth  = GFX_MAX(1U, depth / 2);
+            for(uint32_t i = 1; i < mipCount; i++)
+            {
+                dataSize += GetImageSize(mipWidth, mipHeight) * mipDepth;
+                mipWidth  = GFX_MAX(1U, mipWidth / 2);
+                mipHeight = GFX_MAX(1U, mipHeight / 2);
+                mipDepth  = GFX_MAX(1U, mipDepth / 2);
+            }
         }
         image_ref->data.resize(dataSize);
         image_ref->width             = width;
@@ -2609,7 +2618,7 @@ private:
             for(uint32_t i = 0; i < mipCount; i++)
             {
                 uint32_t numBytes = GetImageSize(mipWidth, mipHeight) * mipDepth;
-                if(std::fread(data, numBytes, 1, file) != sizeof(numBytes))
+                if(std::fread(data, numBytes, 1, file) != 1)
                 {
                     std::fclose(file);
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation,

@@ -26,7 +26,11 @@ SOFTWARE.
 
 #    ifdef GFX_ENABLE_GUI
 #include "gfx_imgui.h"  // for (optional) ImGui integration
+#       ifdef GFX_IMGUI_SOURCE
 #include "backends/imgui_impl_win32.h"
+#       else
+#include "imgui_impl_win32.h"
+#       endif
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #   endif
 

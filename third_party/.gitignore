@@ -6,3 +6,7 @@
 /tinyobjloader/
 /cgltf/
 /tinyexr/
+/D3D12MemoryAllocator/
+/directx12-agility/
+/directx-dxc/
+/WinPixEventRuntime/
