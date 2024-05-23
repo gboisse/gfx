@@ -3302,6 +3302,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if((kernel.isMesh() && mesh_command_list_ == nullptr))
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!kernel_handles_.has_handle(kernel.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot bind invalid kernel object");
         if(bound_kernel_.handle == kernel.handle) return kGfxResult_NoError;    // already bound
@@ -3631,6 +3633,8 @@ public:
     GfxResult encodeDrawMesh(uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
     {
         if(mesh_command_list_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(!num_groups_x || !num_groups_y || !num_groups_z)
             return kGfxResult_NoError;  // nothing to draw
@@ -3649,6 +3653,8 @@ public:
 
     GfxResult encodeDrawMeshIndirect(GfxBuffer args_buffer)
     {
+        if(mesh_command_list_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(!buffer_handles_.has_handle(args_buffer.handle))
