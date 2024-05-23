@@ -3632,10 +3632,10 @@ public:
 
     GfxResult encodeDrawMesh(uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
     {
-        if(mesh_command_list_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(mesh_command_list_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!num_groups_x || !num_groups_y || !num_groups_z)
             return kGfxResult_NoError;  // nothing to draw
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
@@ -3653,10 +3653,10 @@ public:
 
     GfxResult encodeDrawMeshIndirect(GfxBuffer args_buffer)
     {
-        if(mesh_command_list_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(mesh_command_list_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!buffer_handles_.has_handle(args_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot draw using an invalid arguments buffer object");
         if(args_buffer.cpu_access == kGfxCpuAccess_Read)
