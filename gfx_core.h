@@ -112,7 +112,7 @@ enum GfxConstant
 #undef GFX_ASSERT
 #define GFX_ASSERT(X)                       \
     GFX_MULTI_LINE_MACRO_BEGIN              \
-        if (!(X))                           \
+        if(!(X))                            \
         {                                   \
             GFX_BREAKPOINT;                 \
             exit(kGfxResult_InternalError); \
