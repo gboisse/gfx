@@ -38,6 +38,7 @@ SOFTWARE.
 #include "backends/imgui_impl_win32.cpp"
 #ifdef _MSC_VER
 #    pragma warning(pop)
+#endif
 #else
 #include "imgui_impl_win32.h"
 #endif

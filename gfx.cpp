@@ -6612,8 +6612,9 @@ private:
         geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
         if((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Opaque) != 0)
             geometry_desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-        GFX_ASSERT(gfx_raytracing_primitive.index_stride_ == 0 || gfx_index_buffer != nullptr); // should never happen
+        GFX_ASSERT(gfx_raytracing_primitive.triangles_.index_stride_ == 0 || gfx_index_buffer != nullptr);  // should never happen
         if(gfx_index_buffer != nullptr)
+        {
             geometry_desc.Triangles.IndexFormat = (gfx_raytracing_primitive.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT);
             geometry_desc.Triangles.IndexCount = (uint32_t)(gfx_raytracing_primitive.triangles_.index_buffer_.size / gfx_raytracing_primitive.triangles_.index_stride_);
             geometry_desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
