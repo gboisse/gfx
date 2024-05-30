@@ -311,6 +311,15 @@ enum GfxMaterialFlag
 };
 typedef uint32_t GfxMaterialFlags;
 
+enum GfxMaterialAlphaMode
+{
+    GfxMaterialAlphaMode_Opaque = 0,
+    GfxMaterialAlphaMode_Blend = 1,
+    GfxMaterialAlphaMode_Mask = 2,
+
+    GfxMaterialAlphaMode_Count
+};
+
 struct GfxMaterial
 {
     glm::vec4        albedo              = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
@@ -324,6 +333,7 @@ struct GfxMaterial
     float            clearcoat           = 0.0f;
     float            clearcoat_roughness = 0.0f;
     GfxMaterialFlags flags               = 0;
+    GfxMaterialAlphaMode alpha_mode      = GfxMaterialAlphaMode_Opaque;
 
     GfxConstRef<GfxImage> albedo_map;
     GfxConstRef<GfxImage> roughness_map;

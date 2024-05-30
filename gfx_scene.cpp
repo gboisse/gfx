@@ -1364,6 +1364,13 @@ private:
                 material.clearcoat_roughness = gltf_material.clearcoat.clearcoat_roughness_factor;
             }
             if(gltf_material.double_sided) material.flags |= kGfxMaterialFlag_DoubleSided;
+            switch(gltf_material.alpha_mode)
+            {
+            case cgltf_alpha_mode_opaque: material.alpha_mode = GfxMaterialAlphaMode_Opaque; break;
+            case cgltf_alpha_mode_mask: material.alpha_mode = GfxMaterialAlphaMode_Mask; break;
+            case cgltf_alpha_mode_blend: material.alpha_mode = GfxMaterialAlphaMode_Blend; break;
+            default: material.alpha_mode = GfxMaterialAlphaMode_Opaque; break;
+            }
             cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
             it = (albedo_map_text != nullptr ? images.find(albedo_map_text->image) : images.end());
             if(it != images.end())
