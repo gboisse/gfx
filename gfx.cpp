@@ -1561,20 +1561,16 @@ public:
             return buffer;
         }
         if(cpu_access != kGfxCpuAccess_None)
-            switch(cpu_access)
+            if(cpu_access == kGfxCpuAccess_Write)
             {
-            case kGfxCpuAccess_Write:
-                {
-                    D3D12_RANGE read_range = {};
-                    gfx_buffer.resource_->Map(0, &read_range, &gfx_buffer.data_);
-                    memset(gfx_buffer.data_, 0, (size_t)resource_desc.Width);
-                    if(data) memcpy(gfx_buffer.data_, data, (size_t)size);
-                }
-                break;
-            default:
-                gfx_buffer.resource_->Map(0, nullptr, &gfx_buffer.data_);
-                break;
+                D3D12_RANGE read_range = {};
+                gfx_buffer.resource_->Map(0, &read_range, &gfx_buffer.data_);
+                memset(gfx_buffer.data_, 0, (size_t)resource_desc.Width);
+                if(data)
+                    memcpy(gfx_buffer.data_, data, (size_t)size);
             }
+            else
+                gfx_buffer.resource_->Map(0, nullptr, &gfx_buffer.data_);
         buffer.size = size;
         buffer.cpu_access = cpu_access;
         buffer.stride = sizeof(uint32_t);
@@ -1978,7 +1974,7 @@ public:
                 continue;   // invalid raytracing primitive object
             active_raytracing_primitives_.push_back(raytracing_primitive);
             RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-            GfxBuffer const &buffer = getRaytracingPrimitiveBuffer(gfx_raytracing_primitive);
+            GfxBuffer buffer = getRaytracingPrimitiveBuffer(gfx_raytracing_primitive);
             if(!buffer_handles_.has_handle(buffer.handle))
                 continue;   // no valid BVH memory, probably wasn't built
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
@@ -2121,12 +2117,12 @@ public:
             RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
             if(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
                 break;  // found parent raytracing primitive
-            switch(parent_raytracing_primitive.type_)
+            if(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Instance)
             {
-            case RaytracingPrimitive::kType_Instance:
                 raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
-                break;
-            default:
+            }
+            else
+            {
                 GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
                 return cloned_raytracing_primitive; // invalid raytracing primitive type
             }
@@ -2281,13 +2277,8 @@ public:
             return 0;
         }
         RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        switch(gfx_raytracing_primitive.type_)
-        {
-        case RaytracingPrimitive::kType_Triangles:
+        if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
             return gfx_raytracing_primitive.triangles_.bvh_data_size_;
-        default:
-            break;
-        }
         return 0;   // instanced raytracing primitives do not consume BVH memory
     }
 
@@ -2571,7 +2562,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture const &texture, uint32_t mip_level)
     {
         if(!sbt_handles_.has_handle(sbt.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
@@ -2854,7 +2845,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearBuffer(GfxBuffer buffer, uint32_t clear_value)
+    GfxResult encodeClearBuffer(GfxBuffer const &buffer, uint32_t clear_value)
     {
         GfxResult result = kGfxResult_NoError;
         if(command_list_ == nullptr)
@@ -2864,7 +2855,6 @@ public:
         if(buffer.size == 0) return kGfxResult_NoError; // nothing to clear
         uint64_t const data_size = GFX_ALIGN(buffer.size, 4);
         uint64_t const num_uints = data_size / sizeof(uint32_t);
-        buffer.setStride(sizeof(uint32_t));
         switch(buffer.cpu_access)
         {
         case kGfxCpuAccess_Write:
@@ -2894,7 +2884,9 @@ public:
         default:    // kGfxCpuAccess_None
             {
                 GfxKernel const bound_kernel = bound_kernel_;
-                setProgramBuffer(clear_buffer_program_, "OutputBuffer", buffer);
+                GfxBuffer       buffer_temp  = buffer;
+                buffer_temp.setStride(sizeof(uint32_t));
+                setProgramBuffer(clear_buffer_program_, "OutputBuffer", buffer_temp);
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
                 uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
@@ -3259,7 +3251,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeBindColorTarget(uint32_t target_index, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
+    GfxResult encodeBindColorTarget(uint32_t target_index, GfxTexture const &target_texture, uint32_t mip_level, uint32_t slice)
     {
         if(target_index >= kGfxConstant_MaxRenderTarget)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot bind more than %u render targets", (uint32_t)kGfxConstant_MaxRenderTarget);
@@ -3275,7 +3267,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeBindDepthStencilTarget(GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
+    GfxResult encodeBindDepthStencilTarget(GfxTexture const &target_texture, uint32_t mip_level, uint32_t slice)
     {
         if(!target_texture)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
@@ -3487,7 +3479,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDispatchIndirect(GfxBuffer args_buffer)
+    GfxResult encodeDispatchIndirect(GfxBuffer const &args_buffer)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3512,7 +3504,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeMultiDispatchIndirect(GfxBuffer args_buffer, uint32_t args_count)
+    GfxResult encodeMultiDispatchIndirect(GfxBuffer const &args_buffer, uint32_t args_count)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3593,7 +3585,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDispatchRaysIndirect(GfxSbt const &sbt, GfxBuffer args_buffer)
+    GfxResult encodeDispatchRaysIndirect(GfxSbt const &sbt, GfxBuffer const &args_buffer)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -3642,7 +3634,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeDrawMeshIndirect(GfxBuffer args_buffer)
+    GfxResult encodeDrawMeshIndirect(GfxBuffer const &args_buffer)
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
@@ -4568,7 +4560,7 @@ public:
         return buffers_[gfx_acceleration_structure.bvh_buffer_].isInterop();
     }
 
-    static inline GfxInternal *GetGfx(GfxContext &context) { return reinterpret_cast<GfxInternal *>(context.handle); }
+    static inline GfxInternal *GetGfx(GfxContext const &context) { return reinterpret_cast<GfxInternal *>(context.handle); }
 
     static void DispenseDrawState(GfxDrawState &draw_state)
     {
@@ -5668,19 +5660,18 @@ private:
             for(size_t i = 0; i < root_signature_parameters.root_parameters.size(); ++i)
             {
                 Kernel::Parameter const &kernel_parameter = root_signature_parameters.kernel_parameters[i];
-                switch(kernel_parameter.type_)
+                if(kernel_parameter.type_ == Kernel::Parameter::kType_Constants)
                 {
-                case Kernel::Parameter::kType_Constants:
                     root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
                     root_signature_parameters.root_parameters[i].Constants.Num32BitValues = kernel_parameter.variable_size_ / sizeof(uint32_t);
                     root_signature_parameters.root_parameters[i].Constants.ShaderRegister = root_signature_parameters.descriptor_ranges[i].BaseShaderRegister;
                     root_signature_parameters.root_parameters[i].Constants.RegisterSpace = root_signature_parameters.descriptor_ranges[i].RegisterSpace;
-                    break;
-                default:
+                }
+                else
+                {
                     root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
                     root_signature_parameters.root_parameters[i].DescriptorTable.pDescriptorRanges = &root_signature_parameters.descriptor_ranges[i];
                     root_signature_parameters.root_parameters[i].DescriptorTable.NumDescriptorRanges = 1;
-                    break;
                 }
             }
         };
@@ -5751,15 +5742,14 @@ private:
             for(size_t i = 0; i < local_parameters.parameters_.size(); ++i)
             {
                 Kernel::Parameter const &kernel_parameter = local_parameters.parameters_[i];
-                switch(kernel_parameter.type_)
+                if(kernel_parameter.type_ == Kernel::Parameter::kType_Constants)
                 {
-                case Kernel::Parameter::kType_Constants:
                     local_root_signature_parameters_size += GFX_ALIGN(kernel_parameter.variable_size_, sizeof(D3D12_GPU_VIRTUAL_ADDRESS));
                     local_root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-                    break;
-                default:
+                }
+                else
+                {
                     local_root_signature_parameters_size += sizeof(D3D12_GPU_DESCRIPTOR_HANDLE);
-                    break;
                 }
             }
             GfxShaderGroupType const shader_group_type = local_root_signature_spaces[space];
@@ -7420,7 +7410,7 @@ private:
                     }
                     else
                     {
-                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                        GfxBuffer buffer = parameter.parameter_->data_.buffer_.buffers_[j];
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
                             if(buffer.handle != 0)
@@ -7483,7 +7473,7 @@ private:
                     }
                     else
                     {
-                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                        GfxBuffer buffer = parameter.parameter_->data_.buffer_.buffers_[j];
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
                             if(buffer.handle != 0)
@@ -8049,7 +8039,7 @@ private:
                             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str (),    program.file_name_.c_str());
                             break;  // user set an invalid buffer object
                         }
-                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
+                        GfxBuffer buffer = parameter.parameter_->data_.buffer_.buffers_[0];
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
                             if(buffer.handle != 0)
@@ -8922,7 +8912,7 @@ GfxContext gfxCreateContext(uint32_t width, uint32_t height, GfxCreateContextFla
     return context;
 }
 
-GfxResult gfxDestroyContext(GfxContext context)
+GfxResult gfxDestroyContext(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_NoError; // nothing to destroy
@@ -8930,56 +8920,56 @@ GfxResult gfxDestroyContext(GfxContext context)
     return kGfxResult_NoError;
 }
 
-uint32_t gfxGetBackBufferWidth(GfxContext context)
+uint32_t gfxGetBackBufferWidth(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBackBufferWidth();
 }
 
-uint32_t gfxGetBackBufferHeight(GfxContext context)
+uint32_t gfxGetBackBufferHeight(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBackBufferHeight();
 }
 
-uint32_t gfxGetBackBufferIndex(GfxContext context)
+uint32_t gfxGetBackBufferIndex(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBackBufferIndex();
 }
 
-uint32_t gfxGetBackBufferCount(GfxContext context)
+uint32_t gfxGetBackBufferCount(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBackBufferCount();
 }
 
-bool gfxIsRaytracingSupported(GfxContext context)
+bool gfxIsRaytracingSupported(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return false;  // invalid context
     return gfx->isRaytracingSupported();
 }
 
-bool gfxIsMeshShaderSupported(GfxContext context)
+bool gfxIsMeshShaderSupported(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return false;  // invalid context
     return gfx->isMeshShaderSupported();
 }
 
-bool gfxIsInteropContext(GfxContext context)
+bool gfxIsInteropContext(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return false;  // invalid context
     return gfx->isInterop();
 }
 
-GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data, GfxCpuAccess cpu_access)
+GfxBuffer gfxCreateBuffer(GfxContext const &context, uint64_t size, void const *data, GfxCpuAccess cpu_access)
 {
     GfxBuffer const buffer = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -8987,7 +8977,7 @@ GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data, G
     return gfx->createBuffer(size, data, cpu_access);
 }
 
-GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t byte_offset, uint64_t size)
+GfxBuffer gfxCreateBufferRange(GfxContext const &context, GfxBuffer const &buffer, uint64_t byte_offset, uint64_t size)
 {
     GfxBuffer const buffer_range = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -8995,21 +8985,21 @@ GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t by
     return gfx->createBufferRange(buffer, byte_offset, size);
 }
 
-GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer)
+GfxResult gfxDestroyBuffer(GfxContext const &context, GfxBuffer const &buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyBuffer(buffer);
 }
 
-void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
+void *gfxBufferGetData(GfxContext const &context, GfxBuffer const &buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getBufferData(buffer);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext const &context, DXGI_FORMAT format, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9017,7 +9007,7 @@ GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float cons
     return gfx->createTexture2D(format, clear_value);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext const &context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9025,7 +9015,7 @@ GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t heigh
     return gfx->createTexture2D(width, height, format, mip_levels, clear_value);
 }
 
-GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture2DArray(GfxContext const &context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9033,7 +9023,7 @@ GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t 
     return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels, clear_value);
 }
 
-GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture3D(GfxContext const &context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9041,7 +9031,7 @@ GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t heigh
     return gfx->createTexture3D(width, height, depth, format, mip_levels, clear_value);
 }
 
-GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTextureCube(GfxContext const &context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9049,14 +9039,14 @@ GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT f
     return gfx->createTextureCube(size, format, mip_levels, clear_value);
 }
 
-GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
+GfxResult gfxDestroyTexture(GfxContext const &context, GfxTexture const &texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyTexture(texture);
 }
 
-GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
+GfxSamplerState gfxCreateSamplerState(GfxContext const &context, D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
 {
     GfxSamplerState const sampler_state = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9064,7 +9054,7 @@ GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D
     return gfx->createSamplerState(filter, address_u, address_v, address_w, mip_lod_bias, min_lod, max_lod);
 }
 
-GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D3D12_COMPARISON_FUNC comparison_func, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
+GfxSamplerState gfxCreateSamplerState(GfxContext const &context, D3D12_FILTER filter, D3D12_COMPARISON_FUNC comparison_func, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
 {
     GfxSamplerState const sampler_state = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9072,14 +9062,14 @@ GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D
     return gfx->createSamplerState(filter, comparison_func, address_u, address_v, address_w, mip_lod_bias, min_lod, max_lod);
 }
 
-GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_state)
+GfxResult gfxDestroySamplerState(GfxContext const &context, GfxSamplerState sampler_state)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroySamplerState(sampler_state);
 }
 
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context)
+GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext const &context)
 {
     GfxAccelerationStructure const acceleration_structure = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9087,42 +9077,42 @@ GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context)
     return gfx->createAccelerationStructure();
 }
 
-GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStructure acceleration_structure)
+GfxResult gfxDestroyAccelerationStructure(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyAccelerationStructure(acceleration_structure);
 }
 
-GfxResult gfxAccelerationStructureUpdate(GfxContext context, GfxAccelerationStructure acceleration_structure)
+GfxResult gfxAccelerationStructureUpdate(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateAccelerationStructure(acceleration_structure);
 }
 
-uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAccelerationStructure acceleration_structure)
+uint64_t gfxAccelerationStructureGetDataSize(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getAccelerationStructureDataSize(acceleration_structure);
 }
 
-uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context, GfxAccelerationStructure acceleration_structure)
+uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getAccelerationStructureRaytracingPrimitiveCount(acceleration_structure);
 }
 
-GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure)
+GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getAccelerationStructureRaytracingPrimitives(acceleration_structure);
 }
 
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure)
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxRaytracingPrimitive const raytracing_primitive = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9130,7 +9120,7 @@ GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccel
     return gfx->createRaytracingPrimitive(acceleration_structure);
 }
 
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive)
 {
     GfxRaytracingPrimitive const cloned_raytracing_primitive = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9138,77 +9128,77 @@ GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytr
     return gfx->createRaytracingPrimitive(raytracing_primitive);
 }
 
-GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+GfxResult gfxDestroyRaytracingPrimitive(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyRaytracingPrimitive(raytracing_primitive);
 }
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->buildRaytracingPrimitive(raytracing_primitive, vertex_buffer, vertex_stride, build_flags);
 }
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+GfxResult gfxRaytracingPrimitiveBuild(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->buildRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, build_flags);
 }
 
-GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform)
+GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, float const *row_major_4x4_transform)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setRaytracingPrimitiveTransform(raytracing_primitive, row_major_4x4_transform);
 }
 
-GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id)
+GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, uint32_t instance_id)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setRaytracingPrimitiveInstanceID(raytracing_primitive, instance_id);
 }
 
-GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask)
+GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, uint8_t instance_mask)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setRaytracingPrimitiveInstanceMask(raytracing_primitive, instance_mask);
 }
 
-GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index)
+GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, uint32_t instance_contribution_to_hit_group_index)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setRaytracingPrimitiveInstanceContributionToHitGroupIndex(raytracing_primitive, instance_contribution_to_hit_group_index);
 }
 
-uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getRaytracingPrimitiveDataSize(raytracing_primitive);
 }
 
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateRaytracingPrimitive(raytracing_primitive);
 }
 
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext const &context, GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const& index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride);
 }
 
-GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+GfxSbt gfxCreateSbt(GfxContext const &context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
 {
     GfxSbt const sbt = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9216,7 +9206,7 @@ GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kerne
     return gfx->createSbt(kernels, kernel_count, entry_count);
 }
 
-GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
+GfxResult gfxDestroySbt(GfxContext const &context, GfxSbt sbt)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
@@ -9287,7 +9277,7 @@ GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blen
     return GfxInternal::SetDrawStateBlendMode(draw_state, src_blend, dst_blend, blend_op, src_blend_alpha, dst_blend_alpha, blend_op_alpha);
 }
 
-GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
+GfxProgram gfxCreateProgram(GfxContext const &context, char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
 {
     GfxProgram const program = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9295,7 +9285,7 @@ GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char cons
     return gfx->createProgram(file_name, file_path, shader_model, include_paths, include_path_count);
 }
 
-GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, char const *name, char const *shader_model, char const **include_paths, uint32_t include_path_count)
+GfxProgram gfxCreateProgram(GfxContext const &context, GfxProgramDesc program_desc, char const *name, char const *shader_model, char const **include_paths, uint32_t include_path_count)
 {
     GfxProgram const program = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9303,91 +9293,91 @@ GfxProgram gfxCreateProgram(GfxContext context, GfxProgramDesc program_desc, cha
     return gfx->createProgram(program_desc, name, shader_model, include_paths, include_path_count);
 }
 
-GfxResult gfxDestroyProgram(GfxContext context, GfxProgram program)
+GfxResult gfxDestroyProgram(GfxContext const &context, GfxProgram const &program)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyProgram(program);
 }
 
-GfxResult gfxProgramSetBuffer(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer buffer)
+GfxResult gfxProgramSetBuffer(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxBuffer const &buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramBuffer(program, parameter_name, buffer);
 }
 
-GfxResult gfxProgramSetBuffers(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const *buffers, uint32_t buffer_count)
+GfxResult gfxProgramSetBuffers(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxBuffer const *buffers, uint32_t buffer_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramBuffers(program, parameter_name, buffers, buffer_count);
 }
 
-GfxResult gfxProgramSetTexture(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+GfxResult gfxProgramSetTexture(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxTexture const &texture, uint32_t mip_level)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramTexture(program, parameter_name, texture, mip_level);
 }
 
-GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count)
+GfxResult gfxProgramSetTextures(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramTextures(program, parameter_name, textures, nullptr, texture_count);
 }
 
-GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
+GfxResult gfxProgramSetTextures(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramTextures(program, parameter_name, textures, mip_levels, texture_count);
 }
 
-GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state)
+GfxResult gfxProgramSetSamplerState(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxSamplerState sampler_state)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramSamplerState(program, parameter_name, sampler_state);
 }
 
-GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure)
+GfxResult gfxProgramSetAccelerationStructure(GfxContext const &context, GfxProgram const &program, char const *parameter_name, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramAccelerationStructure(program, parameter_name, acceleration_structure);
 }
 
-GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size)
+GfxResult gfxProgramSetConstants(GfxContext const &context, GfxProgram const &program, char const *parameter_name, void const *data, uint32_t data_size)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setProgramConstants(program, parameter_name, data, data_size);
 }
 
-GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+GfxResult gfxSbtSetShaderGroup(GfxContext const &context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->sbtSetShaderGroup(sbt, shader_group_type, index, group_name);
 }
 
-GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+GfxResult gfxSbtSetConstants(GfxContext const &context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
 }
 
-GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+GfxResult gfxSbtSetTexture(GfxContext const &context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture const &texture, uint32_t mip_level)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->sbtSetTexture(sbt, shader_group_type, index, parameter_name, texture, mip_level);
 }
 
-GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
+GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext const &context,
     GfxSbt sbt,
     D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
     D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
@@ -9403,13 +9393,13 @@ GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
         callable_shader_table);
 }
 
-GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateMeshKernel(GfxContext const &context, GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxDrawState const default_draw_state = {};
     return gfxCreateMeshKernel(context, program, default_draw_state, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateMeshKernel(GfxContext const &context, GfxProgram const &program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const mesh_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9417,7 +9407,7 @@ GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, GfxDrawSta
     return gfx->createMeshKernel(program, draw_state, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateComputeKernel(GfxContext const &context, GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const compute_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9425,13 +9415,13 @@ GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char co
     return gfx->createComputeKernel(program, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateGraphicsKernel(GfxContext const &context, GfxProgram const &program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxDrawState const default_draw_state = {};
     return gfxCreateGraphicsKernel(context, program, default_draw_state, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
+GfxKernel gfxCreateGraphicsKernel(GfxContext const &context, GfxProgram const &program, GfxDrawState draw_state, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxKernel const graphics_kernel = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9439,7 +9429,7 @@ GfxKernel gfxCreateGraphicsKernel(GfxContext context, GfxProgram program, GfxDra
     return gfx->createGraphicsKernel(program, draw_state, entry_point, defines, define_count);
 }
 
-GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
+GfxKernel gfxCreateRaytracingKernel(GfxContext const &context, GfxProgram const &program,
     GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
     char const **exports, uint32_t export_count,
     char const **subobjects, uint32_t subobject_count,
@@ -9451,238 +9441,238 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count);
 }
 
-GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
+GfxResult gfxDestroyKernel(GfxContext const &context, GfxKernel const &kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyKernel(kernel);
 }
 
-uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel)
+uint32_t const *gfxKernelGetNumThreads(GfxContext const &context, GfxKernel const &kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getKernelNumThreads(kernel);
 }
 
-GfxResult gfxKernelReloadAll(GfxContext context)
+GfxResult gfxKernelReloadAll(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->reloadAllKernels();
 }
 
-GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src)
+GfxResult gfxCommandCopyBuffer(GfxContext const &context, GfxBuffer const &dst, GfxBuffer const &src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyBuffer(dst, src);
 }
 
-GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_offset, GfxBuffer src, uint64_t src_offset, uint64_t size)
+GfxResult gfxCommandCopyBuffer(GfxContext const &context, GfxBuffer const &dst, uint64_t dst_offset, GfxBuffer const &src, uint64_t src_offset, uint64_t size)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyBuffer(dst, dst_offset, src, src_offset, size);
 }
 
-GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value)
+GfxResult gfxCommandClearBuffer(GfxContext const &context, GfxBuffer const &buffer, uint32_t clear_value)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeClearBuffer(buffer, clear_value);
 }
 
-GfxResult gfxCommandClearBackBuffer(GfxContext context)
+GfxResult gfxCommandClearBackBuffer(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeClearBackBuffer();
 }
 
-GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture)
+GfxResult gfxCommandClearTexture(GfxContext const &context, GfxTexture const &texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeClearTexture(texture);
 }
 
-GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src)
+GfxResult gfxCommandCopyTexture(GfxContext const &context, GfxTexture const &dst, GfxTexture const &src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTexture(dst, src);
 }
 
-GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice)
+GfxResult gfxCommandClearImage(GfxContext const &context, GfxTexture const &texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeClearImage(texture, mip_level, slice);
 }
 
-GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture)
+GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext const &context, GfxTexture const &texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTextureToBackBuffer(texture);
 }
 
-GfxResult gfxCommandCopyBufferToTexture(GfxContext context, GfxTexture dst, GfxBuffer src)
+GfxResult gfxCommandCopyBufferToTexture(GfxContext const &context, GfxTexture const &dst, GfxBuffer const &src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyBufferToTexture(dst, src);
 }
 
-GfxResult gfxCommandCopyBufferToCubeFace(GfxContext context, GfxTexture dst, GfxBuffer src, uint32_t face)
+GfxResult gfxCommandCopyBufferToCubeFace(GfxContext const &context, GfxTexture const &dst, GfxBuffer const &src, uint32_t face)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyBufferToCubeFace(dst, src, face);
 }
 
-GfxResult gfxCommandCopyTextureToBuffer(GfxContext context, GfxBuffer dst, GfxTexture src)
+GfxResult gfxCommandCopyTextureToBuffer(GfxContext const &context, GfxBuffer const &dst, GfxTexture const &src)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTextureToBuffer(dst, src);
 }
 
-GfxResult gfxCommandGenerateMips(GfxContext context, GfxTexture texture)
+GfxResult gfxCommandGenerateMips(GfxContext const &context, GfxTexture const &texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeGenerateMips(texture);
 }
 
-GfxResult gfxCommandBindColorTarget(GfxContext context, uint32_t target_index, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
+GfxResult gfxCommandBindColorTarget(GfxContext const &context, uint32_t target_index, GfxTexture const &target_texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeBindColorTarget(target_index, target_texture, mip_level, slice);
 }
 
-GfxResult gfxCommandBindDepthStencilTarget(GfxContext context, GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
+GfxResult gfxCommandBindDepthStencilTarget(GfxContext const &context, GfxTexture const &target_texture, uint32_t mip_level, uint32_t slice)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeBindDepthStencilTarget(target_texture, mip_level, slice);
 }
 
-GfxResult gfxCommandBindKernel(GfxContext context, GfxKernel kernel)
+GfxResult gfxCommandBindKernel(GfxContext const &context, GfxKernel const &kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeBindKernel(kernel);
 }
 
-GfxResult gfxCommandBindIndexBuffer(GfxContext context, GfxBuffer index_buffer)
+GfxResult gfxCommandBindIndexBuffer(GfxContext const &context, GfxBuffer const &index_buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeBindIndexBuffer(index_buffer);
 }
 
-GfxResult gfxCommandBindVertexBuffer(GfxContext context, GfxBuffer vertex_buffer)
+GfxResult gfxCommandBindVertexBuffer(GfxContext const &context, GfxBuffer const &vertex_buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeBindVertexBuffer(vertex_buffer);
 }
 
-GfxResult gfxCommandSetViewport(GfxContext context, float x, float y, float width, float height)
+GfxResult gfxCommandSetViewport(GfxContext const &context, float x, float y, float width, float height)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeSetViewport(x, y, width, height);
 }
 
-GfxResult gfxCommandSetScissorRect(GfxContext context, int32_t x, int32_t y, int32_t width, int32_t height)
+GfxResult gfxCommandSetScissorRect(GfxContext const &context, int32_t x, int32_t y, int32_t width, int32_t height)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeSetScissorRect(x, y, width, height);
 }
 
-GfxResult gfxCommandDraw(GfxContext context, uint32_t vertex_count, uint32_t instance_count, uint32_t base_vertex, uint32_t base_instance)
+GfxResult gfxCommandDraw(GfxContext const &context, uint32_t vertex_count, uint32_t instance_count, uint32_t base_vertex, uint32_t base_instance)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDraw(vertex_count, instance_count, base_vertex, base_instance);
 }
 
-GfxResult gfxCommandDrawIndexed(GfxContext context, uint32_t index_count, uint32_t instance_count, uint32_t first_index, uint32_t base_vertex, uint32_t base_instance)
+GfxResult gfxCommandDrawIndexed(GfxContext const &context, uint32_t index_count, uint32_t instance_count, uint32_t first_index, uint32_t base_vertex, uint32_t base_instance)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDrawIndexed(index_count, instance_count, first_index, base_vertex, base_instance);
 }
 
-GfxResult gfxCommandMultiDrawIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count)
+GfxResult gfxCommandMultiDrawIndirect(GfxContext const &context, GfxBuffer const &args_buffer, uint32_t args_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeMultiDrawIndirect(args_buffer, args_count);
 }
 
-GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count)
+GfxResult gfxCommandMultiDrawIndexedIndirect(GfxContext const &context, GfxBuffer const &args_buffer, uint32_t args_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeMultiDrawIndexedIndirect(args_buffer, args_count);
 }
 
-GfxResult gfxCommandDispatch(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
+GfxResult gfxCommandDispatch(GfxContext const &context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatch(num_groups_x, num_groups_y, num_groups_z);
 }
 
-GfxResult gfxCommandDispatchIndirect(GfxContext context, GfxBuffer args_buffer)
+GfxResult gfxCommandDispatchIndirect(GfxContext const &context, GfxBuffer const &args_buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatchIndirect(args_buffer);
 }
 
-GfxResult gfxCommandMultiDispatchIndirect(GfxContext context, GfxBuffer args_buffer, uint32_t args_count)
+GfxResult gfxCommandMultiDispatchIndirect(GfxContext const &context, GfxBuffer const &args_buffer, uint32_t args_count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeMultiDispatchIndirect(args_buffer, args_count);
 }
 
-GfxResult gfxCommandDispatchRays(GfxContext context, GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth)
+GfxResult gfxCommandDispatchRays(GfxContext const &context, GfxSbt sbt, uint32_t width, uint32_t height, uint32_t depth)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatchRays(sbt, width, height, depth);
 }
 
-GfxResult gfxCommandDispatchRaysIndirect(GfxContext context, GfxSbt sbt, GfxBuffer args_buffer)
+GfxResult gfxCommandDispatchRaysIndirect(GfxContext const &context, GfxSbt sbt, GfxBuffer const &args_buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDispatchRaysIndirect(sbt, args_buffer);
 }
 
-GfxResult gfxCommandDrawMesh(GfxContext context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
+GfxResult gfxCommandDrawMesh(GfxContext const &context, uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDrawMesh(num_groups_x, num_groups_y, num_groups_z);
 }
 
-GfxResult gfxCommandDrawMeshIndirect(GfxContext context, GfxBuffer args_buffer)
+GfxResult gfxCommandDrawMeshIndirect(GfxContext const &context, GfxBuffer const &args_buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeDrawMeshIndirect(args_buffer);
 }
 
-GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
+GfxTimestampQuery gfxCreateTimestampQuery(GfxContext const &context)
 {
     GfxTimestampQuery const timestamp_query = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9690,35 +9680,35 @@ GfxTimestampQuery gfxCreateTimestampQuery(GfxContext context)
     return gfx->createTimestampQuery();
 }
 
-GfxResult gfxDestroyTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query)
+GfxResult gfxDestroyTimestampQuery(GfxContext const &context, GfxTimestampQuery timestamp_query)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyTimestampQuery(timestamp_query);
 }
 
-float gfxTimestampQueryGetDuration(GfxContext context, GfxTimestampQuery timestamp_query)
+float gfxTimestampQueryGetDuration(GfxContext const &context, GfxTimestampQuery timestamp_query)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0.0f;   // invalid context
     return gfx->getTimestampQueryDuration(timestamp_query);
 }
 
-GfxResult gfxCommandBeginTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query)
+GfxResult gfxCommandBeginTimestampQuery(GfxContext const &context, GfxTimestampQuery timestamp_query)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeBeginTimestampQuery(timestamp_query);
 }
 
-GfxResult gfxCommandEndTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query)
+GfxResult gfxCommandEndTimestampQuery(GfxContext const &context, GfxTimestampQuery timestamp_query)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeEndTimestampQuery(timestamp_query);
 }
 
-GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...)
+GfxResult gfxCommandBeginEvent(GfxContext const &context, char const *format, ...)
 {
     va_list args;
     GfxResult result;
@@ -9730,7 +9720,7 @@ GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...)
     return result;
 }
 
-GfxResult gfxCommandBeginEvent(GfxContext context, uint64_t color, char const *format, ...)
+GfxResult gfxCommandBeginEvent(GfxContext const &context, uint64_t color, char const *format, ...)
 {
     va_list args;
     GfxResult result;
@@ -9742,70 +9732,70 @@ GfxResult gfxCommandBeginEvent(GfxContext context, uint64_t color, char const *f
     return result;
 }
 
-GfxResult gfxCommandEndEvent(GfxContext context)
+GfxResult gfxCommandEndEvent(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeEndEvent();
 }
 
-GfxResult gfxCommandScanMin(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+GfxResult gfxCommandScanMin(GfxContext const &context, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeScan(GfxInternal::kOpType_Min, data_type, dst, src, count);
 }
 
-GfxResult gfxCommandScanMax(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+GfxResult gfxCommandScanMax(GfxContext const &context, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeScan(GfxInternal::kOpType_Max, data_type, dst, src, count);
 }
 
-GfxResult gfxCommandScanSum(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+GfxResult gfxCommandScanSum(GfxContext const &context, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeScan(GfxInternal::kOpType_Sum, data_type, dst, src, count);
 }
 
-GfxResult gfxCommandReduceMin(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+GfxResult gfxCommandReduceMin(GfxContext const &context, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeReduce(GfxInternal::kOpType_Min, data_type, dst, src, count);
 }
 
-GfxResult gfxCommandReduceMax(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+GfxResult gfxCommandReduceMax(GfxContext const &context, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeReduce(GfxInternal::kOpType_Max, data_type, dst, src, count);
 }
 
-GfxResult gfxCommandReduceSum(GfxContext context, GfxDataType data_type, GfxBuffer dst, GfxBuffer src, GfxBuffer const *count)
+GfxResult gfxCommandReduceSum(GfxContext const &context, GfxDataType data_type, GfxBuffer const &dst, GfxBuffer const &src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeReduce(GfxInternal::kOpType_Sum, data_type, dst, src, count);
 }
 
-GfxResult gfxCommandSortRadix(GfxContext context, GfxBuffer keys_dst, GfxBuffer keys_src, GfxBuffer const *values_dst, GfxBuffer const *values_src, GfxBuffer const *count)
+GfxResult gfxCommandSortRadix(GfxContext const &context, GfxBuffer const &keys_dst, GfxBuffer const &keys_src, GfxBuffer const *values_dst, GfxBuffer const *values_src, GfxBuffer const *count)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeRadixSort(keys_dst, keys_src, values_dst, values_src, count);
 }
 
-GfxResult gfxFrame(GfxContext context, bool vsync)
+GfxResult gfxFrame(GfxContext const &context, bool vsync)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->frame(vsync);
 }
 
-GfxResult gfxFinish(GfxContext context)
+GfxResult gfxFinish(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
@@ -9829,42 +9819,42 @@ GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight)
     return context;
 }
 
-ID3D12Device *gfxGetDevice(GfxContext context)
+ID3D12Device *gfxGetDevice(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getDevice();
 }
 
-ID3D12CommandQueue *gfxGetCommandQueue(GfxContext context)
+ID3D12CommandQueue *gfxGetCommandQueue(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getCommandQueue();
 }
 
-ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context)
+ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getCommandList();
 }
 
-GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *command_list)
+GfxResult gfxSetCommandList(GfxContext const &context, ID3D12GraphicsCommandList *command_list)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setCommandList(command_list);
 }
 
-GfxResult gfxResetCommandListState(GfxContext context)
+GfxResult gfxResetCommandListState(GfxContext const &context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->resetCommandListState();
 }
 
-GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
+GfxBuffer gfxCreateBuffer(GfxContext const &context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
 {
     GfxBuffer const buffer = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9872,7 +9862,7 @@ GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RE
     return gfx->createBuffer(resource, resource_state);
 }
 
-GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
+GfxTexture gfxCreateTexture(GfxContext const &context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9880,7 +9870,7 @@ GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_
     return gfx->createTexture(resource, resource_state);
 }
 
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource, uint64_t byte_offset)
+GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext const &context, ID3D12Resource *resource, uint64_t byte_offset)
 {
     GfxAccelerationStructure const acceleration_structure = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9888,42 +9878,42 @@ GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D
     return gfx->createAccelerationStructure(resource, byte_offset);
 }
 
-ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer)
+ID3D12Resource *gfxBufferGetResource(GfxContext const &context, GfxBuffer const &buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getBufferResource(buffer);
 }
 
-ID3D12Resource *gfxTextureGetResource(GfxContext context, GfxTexture texture)
+ID3D12Resource *gfxTextureGetResource(GfxContext const &context, GfxTexture const &texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getTextureResource(texture);
 }
 
-ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext context, GfxAccelerationStructure acceleration_structure)
+ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext const &context, GfxAccelerationStructure const &acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->getAccelerationStructureResource(acceleration_structure);
 }
 
-D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer buffer)
+D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext const &context, GfxBuffer const &buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return D3D12_RESOURCE_STATE_COMMON;    // invalid context
     return gfx->getBufferResourceState(buffer);
 }
 
-D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture)
+D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext const &context, GfxTexture const &texture)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return D3D12_RESOURCE_STATE_COMMON;    // invalid context
     return gfx->getTextureResourceState(texture);
 }
 
-HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
+HANDLE gfxBufferCreateSharedHandle(GfxContext const &context, GfxBuffer const &buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context

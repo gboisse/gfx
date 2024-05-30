@@ -307,7 +307,7 @@ public:
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count,
+GfxResult gfxImGuiInitialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count,
     ImFontConfig const *font_configs, ImGuiConfigFlags flags)
 {
     GfxResult result;
