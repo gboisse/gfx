@@ -1974,7 +1974,7 @@ public:
                 continue;   // invalid raytracing primitive object
             active_raytracing_primitives_.push_back(raytracing_primitive);
             RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-            GfxBuffer buffer = getRaytracingPrimitiveBuffer(gfx_raytracing_primitive);
+            GfxBuffer const &buffer = getRaytracingPrimitiveBuffer(gfx_raytracing_primitive);
             if(!buffer_handles_.has_handle(buffer.handle))
                 continue;   // no valid BVH memory, probably wasn't built
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
@@ -7410,7 +7410,7 @@ private:
                     }
                     else
                     {
-                        GfxBuffer buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
                             if(buffer.handle != 0)
@@ -7473,7 +7473,7 @@ private:
                     }
                     else
                     {
-                        GfxBuffer buffer = parameter.parameter_->data_.buffer_.buffers_[j];
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[j];
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
                             if(buffer.handle != 0)
@@ -8039,7 +8039,7 @@ private:
                             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str (),    program.file_name_.c_str());
                             break;  // user set an invalid buffer object
                         }
-                        GfxBuffer buffer = parameter.parameter_->data_.buffer_.buffers_[0];
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
                         if(!buffer_handles_.has_handle(buffer.handle))
                         {
                             if(buffer.handle != 0)
