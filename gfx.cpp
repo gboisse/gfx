@@ -2230,7 +2230,23 @@ public:
         RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(gfx_raytracing_primitive);
         if(acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+        {
             acceleration_structures_[acceleration_structure].needs_rebuild_ = true;
+            auto &primitives = acceleration_structures_[acceleration_structure].raytracing_primitives_;
+            if(gfx_raytracing_primitive.index_ < primitives.size() && primitives[gfx_raytracing_primitive.index_].handle == raytracing_primitive.handle)
+            {
+                auto it = primitives.begin() + gfx_raytracing_primitive.index_;
+                primitives.erase(it);
+
+                // Indices moved after the primitive removal, so we need to update indices of primitives that were ahead of it
+                for (size_t i = gfx_raytracing_primitive.index_; i < primitives.size(); ++i)
+                {
+                    auto &primitive_ahead = raytracing_primitives_[primitives[i]];
+                    --primitive_ahead.index_;
+                    --primitive_ahead.instance_id_;
+                }
+            }
+        }
         collect(gfx_raytracing_primitive);  // release resources
         raytracing_primitives_.erase(raytracing_primitive); // destroy raytracing primitive
         raytracing_primitive_handles_.free_handle(raytracing_primitive.handle);
@@ -5270,9 +5286,10 @@ private:
     void collect(AccelerationStructure const &acceleration_structure)
     {
         destroyBuffer(acceleration_structure.bvh_buffer_);
-        for(size_t i = 0; i < acceleration_structure.raytracing_primitives_.size(); ++i)
-            if(raytracing_primitive_handles_.has_handle(acceleration_structure.raytracing_primitives_[i].handle))
-                destroyRaytracingPrimitive(acceleration_structure.raytracing_primitives_[i]);
+        auto copy = acceleration_structure.raytracing_primitives_;
+        for(size_t i = 0; i < copy.size(); ++i)
+            if(raytracing_primitive_handles_.has_handle(copy[i].handle))
+                destroyRaytracingPrimitive(copy[i]);
     }
 
     void collect(RaytracingPrimitive const &raytracing_primitive)
