@@ -2232,18 +2232,21 @@ public:
         if(acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             acceleration_structures_[acceleration_structure].needs_rebuild_ = true;
-            auto &primitives = acceleration_structures_[acceleration_structure].raytracing_primitives_;
-            if(gfx_raytracing_primitive.index_ < primitives.size() && primitives[gfx_raytracing_primitive.index_].handle == raytracing_primitive.handle)
+            if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural)
             {
-                auto it = primitives.begin() + gfx_raytracing_primitive.index_;
-                primitives.erase(it);
-
-                // Indices moved after the primitive removal, so we need to update indices of primitives that were ahead of it
-                for (size_t i = gfx_raytracing_primitive.index_; i < primitives.size(); ++i)
+                auto &primitives = acceleration_structures_[acceleration_structure].raytracing_primitives_;
+                if(gfx_raytracing_primitive.index_ < primitives.size() && primitives[gfx_raytracing_primitive.index_].handle == raytracing_primitive.handle)
                 {
-                    auto &primitive_ahead = raytracing_primitives_[primitives[i]];
-                    --primitive_ahead.index_;
-                    --primitive_ahead.instance_id_;
+                    auto it = primitives.begin() + gfx_raytracing_primitive.index_;
+                    primitives.erase(it);
+
+                    // Indices moved after the primitive removal, so we need to update indices of primitives that were ahead of it
+                    for(size_t i = gfx_raytracing_primitive.index_; i < primitives.size(); ++i)
+                    {
+                        auto &primitive_ahead = raytracing_primitives_[primitives[i]];
+                        --primitive_ahead.index_;
+                        --primitive_ahead.instance_id_;
+                    }
                 }
             }
         }
