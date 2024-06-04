@@ -322,18 +322,18 @@ enum GfxMaterialAlphaMode
 
 struct GfxMaterial
 {
-    glm::vec4        albedo              = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
-    float            roughness           = 1.0f;
-    float            metallicity         = 0.0f;
-    glm::vec3        emissivity          = glm::vec3(0.0f, 0.0f, 0.0f);
-    float            ior                 = 1.5f;
-    glm::vec4        specular            = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); //.w=specular factor
-    float            transmission        = 0.0f;
-    glm::vec4        sheen               = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); //.w=sheen roughness
-    float            clearcoat           = 0.0f;
-    float            clearcoat_roughness = 0.0f;
-    GfxMaterialFlags flags               = 0;
-    GfxMaterialAlphaMode alpha_mode      = GfxMaterialAlphaMode_Opaque;
+    glm::vec4            albedo              = glm::vec4(0.7f, 0.7f, 0.7f, 1.0f);
+    float                roughness           = 1.0f;
+    float                metallicity         = 0.0f;
+    glm::vec3            emissivity          = glm::vec3(0.0f, 0.0f, 0.0f);
+    float                ior                 = 1.5f;
+    glm::vec4            specular            = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f); //.w=specular factor
+    float                transmission        = 0.0f;
+    glm::vec4            sheen               = glm::vec4(0.0f, 0.0f, 0.0f, 0.0f); //.w=sheen roughness
+    float                clearcoat           = 0.0f;
+    float                clearcoat_roughness = 0.0f;
+    GfxMaterialFlags     flags               = 0;
+    GfxMaterialAlphaMode alpha_mode          = GfxMaterialAlphaMode_Opaque;
 
     GfxConstRef<GfxImage> albedo_map;
     GfxConstRef<GfxImage> roughness_map;

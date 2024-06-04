@@ -1438,7 +1438,7 @@ private:
                     }
                 }
             }
-            if (!has_split_extension)
+            if(!has_split_extension)
             {
                 cgltf_texture const *metallicity_roughness_map_text = gltf_material_pbr.metallic_roughness_texture.texture;
                 it = (metallicity_roughness_map_text != nullptr ? textures.find(metallicity_roughness_map_text) : textures.end());
