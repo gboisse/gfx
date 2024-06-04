@@ -1268,34 +1268,49 @@ private:
             lights[&gltf_light] = light_ref;
         }
         std::map<cgltf_image const *, GfxConstRef<GfxImage>> images;
-        for(size_t i = 0; i < gltf_model->textures_count; ++i)
-        {
-            cgltf_texture const &gltf_texture = gltf_model->textures[i];
-            uint32_t texture_dds_index = std::numeric_limits<uint32_t>::max();
-            for(uint64_t e = 0; e < gltf_texture.extensions_count; ++e)
+        std::map<cgltf_texture const *, GfxConstRef<GfxImage>> textures;
+        auto get_best_image = [&](cgltf_texture const *texture) -> cgltf_image * {
+            if(texture == nullptr) return nullptr;
+            for(uint64_t i = 0; i < texture->extensions_count; ++i)
             {
-                if(strcmp(gltf_texture.extensions[e].name, "MSFT_texture_dds") == 0)
+                if(strcmp(texture->extensions[i].name, "MSFT_texture_dds") == 0)
                 {
-                    std::string json = gltf_texture.extensions[e].data;
-                    json.erase(remove_if(json.begin(), json.end(),
-                                   [](char c) { return (c == '\r' || c == '\t' || c == ' ' || c == '\n'); }),
+                    // Need to get the dds out of the extension
+                    std::string json = texture->extensions[i].data;
+                    json.erase(
+                        remove_if(json.begin(), json.end(),
+                            [](char c) { return (c == '\r' || c == '\t' || c == ' ' || c == '\n'); }),
                         json.end());
                     constexpr std::string_view source_tag = "\"source\":";
                     if(auto pos = json.find(source_tag); pos != std::string::npos)
                     {
                         pos += source_tag.length();
-                        std::string clipped = json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
-                        texture_dds_index = stoi(clipped);
+                        std::string clipped =
+                            json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
+                        uint64_t const index = strtoull(clipped.c_str(), nullptr, 10);
+                        if(index < gltf_model->images_count)
+                        {
+                            return &gltf_model->images[index];
+                        }
                     }
                 }
             }
-            if(gltf_texture.image == nullptr && gltf_texture.basisu_image == nullptr
-                && texture_dds_index != std::numeric_limits<uint32_t>::max())
+            if(texture->basisu_image != nullptr && ((texture->basisu_image->uri != nullptr) || (texture->basisu_image->buffer_view != nullptr)))
+                return texture->image;
+            else if(texture->image != nullptr && ((texture->image->uri != nullptr) || (texture->image->buffer_view != nullptr)))
+                return texture->image;
+            return nullptr;
+        };
+        for(size_t i = 0; i < gltf_model->textures_count; ++i)
+        {
+            cgltf_texture const &gltf_texture = gltf_model->textures[i];
+            cgltf_image const *gltf_image = get_best_image(&gltf_texture);
+            if(gltf_image == nullptr)
                 continue;
-            cgltf_image const *gltf_image = gltf_texture.has_basisu ? gltf_texture.basisu_image : gltf_texture.image;
-            if(texture_dds_index != std::numeric_limits<uint32_t>::max())
+            if(const auto it = images.find(gltf_image); it != images.end())
             {
-                gltf_image = &(gltf_model->images[texture_dds_index]);
+                textures[&gltf_texture] = it->second;
+                continue;
             }
             GfxRef<GfxImage> image_ref;
             if(gltf_image->uri != nullptr)
@@ -1310,7 +1325,8 @@ private:
                 if(gfxSceneImport(scene, image_file.c_str()) != kGfxResult_NoError)
                     continue; // unable to load image file
                 image_ref          = gfxSceneFindObjectByAssetFile<GfxImage>(scene, image_file.c_str());
-                images[gltf_texture.image] = image_ref;
+                images[gltf_image] = image_ref;
+                textures[&gltf_texture] = image_ref;
             }
             else if(gltf_image->buffer_view != nullptr)
             {
@@ -1324,14 +1340,15 @@ private:
                 if(importImage(scene, gltf_image->name, ptr, gltf_image->buffer_view->size) != kGfxResult_NoError)
                     continue; // unable to load image file
                 image_ref          = gfxSceneFindObjectByAssetFile<GfxImage>(scene, gltf_image->name);
-                images[gltf_texture.image] = image_ref;
+                images[gltf_image]      = image_ref;
+                textures[&gltf_texture] = image_ref;
             }
         }
         std::map<cgltf_material const *, GfxConstRef<GfxMaterial>> materials;
-        std::map<cgltf_image const *, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
+        std::map<GfxConstRef<GfxImage>, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>> maps;
         for(size_t i = 0; i < gltf_model->materials_count; ++i)
         {
-            std::map<cgltf_image const *, GfxConstRef<GfxImage>>::const_iterator it;
+            std::map<cgltf_texture const *, GfxConstRef<GfxImage>>::const_iterator it;
             cgltf_material const &gltf_material = gltf_model->materials[i];
             if(!gltf_material.has_pbr_metallic_roughness)
                 continue; // unsupported material type
@@ -1364,131 +1381,182 @@ private:
                 material.clearcoat_roughness = gltf_material.clearcoat.clearcoat_roughness_factor;
             }
             if(gltf_material.double_sided) material.flags |= kGfxMaterialFlag_DoubleSided;
+            switch(gltf_material.alpha_mode)
+            {
+            case cgltf_alpha_mode_opaque: material.alpha_mode = GfxMaterialAlphaMode_Opaque; break;
+            case cgltf_alpha_mode_mask: material.alpha_mode = GfxMaterialAlphaMode_Mask; break;
+            case cgltf_alpha_mode_blend: material.alpha_mode = GfxMaterialAlphaMode_Blend; break;
+            default: material.alpha_mode = GfxMaterialAlphaMode_Opaque; break;
+            }
             cgltf_texture const *albedo_map_text = gltf_material_pbr.base_color_texture.texture;
-            it = (albedo_map_text != nullptr ? images.find(albedo_map_text->image) : images.end());
-            if(it != images.end())
+            it = (albedo_map_text != nullptr ? textures.find(albedo_map_text) : textures.end());
+            if(it != textures.end())
             {
                 GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                 if(temp->bytes_per_channel <= 1)
                     temp->format = ConvertImageFormatSRGB(temp->format);
                 material.albedo_map = (*it).second;
             }
-            cgltf_texture const *metallicity_roughness_map_text = gltf_material_pbr.metallic_roughness_texture.texture;
-            it = (metallicity_roughness_map_text != nullptr ? images.find(metallicity_roughness_map_text->image) : images.end());
-            if(it != images.end())
+            bool has_split_extension = false;
+            if(gltf_material.extensions_count != 0)
             {
-                std::map<cgltf_image const *, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 =
-                    maps.find(it->first);
-                if(it2 != maps.end())
+                // AMD Extension support for split metal rough
+                for(uint64_t ext = 0; ext < gltf_material.extensions_count; ++ext)
                 {
-                    material_ref->roughness_map = (*it2).second.first;
-                    material_ref->metallicity_map = (*it2).second.second;
-                }
-                else
-                {
-                    size_t const asset_file_ext = image_metadata_[(*it).second].asset_file.rfind('.');
-                    std::string  metallicity_map_file;
-                    std::string  roughness_map_file;
-                    if(asset_file_ext != std::string::npos)
+                    if(strcmp(gltf_material.extensions[ext].name, "AMD_split_roughnessMetallic") == 0)
                     {
-                        std::string asset_file_name =
-                            image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
-                        std::string const asset_file_extension =
-                            image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
-                        if(auto const pos = asset_file_name.rfind(".metalrough"); pos != std::string::npos)
-                        {
-                            asset_file_name = asset_file_name.substr(0, pos);
-                        }
-                        metallicity_map_file =
-                            asset_file_name + ".metallicity" + asset_file_extension;
-                        roughness_map_file =
-                            asset_file_name + ".roughness" + asset_file_extension;
+                        // Need to get the split files out of the extension
+                        std::string json = gltf_material.extensions[ext].data;
+                        json.erase(
+                            remove_if(json.begin(), json.end(),
+                                [](char c) { return (c == '\r' || c == '\t' || c == ' ' || c == '\n'); }),
+                            json.end());
+                        auto get_texture = [&](std::string_view const tag, GfxConstRef<GfxImage> &image) {
+                            if(auto pos = json.find(tag); pos != std::string::npos)
+                            {
+                                pos += tag.length();
+                                std::string clipped = json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
+                                const auto index = stoi(clipped);
+                                if(index < gltf_model->textures_count)
+                                {
+                                    cgltf_texture const *split_text = &gltf_model->textures[index];
+                                    it = (split_text != nullptr ? textures.find(split_text) : textures.end());
+                                    if(it != textures.end())
+                                    {
+                                        GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
+                                        temp->format = ConvertImageFormatLinear(temp->format);
+                                        image = (*it).second;
+                                    }
+                                }
+                            }
+                        };
+                        constexpr std::string_view metalTag = "\"metallicTexture\":{\"index\":";
+                        constexpr std::string_view roughTag = "\"roughnessTexture\":{\"index\":";
+                        get_texture(metalTag, material_ref->roughness_map);
+                        get_texture(roughTag, material_ref->metallicity_map);
+                        has_split_extension = true;
+                    }
+                }
+            }
+            if (!has_split_extension)
+            {
+                cgltf_texture const *metallicity_roughness_map_text = gltf_material_pbr.metallic_roughness_texture.texture;
+                it = (metallicity_roughness_map_text != nullptr ? textures.find(metallicity_roughness_map_text) : textures.end());
+                if(it != textures.end())
+                {
+                    std::map<GfxConstRef<GfxImage>, std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>>::const_iterator const it2 =
+                        maps.find(it->second);
+                    if(it2 != maps.end())
+                    {
+                        material_ref->roughness_map = (*it2).second.first;
+                        material_ref->metallicity_map = (*it2).second.second;
                     }
                     else
                     {
-                        // Embedded texture
-                        metallicity_map_file = image_metadata_[(*it).second].asset_file + ".metallicity";
-                        metallicity_map_file = image_metadata_[(*it).second].asset_file + ".roughness";
-                    }
-                    GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
-                    GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
-                    if(!metallicity_map_ref)
-                    {
-                        std::ifstream f(metallicity_map_file.c_str(), std::ios_base::in);
-                        if(f.good() && gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
+                        size_t const asset_file_ext = image_metadata_[(*it).second].asset_file.rfind('.');
+                        std::string  metallicity_map_file;
+                        std::string  roughness_map_file;
+                        if(asset_file_ext != std::string::npos)
                         {
-                            metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
-                            metallicity_map_ref->format = ConvertImageFormatLinear(metallicity_map_ref->format);
+                            std::string asset_file_name =
+                                image_metadata_[(*it).second].asset_file.substr(0, asset_file_ext);
+                            std::string const asset_file_extension =
+                                image_metadata_[(*it).second].asset_file.substr(asset_file_ext);
+                            if(auto const pos = asset_file_name.rfind(".metalrough"); pos != std::string::npos)
+                            {
+                                asset_file_name = asset_file_name.substr(0, pos);
+                            }
+                            metallicity_map_file =
+                                asset_file_name + ".metallicity" + asset_file_extension;
+                            roughness_map_file =
+                                asset_file_name + ".roughness" + asset_file_extension;
                         }
-                    }
-                    if(!roughness_map_ref)
-                    {
-                        std::ifstream f(roughness_map_file.c_str(), std::ios_base::in);
-                        if(f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
+                        else
                         {
-                            roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
-                            roughness_map_ref->format = ConvertImageFormatLinear(roughness_map_ref->format);
+                            // Embedded texture
+                            metallicity_map_file = image_metadata_[(*it).second].asset_file + ".metallicity";
+                            metallicity_map_file = image_metadata_[(*it).second].asset_file + ".roughness";
                         }
-                    }
-                    if(!metallicity_map_ref && !roughness_map_ref)
-                    {
-                        if(gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
+                        GfxRef<GfxImage> metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
+                        GfxRef<GfxImage> roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
+                        if(!metallicity_map_ref)
                         {
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Compressed textures require separate metal/roughness textures '%s'",
-                                image_metadata_[(*it).second].asset_file.c_str());
-                            continue;
+                            std::ifstream f(metallicity_map_file.c_str(), std::ios_base::in);
+                            if(f.good() && gfxSceneImport(scene, metallicity_map_file.c_str()) == kGfxResult_NoError)
+                            {
+                                metallicity_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, metallicity_map_file.c_str());
+                                metallicity_map_ref->format = ConvertImageFormatLinear(metallicity_map_ref->format);
+                            }
                         }
-                        metallicity_map_ref = gfxSceneCreateImage(scene);
-                        roughness_map_ref = gfxSceneCreateImage(scene);
-                        GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
-                        metallicity_map_metadata = image_metadata_[(*it).second];   // set up metadata
-                        metallicity_map_metadata.asset_file = metallicity_map_file;
-                        metallicity_map_metadata.object_name = metallicity_map_file;
-                        GfxMetadata &roughness_map_metadata = image_metadata_[roughness_map_ref];
-                        roughness_map_metadata = image_metadata_[(*it).second];
-                        roughness_map_metadata.asset_file = roughness_map_file;
-                        roughness_map_metadata.object_name += roughness_map_file;
-                        GfxImage &metallicity_map = *metallicity_map_ref;
-                        GfxImage &roughness_map = *roughness_map_ref;
-                        GfxImage const &image = *(*it).second;
-                        metallicity_map.width = image.width;
-                        metallicity_map.height = image.height;
-                        metallicity_map.channel_count = 1;
-                        metallicity_map.bytes_per_channel = image.bytes_per_channel;
-                        metallicity_map.format = GetImageFormat(metallicity_map);
-                        metallicity_map.flags = 0;
-                        metallicity_map.data.resize((size_t)metallicity_map.width * metallicity_map.height *
-                            metallicity_map.bytes_per_channel);
-                        roughness_map.width = image.width;
-                        roughness_map.height = image.height;
-                        roughness_map.channel_count = 1;
-                        roughness_map.bytes_per_channel = image.bytes_per_channel;
-                        roughness_map.format = GetImageFormat(roughness_map);
-                        roughness_map.flags = 0;
-                        roughness_map.data.resize((size_t)roughness_map.width * roughness_map.height *
-                            roughness_map.bytes_per_channel);
-                        uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
-                        uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
-                        for(uint32_t j = 0; j < texel_count; ++j)
+                        if(!roughness_map_ref)
                         {
-                            uint32_t index = j * byte_stride + image.bytes_per_channel;
-                            if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
-                                for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                                    roughness_map.data[(size_t)j * image.bytes_per_channel + k] = image.data[index++];
-                            if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
-                                for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
-                                    metallicity_map.data[(size_t)j * image.bytes_per_channel + k] = image.data[index++];
+                            std::ifstream f(roughness_map_file.c_str(), std::ios_base::in);
+                            if(f.good() && gfxSceneImport(scene, roughness_map_file.c_str()) == kGfxResult_NoError)
+                            {
+                                roughness_map_ref = gfxSceneFindObjectByAssetFile<GfxImage>(scene, roughness_map_file.c_str());
+                                roughness_map_ref->format = ConvertImageFormatLinear(roughness_map_ref->format);
+                            }
                         }
+                        if(!metallicity_map_ref && !roughness_map_ref)
+                        {
+                            if(gfxImageIsFormatCompressed(*gfxSceneGetObject<GfxImage>(scene, (*it).second)))
+                            {
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Compressed textures require separate metal/roughness textures '%s'",
+                                    image_metadata_[(*it).second].asset_file.c_str());
+                                continue;
+                            }
+                            metallicity_map_ref = gfxSceneCreateImage(scene);
+                            roughness_map_ref = gfxSceneCreateImage(scene);
+                            GfxMetadata &metallicity_map_metadata = image_metadata_[metallicity_map_ref];
+                            metallicity_map_metadata = image_metadata_[(*it).second];   // set up metadata
+                            metallicity_map_metadata.asset_file = metallicity_map_file;
+                            metallicity_map_metadata.object_name = metallicity_map_file;
+                            GfxMetadata &roughness_map_metadata = image_metadata_[roughness_map_ref];
+                            roughness_map_metadata = image_metadata_[(*it).second];
+                            roughness_map_metadata.asset_file = roughness_map_file;
+                            roughness_map_metadata.object_name += roughness_map_file;
+                            GfxImage &metallicity_map = *metallicity_map_ref;
+                            GfxImage &roughness_map = *roughness_map_ref;
+                            GfxImage const &image = *(*it).second;
+                            metallicity_map.width = image.width;
+                            metallicity_map.height = image.height;
+                            metallicity_map.channel_count = 1;
+                            metallicity_map.bytes_per_channel = image.bytes_per_channel;
+                            metallicity_map.format = GetImageFormat(metallicity_map);
+                            metallicity_map.flags = 0;
+                            metallicity_map.data.resize((size_t)metallicity_map.width * metallicity_map.height *
+                                metallicity_map.bytes_per_channel);
+                            roughness_map.width = image.width;
+                            roughness_map.height = image.height;
+                            roughness_map.channel_count = 1;
+                            roughness_map.bytes_per_channel = image.bytes_per_channel;
+                            roughness_map.format = GetImageFormat(roughness_map);
+                            roughness_map.flags = 0;
+                            roughness_map.data.resize((size_t)roughness_map.width * roughness_map.height *
+                                roughness_map.bytes_per_channel);
+                            uint32_t const texel_count = image.width * image.height * image.bytes_per_channel;
+                            uint32_t const byte_stride = image.channel_count * image.bytes_per_channel;
+                            for(uint32_t j = 0; j < texel_count; ++j)
+                            {
+                                uint32_t index = j * byte_stride + image.bytes_per_channel;
+                                if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
+                                    for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
+                                        roughness_map.data[(size_t)j * image.bytes_per_channel + k] = image.data[index++];
+                                if(index + image.bytes_per_channel <= (uint32_t)image.data.size())
+                                    for(uint32_t k = 0; k < image.bytes_per_channel; ++k)
+                                        metallicity_map.data[(size_t)j * image.bytes_per_channel + k] = image.data[index++];
+                            }
+                        }
+                        material.roughness_map = roughness_map_ref;
+                        material.metallicity_map = metallicity_map_ref;
+                        maps[it->second] =
+                            std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>(roughness_map_ref, metallicity_map_ref);
                     }
-                    material.roughness_map = roughness_map_ref;
-                    material.metallicity_map = metallicity_map_ref;
-                    maps[it->first] =
-                        std::pair<GfxConstRef<GfxImage>, GfxConstRef<GfxImage>>(roughness_map_ref, metallicity_map_ref);
                 }
             }
             cgltf_texture const *emissivity_map_text = gltf_material.emissive_texture.texture;
-            it = (emissivity_map_text != nullptr ? images.find(emissivity_map_text->image) : images.end());
-            if(it != images.end())
+            it = (emissivity_map_text != nullptr ? textures.find(emissivity_map_text) : textures.end());
+            if(it != textures.end())
             {
                 GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                 if(temp->bytes_per_channel <= 1)
@@ -1498,8 +1566,8 @@ private:
             if(gltf_material.has_specular)
             {
                 cgltf_texture const *specular_map_text = gltf_material.specular.specular_color_texture.texture;
-                it = (specular_map_text != nullptr ? images.find(specular_map_text->image) : images.end());
-                if(it != images.end())
+                it = (specular_map_text != nullptr ? textures.find(specular_map_text) : textures.end());
+                if(it != textures.end())
                 {
                     GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     if(temp->bytes_per_channel <= 1)
@@ -1512,8 +1580,8 @@ private:
                         "Specular factor texture should be stored in Specular color texture alpha channel");
             }
             cgltf_texture const *normal_map_text = gltf_material.normal_texture.texture;
-            it = (normal_map_text != nullptr ? images.find(normal_map_text->image) : images.end());
-            if(it != images.end())
+            it = (normal_map_text != nullptr ? textures.find(normal_map_text) : textures.end());
+            if(it != textures.end())
             {
                 GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                 temp->format = ConvertImageFormatLinear(temp->format);
@@ -1522,8 +1590,8 @@ private:
             if(gltf_material.has_transmission)
             {
                 cgltf_texture const *transmission_map_text = gltf_material.transmission.transmission_texture.texture;
-                it = (transmission_map_text != nullptr ? images.find(transmission_map_text->image) : images.end());
-                if(it != images.end())
+                it = (transmission_map_text != nullptr ? textures.find(transmission_map_text) : textures.end());
+                if(it != textures.end())
                 {
                     GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     temp->format = ConvertImageFormatLinear(temp->format);
@@ -1533,8 +1601,8 @@ private:
             if(gltf_material.has_sheen)
             {
                 cgltf_texture const *sheen_map_text = gltf_material.sheen.sheen_color_texture.texture;
-                it = (sheen_map_text != nullptr ? images.find(sheen_map_text->image) : images.end());
-                if(it != images.end())
+                it = (sheen_map_text != nullptr ? textures.find(sheen_map_text) : textures.end());
+                if(it != textures.end())
                 {
                     GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     if(temp->bytes_per_channel <= 1)
@@ -1549,16 +1617,16 @@ private:
             if(gltf_material.has_clearcoat)
             {
                 cgltf_texture const *clearcoat_map_text = gltf_material.clearcoat.clearcoat_texture.texture;
-                it = (clearcoat_map_text != nullptr ? images.find(clearcoat_map_text->image) : images.end());
-                if(it != images.end())
+                it = (clearcoat_map_text != nullptr ? textures.find(clearcoat_map_text) : textures.end());
+                if(it != textures.end())
                 {
                     GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     temp->format = ConvertImageFormatLinear(temp->format);
                     material.clearcoat_map = (*it).second;
                 }
                 cgltf_texture const *clearcoat_rough_map_text = gltf_material.clearcoat.clearcoat_roughness_texture.texture;
-                it = (clearcoat_rough_map_text != nullptr ? images.find(clearcoat_rough_map_text->image) : images.end());
-                if(it != images.end())
+                it = (clearcoat_rough_map_text != nullptr ? textures.find(clearcoat_rough_map_text) : textures.end());
+                if(it != textures.end())
                 {
                     GfxImage *temp = gfxSceneGetObject<GfxImage>(scene, (*it).second);
                     temp->format = ConvertImageFormatLinear(temp->format);
@@ -1566,8 +1634,8 @@ private:
                 }
             }
             cgltf_texture const *ao_map_text = gltf_material.occlusion_texture.texture;
-            it = (ao_map_text != nullptr ? images.find(ao_map_text->image) : images.end());
-            if(it != images.end()) material.ao_map = (*it).second;
+            it = (ao_map_text != nullptr ? textures.find(ao_map_text) : textures.end());
+            if(it != textures.end()) material.ao_map = (*it).second;
             materials[&gltf_material] = material_ref;
         }
         typedef std::pair<GfxConstRef<GfxMesh>, GfxConstRef<GfxMaterial>> instance_pair;
@@ -2630,7 +2698,11 @@ private:
                 mipDepth = GFX_MAX(1U, mipDepth / 2);
             }
         }
-        image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_HasAlphaChannel);
+        image_ref->flags = (image_ref->channel_count != 4
+            || (image_ref->format == DXGI_FORMAT_BC7_TYPELESS
+            || image_ref->format == DXGI_FORMAT_BC7_UNORM
+            || image_ref->format == DXGI_FORMAT_BC7_UNORM_SRGB) //BC7 may or may not have alpha
+            ? 0 : kGfxImageFlag_HasAlphaChannel);
         image_ref->flags |= (mipCount > 1 ? kGfxImageFlag_HasMipLevels : 0);
         GfxMetadata &image_metadata = image_metadata_[image_ref];
         image_metadata.asset_file = asset_file; // set up metadata
@@ -2736,7 +2808,11 @@ private:
         image_ref->height = ktx_texture->baseHeight;
         if(image_ref->format == DXGI_FORMAT_UNKNOWN)
             image_ref->format = GetImageFormat(*image_ref);
-        image_ref->flags = (image_ref->channel_count != 4 ? 0 : kGfxImageFlag_HasAlphaChannel);
+        image_ref->flags = (image_ref->channel_count != 4
+            || (image_ref->format == DXGI_FORMAT_BC7_TYPELESS
+            || image_ref->format == DXGI_FORMAT_BC7_UNORM
+            || image_ref->format == DXGI_FORMAT_BC7_UNORM_SRGB) //BC7 may or may not have alpha
+            ? 0 : kGfxImageFlag_HasAlphaChannel);
         image_ref->flags |= (ktx_texture->numLevels > 1 ? kGfxImageFlag_HasMipLevels : 0);
 
         GfxMetadata &image_metadata = image_metadata_[image_ref];
