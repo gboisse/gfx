@@ -450,6 +450,8 @@ GfxResult gfxCommandSortRadix(GfxContext context, GfxBuffer keys_dst, GfxBuffer 
 
 GfxResult gfxFrame(GfxContext context, bool vsync = true);
 GfxResult gfxFinish(GfxContext context);
+GfxResult gfxExecute(GfxContext context);
+GfxResult gfxResetCommandList(GfxContext context);
 
 //!
 //! Interop interface.
