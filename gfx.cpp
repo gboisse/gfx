@@ -452,7 +452,9 @@ class GfxInternal
         {
             kType_Triangles = 0,
             kType_Instance,
-            kType_Procedural
+            kType_Procedural,
+
+            kType_Count
         }
         type_;
         struct
