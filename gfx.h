@@ -200,11 +200,14 @@ enum GfxBuildRaytracingPrimitiveFlag
 };
 typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 
-class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); public: };
+class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); enum { kType_Triangles, kType_Instance, kType_Procedural } type; public:
+                               inline bool isTriangles() const { return type == kType_Triangles; }
+                               inline bool isInstance() const { return type == kType_Instance; }
+                               inline bool isProcedural() const { return type == kType_Procedural; } };
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
-GfxRaytracingPrimitive gfxCreateRaytracingProceduralPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);   // instantiates the raytracing primitive
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveInstance(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveProcedural(GfxContext context, GfxAccelerationStructure acceleration_structure);
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
@@ -218,8 +221,6 @@ uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrim
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxRaytracingProceduralPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
-bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index); // Useful when iterating over primitives when using `gfxAccelerationStructureGetRaytracingPrimitiveCount`
-bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 //!
 //! Draw state manipulation.

@@ -452,7 +452,7 @@ class GfxInternal
         {
             kType_Triangles = 0,
             kType_Instance,
-            kType_Procedural,
+            kType_Procedural
         }
         type_;
         struct
@@ -2076,34 +2076,6 @@ public:
         return (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
     }
 
-    bool getRaytracingPrimitiveIsProcedural(GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index)
-    {
-        if(dxr_device_ == nullptr) return false;    // avoid spamming console output
-        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
-            return 0;
-        }
-        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
-        auto const &primitive = gfx_acceleration_structure.raytracing_primitives_[primitive_index];
-
-        RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[primitive];
-        return gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural;
-    }
-
-    bool getRaytracingPrimitiveIsProcedural(GfxRaytracingPrimitive const &raytracing_primitive)
-    {
-        if(dxr_device_ == nullptr)
-            return false; // avoid spamming console output
-        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
-        {
-            GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot get an invalid raytracing primitive object");
-            return false;
-        }
-        RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-        return gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural;
-    }
-
     GfxRaytracingPrimitive const *getAccelerationStructureRaytracingPrimitives(GfxAccelerationStructure const &acceleration_structure)
     {
         if(dxr_device_ == nullptr) return nullptr;  // avoid spamming console output
@@ -2131,6 +2103,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
             return raytracing_primitive;
         }
+        raytracing_primitive.type = GfxRaytracingPrimitive::kType_Triangles;
         raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(raytracing_primitive);
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
@@ -2145,7 +2118,7 @@ public:
         return raytracing_primitive;
     }
 
-    GfxRaytracingPrimitive createRaytracingPrimitive(GfxRaytracingPrimitive raytracing_primitive)
+    GfxRaytracingPrimitive createRaytracingPrimitiveInstance(GfxRaytracingPrimitive raytracing_primitive)
     {
         GfxRaytracingPrimitive cloned_raytracing_primitive = {};
         if(dxr_device_ == nullptr)
@@ -2178,6 +2151,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
             return cloned_raytracing_primitive;
         }
+        cloned_raytracing_primitive.type = GfxRaytracingPrimitive::kType_Instance;
         cloned_raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(cloned_raytracing_primitive);
@@ -2192,7 +2166,7 @@ public:
         return cloned_raytracing_primitive;
     }
 
-    GfxRaytracingPrimitive createRaytracingProceduralPrimitive(GfxAccelerationStructure const &acceleration_structure)
+    GfxRaytracingPrimitive createRaytracingPrimitiveProcedural(GfxAccelerationStructure const &acceleration_structure)
     {
         GfxRaytracingPrimitive raytracing_primitive = {};
         if(dxr_device_ == nullptr)
@@ -2207,6 +2181,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
             return raytracing_primitive;
         }
+        raytracing_primitive.type = GfxRaytracingPrimitive::kType_Procedural;
         raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(raytracing_primitive);
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
@@ -9335,20 +9310,6 @@ uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context,
     return gfx->getAccelerationStructureRaytracingPrimitiveCount(acceleration_structure);
 }
 
-bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxAccelerationStructure const &acceleration_structure, uint32_t primitive_index)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return 0;  // invalid context
-    return gfx->getRaytracingPrimitiveIsProcedural(acceleration_structure, primitive_index);
-}
-
-bool gfxRaytracingPrimitiveIsProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return 0;  // invalid context
-    return gfx->getRaytracingPrimitiveIsProcedural(raytracing_primitive);
-}
-
 GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9364,20 +9325,20 @@ GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccel
     return gfx->createRaytracingPrimitive(acceleration_structure);
 }
 
-GfxRaytracingPrimitive gfxCreateRaytracingProceduralPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure)
-{
-    GfxRaytracingPrimitive const raytracing_primitive = {};
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return raytracing_primitive;   // invalid context
-    return gfx->createRaytracingProceduralPrimitive(acceleration_structure);
-}
-
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveInstance(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
 {
     GfxRaytracingPrimitive const cloned_raytracing_primitive = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return cloned_raytracing_primitive;    // invalid context
-    return gfx->createRaytracingPrimitive(raytracing_primitive);
+    return gfx->createRaytracingPrimitiveInstance(raytracing_primitive);
+}
+
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveProcedural(GfxContext context, GfxAccelerationStructure acceleration_structure)
+{
+    GfxRaytracingPrimitive const raytracing_primitive = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return raytracing_primitive;   // invalid context
+    return gfx->createRaytracingPrimitiveProcedural(acceleration_structure);
 }
 
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
