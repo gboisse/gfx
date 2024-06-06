@@ -2333,78 +2333,6 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
-    GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
-    {
-        GfxSbt sbt = {};
-        if(dxr_device_ == nullptr)
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create SBT");
-            return sbt; // invalid operation
-        }
-        sbt.handle = sbt_handles_.allocate_handle();
-        Sbt &gfx_sbt = sbts_.insert(sbt);
-        for(uint32_t i = 0; i < kernel_count; ++i)
-        {
-            Kernel const &gfx_kernel = kernels_[kernels[i]];
-            for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
-            {
-                gfx_sbt.sbt_max_record_stride_[j] = GFX_MAX(gfx_sbt.sbt_max_record_stride_[j], gfx_kernel.sbt_record_stride_[j]);
-            }
-        }
-        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
-        {
-            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_sbt.sbt_max_record_stride_[i] * entry_count[i];
-            gfx_sbt.sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
-            if(!gfx_sbt.sbt_buffers_[i])
-            {
-                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
-                return sbt;
-            }
-            gfx_sbt.sbt_buffers_[i].setName("gfx_SbtBuffer");
-        }
-        gfx_sbt.ray_generation_shader_record_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Raygen]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
-        gfx_sbt.miss_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            entry_count[kGfxShaderGroupType_Miss] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss],
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-        gfx_sbt.hit_group_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            entry_count[kGfxShaderGroupType_Hit] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit],
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-        gfx_sbt.callable_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            entry_count[kGfxShaderGroupType_Callable] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable],
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-        return sbt;
-    }
-
-    GfxResult destroySbt(GfxSbt const &sbt)
-    {
-        if(!sbt)
-            return kGfxResult_NoError;
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid sbt object");
-        Sbt const &gfx_sbt = sbts_[sbt];
-        collect(gfx_sbt);  // release resources
-        sbts_.erase(sbt); // destroy sbt
-        sbt_handles_.free_handle(sbt.handle);
-        return kGfxResult_NoError;
-    }
-
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
     {
         GfxProgram program = {};
@@ -2539,63 +2467,6 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
         Program &gfx_program = programs_[program];  // get hold of program object
         gfx_program.insertParameter(parameter_name).set(data, data_size);
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtSetShaderGroup(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
-    {
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
-        if(!group_name || !*group_name)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
-        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        std::vector<WCHAR> wgroup_name(mbstowcs(nullptr, group_name, 0) + 1);
-        mbstowcs(wgroup_name.data(), group_name, wgroup_name.size());
-        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name.data());
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtSetConstants(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
-    {
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
-        if(!parameter_name || !*parameter_name)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        if(!data && data_size > 0)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
-        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
-        uint32_t const parameter_prev_id = record_and_param.second.id_;
-        record_and_param.second.set(data, data_size);
-        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
-    {
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
-        if(!parameter_name || !*parameter_name)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
-        uint32_t const parameter_prev_id = record_and_param.second.id_;
-        record_and_param.second.set(&texture, &mip_level, 1);
-        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtGetGpuVirtualAddressRangeAndStride(GfxSbt const &sbt,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
-    {
-        Sbt &gfx_sbt = sbts_[sbt];
-        *ray_generation_shader_record = gfx_sbt.ray_generation_shader_record_;
-        *miss_shader_table = gfx_sbt.miss_shader_table_;
-        *hit_group_table = gfx_sbt.hit_group_table_;
-        *callable_shader_table = gfx_sbt.callable_shader_table_;
         return kGfxResult_NoError;
     }
 
@@ -2795,6 +2666,135 @@ public:
     {
         for(uint32_t i = 0; i < kernels_.size(); ++i)
             reloadKernel(kernels_.data()[i]);
+        return kGfxResult_NoError;
+    }
+
+    GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+    {
+        GfxSbt sbt = {};
+        if(dxr_device_ == nullptr)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create SBT");
+            return sbt; // invalid operation
+        }
+        sbt.handle = sbt_handles_.allocate_handle();
+        Sbt &gfx_sbt = sbts_.insert(sbt);
+        for(uint32_t i = 0; i < kernel_count; ++i)
+        {
+            Kernel const &gfx_kernel = kernels_[kernels[i]];
+            for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
+            {
+                gfx_sbt.sbt_max_record_stride_[j] = GFX_MAX(gfx_sbt.sbt_max_record_stride_[j], gfx_kernel.sbt_record_stride_[j]);
+            }
+        }
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+        {
+            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_sbt.sbt_max_record_stride_[i] * entry_count[i];
+            gfx_sbt.sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!gfx_sbt.sbt_buffers_[i])
+            {
+                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
+                return sbt;
+            }
+            gfx_sbt.sbt_buffers_[i].setName("gfx_SbtBuffer");
+        }
+        gfx_sbt.ray_generation_shader_record_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Raygen]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
+        gfx_sbt.miss_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Miss] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        gfx_sbt.hit_group_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Hit] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        gfx_sbt.callable_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Callable] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        return sbt;
+    }
+
+    GfxResult destroySbt(GfxSbt const &sbt)
+    {
+        if(!sbt)
+            return kGfxResult_NoError;
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid sbt object");
+        Sbt const &gfx_sbt = sbts_[sbt];
+        collect(gfx_sbt);  // release resources
+        sbts_.erase(sbt); // destroy sbt
+        sbt_handles_.free_handle(sbt.handle);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetShaderGroup(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!group_name || !*group_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        std::vector<WCHAR> wgroup_name(mbstowcs(nullptr, group_name, 0) + 1);
+        mbstowcs(wgroup_name.data(), group_name, wgroup_name.size());
+        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name.data());
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetConstants(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        if(!data && data_size > 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
+        uint32_t const parameter_prev_id = record_and_param.second.id_;
+        record_and_param.second.set(data, data_size);
+        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
+        uint32_t const parameter_prev_id = record_and_param.second.id_;
+        record_and_param.second.set(&texture, &mip_level, 1);
+        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtGetGpuVirtualAddressRangeAndStride(GfxSbt const &sbt,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
+    {
+        Sbt &gfx_sbt = sbts_[sbt];
+        *ray_generation_shader_record = gfx_sbt.ray_generation_shader_record_;
+        *miss_shader_table = gfx_sbt.miss_shader_table_;
+        *hit_group_table = gfx_sbt.hit_group_table_;
+        *callable_shader_table = gfx_sbt.callable_shader_table_;
         return kGfxResult_NoError;
     }
 
@@ -9208,21 +9208,6 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride);
 }
 
-GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
-{
-    GfxSbt const sbt = {};
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return sbt;   // invalid context
-    return gfx->createSbt(kernels, kernel_count, entry_count);
-}
-
-GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->destroySbt(sbt);
-}
-
 GfxDrawState::GfxDrawState()
 {
     GfxInternal::DispenseDrawState(*this);
@@ -9366,43 +9351,6 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
     return gfx->setProgramConstants(program, parameter_name, data, data_size);
 }
 
-GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtSetShaderGroup(sbt, shader_group_type, index, group_name);
-}
-
-GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
-}
-
-GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtSetTexture(sbt, shader_group_type, index, parameter_name, texture, mip_level);
-}
-
-GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
-    GfxSbt sbt,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtGetGpuVirtualAddressRangeAndStride(sbt,
-        ray_generation_shader_record,
-        miss_shader_table,
-        hit_group_table,
-        callable_shader_table);
-}
-
 GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxDrawState const default_draw_state = {};
@@ -9470,6 +9418,58 @@ GfxResult gfxKernelReloadAll(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->reloadAllKernels();
+}
+
+GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+{
+    GfxSbt const sbt = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return sbt;   // invalid context
+    return gfx->createSbt(kernels, kernel_count, entry_count);
+}
+
+GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->destroySbt(sbt);
+}
+
+GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetShaderGroup(sbt, shader_group_type, index, group_name);
+}
+
+GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
+}
+
+GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetTexture(sbt, shader_group_type, index, parameter_name, texture, mip_level);
+}
+
+GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
+    GfxSbt sbt,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtGetGpuVirtualAddressRangeAndStride(sbt,
+        ray_generation_shader_record,
+        miss_shader_table,
+        hit_group_table,
+        callable_shader_table);
 }
 
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src)
