@@ -6696,7 +6696,26 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive_Triangle(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    {
+        switch(gfx_raytracing_primitive.type_)
+        {
+        case RaytracingPrimitive::kType_Triangles:
+            GFX_TRY(buildRaytracingPrimitiveTriangles(raytracing_primitive, gfx_raytracing_primitive, update));
+            break;
+        case RaytracingPrimitive::kType_Instance:
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build an instance raytracing primitive");
+        case RaytracingPrimitive::kType_Procedural:
+            GFX_TRY(buildRaytracingPrimitiveProcedural(raytracing_primitive, gfx_raytracing_primitive, update));
+            break;
+        default:
+            GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
+            break;
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult buildRaytracingPrimitiveTriangles(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles); // should never happen
         if(gfx_raytracing_primitive.triangles_.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.index_buffer_.handle))
@@ -6781,7 +6800,7 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxResult buildRaytracingPrimitive_Procedural(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    GfxResult buildRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural); // should never happen
         if(!buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.procedural_buffer_.handle))
@@ -6850,17 +6869,6 @@ private:
         GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
         dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
         return kGfxResult_NoError;
-    }
-
-    GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
-    {
-        if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
-            return buildRaytracingPrimitive_Triangle(raytracing_primitive, gfx_raytracing_primitive, update);
-        else if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural)
-            return buildRaytracingPrimitive_Procedural(raytracing_primitive, gfx_raytracing_primitive, update);
-        
-        GFX_ASSERT(false);
-        return kGfxResult_InvalidOperation;
     }
 
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive)
