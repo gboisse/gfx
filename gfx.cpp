@@ -2282,7 +2282,7 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
-    GfxResult buildRaytracingProceduralPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+    GfxResult buildRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -2418,7 +2418,7 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
-    GfxResult updateRaytracingProceduralPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride)
+    GfxResult updateRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -9362,11 +9362,11 @@ GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive
     return gfx->buildRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, build_flags);
 }
 
-GfxResult gfxRaytracingProceduralPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+GfxResult gfxRaytracingPrimitiveBuildProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->buildRaytracingProceduralPrimitive(raytracing_primitive, aabb_buffer, aabb_stride, build_flags);
+    return gfx->buildRaytracingPrimitiveProcedural(raytracing_primitive, aabb_buffer, aabb_stride, build_flags);
 }
 
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform)
@@ -9418,11 +9418,11 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride);
 }
 
-GfxResult gfxRaytracingProceduralPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride)
+GfxResult gfxRaytracingPrimitiveUpdateProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->updateRaytracingProceduralPrimitive(raytracing_primitive, aabb_buffer, aabb_stride);
+    return gfx->updateRaytracingPrimitiveProcedural(raytracing_primitive, aabb_buffer, aabb_stride);
 }
 
 GfxDrawState::GfxDrawState()

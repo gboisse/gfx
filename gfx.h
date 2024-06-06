@@ -212,7 +212,7 @@ GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimiti
 
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
-GfxResult gfxRaytracingProceduralPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
+GfxResult gfxRaytracingPrimitiveBuildProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
@@ -220,7 +220,7 @@ GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContex
 uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);    // in bytes
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
-GfxResult gfxRaytracingProceduralPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
+GfxResult gfxRaytracingPrimitiveUpdateProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 
 //!
 //! Draw state manipulation.
