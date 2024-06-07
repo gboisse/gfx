@@ -1700,7 +1700,7 @@ public:
             texture.width = width;
             texture.height = height;
         }
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.flags_ = flags;
         return texture;
@@ -1751,7 +1751,7 @@ public:
         texture.width = width;
         texture.height = height;
         texture.depth = slice_count;
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -1801,7 +1801,7 @@ public:
         texture.width = width;
         texture.height = height;
         texture.depth = depth;
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -1844,7 +1844,7 @@ public:
         texture.width = size;
         texture.height = size;
         texture.depth = 6;
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -4368,7 +4368,7 @@ public:
         texture.format = resource_desc.Format;
         texture.mip_levels = (uint32_t)resource_desc.MipLevels;
         ResolveClearValueForTexture(gfx_texture, nullptr, texture.format);
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
             for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
             {

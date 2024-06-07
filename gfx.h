@@ -117,7 +117,7 @@ TYPE *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
 //! Texture resources.
 //!
 
-class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; float clear_value_[4]; public:
+class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32_t height; uint32_t depth; DXGI_FORMAT format; uint32_t mip_levels; enum { kType_2D, kType_2DArray, kType_3D, kType_Cube } type; float clear_value[4]; public:
                    inline bool is2DArray() const { return type == kType_2DArray; }
                    inline bool isCube() const { return type == kType_Cube; }
                    inline bool is3D() const { return type == kType_3D; }
@@ -127,7 +127,7 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32
                    inline uint32_t getDepth() const { return depth; }
                    inline DXGI_FORMAT getFormat() const { return format; }
                    inline uint32_t getMipLevels() const { return mip_levels; }
-                   inline float const *getClearValue() const { return clear_value_; } };
+                   inline float const *getClearValue() const { return clear_value; } };
 
 GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr);  // creates auto-resize window-sized texture
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
