@@ -2066,30 +2066,6 @@ public:
         return gfx_acceleration_structure.bvh_data_size_;
     }
 
-    uint32_t getAccelerationStructureRaytracingPrimitiveCount(GfxAccelerationStructure const &acceleration_structure)
-    {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
-        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
-            return 0;
-        }
-        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
-        return (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
-    }
-
-    GfxRaytracingPrimitive const *getAccelerationStructureRaytracingPrimitives(GfxAccelerationStructure const &acceleration_structure)
-    {
-        if(dxr_device_ == nullptr) return nullptr;  // avoid spamming console output
-        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
-            return nullptr;
-        }
-        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
-        return (!gfx_acceleration_structure.raytracing_primitives_.empty() ? gfx_acceleration_structure.raytracing_primitives_.data() : nullptr);
-    }
-
     GfxRaytracingPrimitive createRaytracingPrimitive(GfxAccelerationStructure const &acceleration_structure)
     {
         GfxRaytracingPrimitive raytracing_primitive = {};
@@ -2209,22 +2185,11 @@ public:
         if(acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             acceleration_structures_[acceleration_structure].needs_rebuild_ = true;
-            if(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural)
+            auto &primitives = acceleration_structures_[acceleration_structure].raytracing_primitives_;
+            if(gfx_raytracing_primitive.index_ < primitives.size() && primitives[gfx_raytracing_primitive.index_].handle == raytracing_primitive.handle)
             {
-                auto &primitives = acceleration_structures_[acceleration_structure].raytracing_primitives_;
-                if(gfx_raytracing_primitive.index_ < primitives.size() && primitives[gfx_raytracing_primitive.index_].handle == raytracing_primitive.handle)
-                {
-                    auto it = primitives.begin() + gfx_raytracing_primitive.index_;
-                    primitives.erase(it);
-
-                    // Indices moved after the primitive removal, so we need to update indices of primitives that were ahead of it
-                    for(size_t i = gfx_raytracing_primitive.index_; i < primitives.size(); ++i)
-                    {
-                        auto &primitive_ahead = raytracing_primitives_[primitives[i]];
-                        --primitive_ahead.index_;
-                        --primitive_ahead.instance_id_;
-                    }
-                }
+                auto it = primitives.begin() + gfx_raytracing_primitive.index_;
+                primitives.erase(it);
             }
         }
         collect(gfx_raytracing_primitive);  // release resources
@@ -9342,20 +9307,6 @@ uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAcceleration
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getAccelerationStructureDataSize(acceleration_structure);
-}
-
-uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context, GfxAccelerationStructure acceleration_structure)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return 0;  // invalid context
-    return gfx->getAccelerationStructureRaytracingPrimitiveCount(acceleration_structure);
-}
-
-GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;    // invalid context
-    return gfx->getAccelerationStructureRaytracingPrimitives(acceleration_structure);
 }
 
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure)

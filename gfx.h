@@ -187,8 +187,6 @@ GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStr
 
 GfxResult gfxAccelerationStructureUpdate(GfxContext context, GfxAccelerationStructure acceleration_structure);
 uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAccelerationStructure acceleration_structure);  // in bytes
-uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context, GfxAccelerationStructure acceleration_structure);
-GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure);
 
 //!
 //! Raytracing primitives.
