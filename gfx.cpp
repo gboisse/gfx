@@ -5262,10 +5262,6 @@ private:
     void collect(AccelerationStructure const &acceleration_structure)
     {
         destroyBuffer(acceleration_structure.bvh_buffer_);
-        auto copy = acceleration_structure.raytracing_primitives_;
-        for(size_t i = 0; i < copy.size(); ++i)
-            if(raytracing_primitive_handles_.has_handle(copy[i].handle))
-                destroyRaytracingPrimitive(copy[i]);
     }
 
     void collect(RaytracingPrimitive const &raytracing_primitive)
