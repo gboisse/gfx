@@ -1127,20 +1127,20 @@ private:
                         GfxVertex vertex = {};
                         if(std::get<0>(key) >= 0)
                         {
-                            vertex.position.x = obj_reader.GetAttrib().vertices[3 * std::get<0>(key) + 0];
-                            vertex.position.y = obj_reader.GetAttrib().vertices[3 * std::get<0>(key) + 1];
-                            vertex.position.z = obj_reader.GetAttrib().vertices[3 * std::get<0>(key) + 2];
+                            vertex.position.x = obj_reader.GetAttrib().vertices[3ull * std::get<0>(key) + 0];
+                            vertex.position.y = obj_reader.GetAttrib().vertices[3ull * std::get<0>(key) + 1];
+                            vertex.position.z = obj_reader.GetAttrib().vertices[3ull * std::get<0>(key) + 2];
                         }
                         if(std::get<1>(key) >= 0)
                         {
-                            vertex.normal.x = obj_reader.GetAttrib().normals[3 * std::get<1>(key) + 0];
-                            vertex.normal.y = obj_reader.GetAttrib().normals[3 * std::get<1>(key) + 1];
-                            vertex.normal.z = obj_reader.GetAttrib().normals[3 * std::get<1>(key) + 2];
+                            vertex.normal.x = obj_reader.GetAttrib().normals[3ull * std::get<1>(key) + 0];
+                            vertex.normal.y = obj_reader.GetAttrib().normals[3ull * std::get<1>(key) + 1];
+                            vertex.normal.z = obj_reader.GetAttrib().normals[3ull * std::get<1>(key) + 2];
                         }
                         if(std::get<2>(key) >= 0)
                         {
-                            vertex.uv.x = obj_reader.GetAttrib().texcoords[2 * std::get<2>(key) + 0];
-                            vertex.uv.y = 1.0f - obj_reader.GetAttrib().texcoords[2 * std::get<2>(key) + 1];
+                            vertex.uv.x = obj_reader.GetAttrib().texcoords[2ull * std::get<2>(key) + 0];
+                            vertex.uv.y = 1.0f - obj_reader.GetAttrib().texcoords[2ull * std::get<2>(key) + 1];
                         }
                         uint32_t const index = (uint32_t)vertex_map.size();
                         vertex_map[key] = std::pair<uint32_t, GfxVertex>(index, vertex);
