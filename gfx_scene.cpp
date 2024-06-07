@@ -1432,8 +1432,8 @@ private:
                         };
                         constexpr std::string_view metalTag = "\"metallicTexture\":{\"index\":";
                         constexpr std::string_view roughTag = "\"roughnessTexture\":{\"index\":";
-                        get_texture(metalTag, material_ref->roughness_map);
-                        get_texture(roughTag, material_ref->metallicity_map);
+                        get_texture(metalTag, material_ref->metallicity_map);
+                        get_texture(roughTag, material_ref->roughness_map);
                         has_split_extension = true;
                     }
                 }
