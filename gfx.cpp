@@ -2109,17 +2109,11 @@ public:
                 return cloned_raytracing_primitive;
             }
             RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-            if(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
+            if(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance)
                 break;  // found parent raytracing primitive
-            switch(parent_raytracing_primitive.type_)
-            {
-            case RaytracingPrimitive::kType_Instance:
-                raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
-                break;
-            default:
-                GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
-                return cloned_raytracing_primitive; // invalid raytracing primitive type
-            }
+            
+            raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
+            break;
         }
         RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(parent_raytracing_primitive);
@@ -6897,8 +6891,8 @@ private:
                 if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.instance_.parent_.handle))
                     return invalid_buffer;  // cannot get buffer from an invalid raytracing primitive
                 RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive.instance_.parent_];
-                GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
-                return parent_raytracing_primitive.triangles_.bvh_buffer_;
+                GFX_ASSERT(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance);  // should never happen
+                return getRaytracingPrimitiveBuffer(parent_raytracing_primitive);
             }
         case RaytracingPrimitive::kType_Procedural:
             return raytracing_primitive.procedural_.bvh_buffer_;
@@ -6921,8 +6915,8 @@ private:
                 if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.instance_.parent_.handle))
                     return invalid_acceleration_structure;  // cannot get acceleration structure from an invalid raytracing primitive
                 RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive.instance_.parent_];
-                GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
-                return parent_raytracing_primitive.triangles_.acceleration_structure_;
+                GFX_ASSERT(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance);  // should never happen
+                return getRaytracingPrimitiveAccelerationStructure(parent_raytracing_primitive);
             }
         case RaytracingPrimitive::kType_Procedural:
             return raytracing_primitive.procedural_.acceleration_structure_;
