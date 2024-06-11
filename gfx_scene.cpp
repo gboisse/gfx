@@ -1295,8 +1295,8 @@ private:
                     }
                 }
             }
-            if(texture->basisu_image != nullptr && ((texture->basisu_image->uri != nullptr) || (texture->basisu_image->buffer_view != nullptr)))
-                return texture->image;
+            if(texture->basisu_image != nullptr && texture->basisu_image->uri != nullptr)
+                return texture->basisu_image;
             else if(texture->image != nullptr && ((texture->image->uri != nullptr) || (texture->image->buffer_view != nullptr)))
                 return texture->image;
             return nullptr;
