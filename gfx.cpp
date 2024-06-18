@@ -70,7 +70,7 @@ SOFTWARE.
 
 extern "C"
 {
-__declspec(dllexport) extern const UINT D3D12SDKVersion = 613;
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 614;
 __declspec(dllexport) extern char8_t const *D3D12SDKPath = u8".\\";
 
 __declspec(dllexport) UINT GetD3D12SDKVersion()
@@ -1009,7 +1009,7 @@ public:
 
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
     {
-        if(GetD3D12SDKVersion() != 613)
+        if(GetD3D12SDKVersion() != 614)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
