@@ -2653,10 +2653,12 @@ public:
         return kGfxResult_NoError;
     }
 
+    static uint32_t const kInvalidNumThreads[3];
+
     uint32_t const *getKernelNumThreads(GfxKernel const &kernel)
     {
         if(!kernel_handles_.has_handle(kernel.handle))
-            return nullptr; // invalid kernel object
+            return kInvalidNumThreads;  // invalid kernel object
         Kernel const &gfx_kernel = kernels_[kernel];
         GFX_ASSERT(gfx_kernel.num_threads_ != nullptr);
         return gfx_kernel.num_threads_;
@@ -8886,6 +8888,13 @@ char const *GfxInternal::shader_extensions_[] =
     ".rt"
 };
 
+uint32_t const GfxInternal::kInvalidNumThreads[] =
+{
+    1,
+    1,
+    1
+};
+
 GfxArray<GfxInternal::DrawState> GfxInternal::draw_states_;
 GfxHandles                       GfxInternal::draw_state_handles_("draw state");
 
@@ -9409,7 +9418,7 @@ GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;    // invalid context
+    if(!gfx) return GfxInternal::kInvalidNumThreads;
     return gfx->getKernelNumThreads(kernel);
 }
 
