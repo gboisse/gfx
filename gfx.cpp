@@ -105,6 +105,7 @@ class GfxInternal
     uint64_t *fence_values_ = nullptr;
 
     bool debug_shaders_ = false;
+    bool experimental_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -931,6 +932,17 @@ public:
             DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
+
+        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
+        {
+            IID features[] = { D3D12ExperimentalShaderModels };
+            if(!IsDeveloperModeEnabled())
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
+            if(!SUCCEEDED(D3D12EnableExperimentalFeatures( 1, features, nullptr, nullptr )))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
+            experimental_shaders_ = true;
+        }
+
         DXGIFactoryReleaser const factory_releaser(factory);
         GFX_TRY(initializeDevice(flags, adapter, factory));
 
@@ -4240,6 +4252,24 @@ public:
         command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
         GFX_TRY(sync());    // make sure GPU has gone through all pending work
         command_allocators_[fence_index_]->Reset();
+        command_list_->Reset(command_allocators_[fence_index_], nullptr);
+        resetState();   // re-install state
+        return kGfxResult_NoError;
+    }
+
+    GfxResult execute()
+    {
+        if(isInterop())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot synchronize commands when using an interop context");
+        command_list_->Close(); // close command list for submit
+        ID3D12CommandList *const command_lists[] = { command_list_ };
+        command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
+
+        return kGfxResult_NoError;
+    }
+
+    GfxResult resetCommandList()
+    {
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
         resetState();   // re-install state
         return kGfxResult_NoError;
@@ -8455,6 +8485,11 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
+        if(experimental_shaders_ == true)
+        {
+            shader_args.push_back(L"-Vd");
+            shader_args.push_back(L"-select-validator internal");
+        }
 
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
@@ -9819,6 +9854,20 @@ GfxResult gfxFinish(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->finish();
+}
+
+GfxResult gfxExecute(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->execute();
+}
+
+GfxResult gfxResetCommandList( GfxContext context )
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->resetCommandList();
 }
 
 GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight)
