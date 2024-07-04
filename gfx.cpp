@@ -70,7 +70,7 @@ SOFTWARE.
 
 extern "C"
 {
-__declspec(dllexport) extern const UINT D3D12SDKVersion = 613;
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 614;
 __declspec(dllexport) extern char8_t const *D3D12SDKPath = u8".\\";
 
 __declspec(dllexport) UINT GetD3D12SDKVersion()
@@ -1022,7 +1022,7 @@ public:
 
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
     {
-        if(GetD3D12SDKVersion() != 613)
+        if(GetD3D12SDKVersion() != 614)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
@@ -2749,10 +2749,12 @@ public:
         return kGfxResult_NoError;
     }
 
+    static uint32_t const kNumThreads_Invalid[3];
+
     uint32_t const *getKernelNumThreads(GfxKernel const &kernel)
     {
         if(!kernel_handles_.has_handle(kernel.handle))
-            return nullptr; // invalid kernel object
+            return kNumThreads_Invalid; // invalid kernel object
         Kernel const &gfx_kernel = kernels_[kernel];
         GFX_ASSERT(gfx_kernel.num_threads_ != nullptr);
         return gfx_kernel.num_threads_;
@@ -9077,6 +9079,13 @@ char const *GfxInternal::shader_extensions_[] =
     ".rt"
 };
 
+uint32_t const GfxInternal::kNumThreads_Invalid[] =
+{
+    1,
+    1,
+    1
+};
+
 GfxArray<GfxInternal::DrawState> GfxInternal::draw_states_;
 GfxHandles                       GfxInternal::draw_state_handles_("draw state");
 
@@ -9615,7 +9624,7 @@ GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;    // invalid context
+    if(!gfx) return GfxInternal::kNumThreads_Invalid;
     return gfx->getKernelNumThreads(kernel);
 }
 
