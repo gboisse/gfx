@@ -2111,7 +2111,6 @@ public:
             RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
             if(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance)
                 break;  // found parent raytracing primitive
-            
             raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
             break;
         }
@@ -2263,6 +2262,9 @@ public:
         if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion AABBs");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Procedural)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a non-procedural raytracing primitive object");
+        destroyBuffer(gfx_raytracing_primitive.procedural_.procedural_buffer_);
         gfx_raytracing_primitive.procedural_.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.procedural_.procedural_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
         gfx_raytracing_primitive.procedural_.procedural_stride_ = aabb_stride;
@@ -2424,11 +2426,14 @@ public:
         if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with a buffer object containing more than 4 billion AABBs");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Procedural)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-procedural raytracing primitive object");
         destroyBuffer(gfx_raytracing_primitive.procedural_.procedural_buffer_);
         gfx_raytracing_primitive.procedural_.procedural_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
         gfx_raytracing_primitive.procedural_.procedural_stride_ = aabb_stride;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
+
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
     {
         GfxProgram program = {};
@@ -6843,7 +6848,6 @@ private:
         gfx_raytracing_primitive.procedural_.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
         GFX_ASSERT(buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.bvh_buffer_.handle));
         GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
-
         Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.procedural_.bvh_buffer_];
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
         SetObjectName(gfx_buffer, raytracing_primitive.name);
