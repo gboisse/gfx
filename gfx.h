@@ -183,7 +183,7 @@ class GfxRaytracingPrimitive;   // forward declaration
 class GfxAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxAccelerationStructure); public: };
 
 GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context);
-GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStructure acceleration_structure); // automatically releases all raytracing primitives
+GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStructure acceleration_structure);
 
 GfxResult gfxAccelerationStructureUpdate(GfxContext context, GfxAccelerationStructure acceleration_structure);
 uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAccelerationStructure acceleration_structure);  // in bytes
