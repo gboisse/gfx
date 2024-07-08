@@ -1321,6 +1321,7 @@ private:
                                          : std::string(""));
                 if(!image_folder.empty() && image_folder.back() != '/' && image_folder.back() != '\\')
                     image_folder += '/';
+                cgltf_decode_uri(gltf_image->uri);
                 std::string image_file = image_folder + gltf_image->uri;
                 if(gfxSceneImport(scene, image_file.c_str()) != kGfxResult_NoError)
                     continue; // unable to load image file
