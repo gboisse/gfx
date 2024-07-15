@@ -27,6 +27,7 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /experimental:external /external:anglebrackets /external:W0 /analyze:external->)
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd4324>) # structure was padded due to alignment specifier
+    target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd6387>) # param could be 0
     target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
     if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
@@ -59,7 +60,26 @@ else()
 endif()
 
 target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(gfx PRIVATE d3d12 dxgi)
+# Find the latest windows SDK needed for d3d12 libs
+if(NOT CMAKE_WINDOWS_KITS_10_DIR)
+    set(CMAKE_WINDOWS_KITS_10_DIR "C:/Program Files (x86)/Windows Kits/10")
+endif()
+if(CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION)
+    STRING(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+" WINDOWS_KIT_VERSION ${CMAKE_VS_WINDOWS_TARGET_PLATFORM_VERSION})
+else()
+    set(WINDOWS_KIT_VERSION "10.0.0.0")
+    file(GLOB _KITS RELATIVE ${CMAKE_WINDOWS_KITS_10_DIR}/Lib ${CMAKE_WINDOWS_KITS_10_DIR}/Lib/*)
+    foreach(_KIT ${_KITS})
+        if(${_KIT} VERSION_GREATER_EQUAL ${WINDOWS_KIT_VERSION})
+            set(WINDOWS_KIT_VERSION ${_KIT})
+        endif()
+    endforeach()
+endif()
+set(WINDOWS_KIT_LIBRARY_DIR ${CMAKE_WINDOWS_KITS_10_DIR}/Lib/${WINDOWS_KIT_VERSION}/um/x64)
+set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} ${WINDOWS_KIT_LIBRARY_DIR})
+find_library(D3D12_LIB NAMES d3d12 REQUIRED)
+find_library(DXGI_LIB NAMES dxgi REQUIRED)
+target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
 
 set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
 FetchContent_Declare(
@@ -78,11 +98,10 @@ else()
     target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator)
 endif()
 
-set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} $ENV{WindowsSdkDir}) # Needed to find d3d12
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 FetchContent_Declare(
     DirectX12-Agility
-    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.613.2"
+    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.614.0"
     SOURCE_DIR     "${GFX_AGILITY_PATH}"
     FIND_PACKAGE_ARGS NAMES DirectX12-Agility
 )
@@ -91,13 +110,13 @@ if(NOT DirectX12-Agility_FOUND)
     add_library(D3D12Core SHARED IMPORTED)
     set_target_properties(D3D12Core PROPERTIES
         IMPORTED_LOCATION "${GFX_AGILITY_PATH}/build/native/bin/x64/D3D12Core.dll"
-        IMPORTED_IMPLIB d3d12.lib
+        IMPORTED_IMPLIB ${D3D12_LIB}
         INTERFACE_INCLUDE_DIRECTORIES "${GFX_AGILITY_PATH}/build/native/include"
     )
     add_library(d3d12SDKLayers SHARED IMPORTED)
     set_target_properties(d3d12SDKLayers PROPERTIES
         IMPORTED_LOCATION "${GFX_AGILITY_PATH}/build/native/bin/x64/d3d12SDKLayers.dll"
-        IMPORTED_IMPLIB d3d12.lib
+        IMPORTED_IMPLIB ${D3D12_LIB}
     )
     target_link_libraries(gfx PRIVATE D3D12Core d3d12SDKLayers)
 else()
@@ -114,7 +133,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(directx-dxc)
 if(NOT directx-dxc_FOUND)
-    find_library(D3D12_LIB NAMES d3d12)
     add_library(dxcompiler SHARED IMPORTED)
     set_target_properties(dxcompiler PROPERTIES
         IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxcompiler.dll"

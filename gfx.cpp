@@ -70,7 +70,7 @@ SOFTWARE.
 
 extern "C"
 {
-__declspec(dllexport) extern const UINT D3D12SDKVersion = 613;
+__declspec(dllexport) extern const UINT D3D12SDKVersion = 614;
 __declspec(dllexport) extern char8_t const *D3D12SDKPath = u8".\\";
 
 __declspec(dllexport) UINT GetD3D12SDKVersion()
@@ -251,15 +251,15 @@ class GfxInternal
         inline String() : data_(nullptr) {}
         inline String(char const *data) : data_(nullptr) { *this = data; }
         inline String(String &&other) : data_(other.data_) { other.data_ = nullptr; }
-        inline String &operator =(String &&other) { if(this != &other) { free(data_); data_ = other.data_; other.data_ = nullptr; } return *this; }
-        inline String &operator =(char const *data) { free(data_); if(!data) data_ = nullptr; else
-                                                                           { data_ = (char *)malloc(strlen(data) + 1); strcpy(data_, data); }
+        inline String &operator =(String &&other) { if(this != &other) { gfxFree(data_); data_ = other.data_; other.data_ = nullptr; } return *this; }
+        inline String &operator =(char const *data) { gfxFree(data_); if(!data) data_ = nullptr; else
+                                                                           { data_ = (char *)gfxMalloc(strlen(data) + 1); strcpy(data_, data); }
                                                       return *this; }
         inline operator char const *() const { return data_ ? data_ : ""; }
         inline size_t size() const { return data_ ? strlen(data_) : 0; }
         inline char const *c_str() const { return data_ ? data_ : ""; }
         inline operator bool() const { return data_ != nullptr; }
-        inline ~String() { free(data_); }
+        inline ~String() { gfxFree(data_); }
     };
 
     struct Garbage
@@ -452,7 +452,10 @@ class GfxInternal
         enum
         {
             kType_Triangles = 0,
-            kType_Instance
+            kType_Instance,
+            kType_Procedural,
+
+            kType_Count
         }
         type_;
         struct
@@ -472,6 +475,16 @@ class GfxInternal
             GfxRaytracingPrimitive parent_ = {};
         }
         instance_;
+        struct
+        {
+            uint32_t build_flags_ = 0;
+            GfxBuffer bvh_buffer_ = {};
+            uint64_t bvh_data_size_ = 0;
+            uint32_t procedural_stride_ = 0;
+            GfxBuffer procedural_buffer_ = {};
+            GfxAccelerationStructure acceleration_structure_ = {};
+        }
+        procedural_;
     };
     GfxArray<RaytracingPrimitive> raytracing_primitives_;
     GfxHandles raytracing_primitive_handles_;
@@ -516,12 +529,7 @@ class GfxInternal
                     type_ = kType_Buffer;
                     data_.buffer_.buffer_count = buffer_count;
                     data_size_ = buffer_count * sizeof(GfxBuffer);
-                    data_.buffer_.buffers_ = (GfxBuffer *)(buffer_count > 0 ? malloc(buffer_count * sizeof(GfxBuffer)) : nullptr);
-                    if(buffer_count > 0 && data_.buffer_.buffers_ == nullptr)
-                    {
-                        GFX_ASSERT(0);  // out of memory
-                        unset(); return;
-                    }
+                    data_.buffer_.buffers_ = (GfxBuffer *)(buffer_count > 0 ? gfxMalloc(buffer_count * sizeof(GfxBuffer)) : nullptr);
                 }
                 for(uint32_t i = 0; i < buffer_count; ++i)
                     data_.buffer_.buffers_[i] = buffers[i];
@@ -539,13 +547,8 @@ class GfxInternal
                     type_ = kType_Image;
                     data_.image_.texture_count = texture_count;
                     data_size_ = texture_count * sizeof(GfxTexture);
-                    data_.image_.textures_ = (GfxTexture *)(texture_count > 0 ? malloc(texture_count * sizeof(GfxTexture)) : nullptr);
-                    data_.image_.mip_levels_ = (uint32_t *)(texture_count > 0 && mip_levels != nullptr ? malloc(texture_count * sizeof(uint32_t)) : nullptr);
-                    if(texture_count > 0 && (data_.image_.textures_ == nullptr || (mip_levels != nullptr && data_.image_.mip_levels_ == nullptr)))
-                    {
-                        GFX_ASSERT(0);  // out of memory
-                        unset(); return;
-                    }
+                    data_.image_.textures_ = (GfxTexture *)(texture_count > 0 ? gfxMalloc(texture_count * sizeof(GfxTexture)) : nullptr);
+                    data_.image_.mip_levels_ = (uint32_t *)(texture_count > 0 && mip_levels != nullptr ? gfxMalloc(texture_count * sizeof(uint32_t)) : nullptr);
                 }
                 for(uint32_t i = 0; i < texture_count; ++i)
                 {
@@ -589,7 +592,7 @@ class GfxInternal
                 {
                     unset();
                     type_ = kType_Constants;
-                    data_.constants_ = (data_size > 0 ? malloc(data_size) : nullptr);
+                    data_.constants_ = (data_size > 0 ? gfxMalloc(data_size) : nullptr);
                 }
                 memcpy(data_.constants_, data, data_size);
                 data_size_ = data_size;
@@ -600,11 +603,11 @@ class GfxInternal
                 switch(type_)
                 {
                 case kType_Image:
-                    free(data_.image_.textures_);
-                    free(data_.image_.mip_levels_);
+                    gfxFree(data_.image_.textures_);
+                    gfxFree(data_.image_.mip_levels_);
                     break;
                 case kType_Constants:
-                    free(data_.constants_);
+                    gfxFree(data_.constants_);
                     break;
                 default:
                     break;
@@ -888,7 +891,7 @@ class GfxInternal
 
         inline WindowsSecurityAttributes()
         {
-            security_descriptor_ = (PSECURITY_DESCRIPTOR)malloc(SECURITY_DESCRIPTOR_MIN_LENGTH + 2 * sizeof(void**));
+            security_descriptor_ = (PSECURITY_DESCRIPTOR)gfxMalloc(SECURITY_DESCRIPTOR_MIN_LENGTH + 2 * sizeof(void**));
             GFX_ASSERT(security_descriptor_ != nullptr);
             PSID *ppSID = (PSID *)((PBYTE)security_descriptor_ + SECURITY_DESCRIPTOR_MIN_LENGTH);
             PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
@@ -916,7 +919,7 @@ class GfxInternal
             PACL *ppACL = (PACL *)((PBYTE)ppSID + sizeof(PSID *));
             FreeSid(*ppSID);
             LocalFree(*ppACL);
-            free(security_descriptor_);
+            gfxFree(security_descriptor_);
         }
     };
 
@@ -981,9 +984,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
 
-        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
+        back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
-        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
+        back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
 
         D3D12_RESOURCE_BARRIER resource_barrier = {};
@@ -1020,10 +1023,10 @@ public:
 
         GFX_TRY(initializeCommon(context));
 
-        back_buffers_ = (ID3D12Resource **)malloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
-        back_buffer_allocations_ = (D3D12MA::Allocation **)malloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
+        back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
+        back_buffer_allocations_ = (D3D12MA::Allocation **)gfxMalloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
         GFX_TRY(createBackBuffers());
-        back_buffer_rtvs_ = (uint32_t *)malloc(max_frames_in_flight_ * sizeof(uint32_t));
+        back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
 
         return kGfxResult_NoError;
@@ -1031,7 +1034,7 @@ public:
 
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
     {
-        if(GetD3D12SDKVersion() != 613)
+        if(GetD3D12SDKVersion() != 614)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
@@ -1165,7 +1168,7 @@ public:
 
         max_frames_in_flight_ = kGfxConstant_BackBufferCount;
 
-        command_allocators_ = (ID3D12CommandAllocator **)malloc(max_frames_in_flight_ * sizeof(ID3D12CommandAllocator *));
+        command_allocators_ = (ID3D12CommandAllocator **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12CommandAllocator *));
         for(uint32_t j = 0; j < max_frames_in_flight_; ++j)
         {
             char buffer[256];
@@ -1185,7 +1188,7 @@ public:
         fence_event_ = CreateEvent(nullptr, false, false, nullptr);
         if(!fence_event_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create event handle");
-        fences_ = (ID3D12Fence **)malloc(max_frames_in_flight_ * sizeof(ID3D12Fence *));
+        fences_ = (ID3D12Fence **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Fence *));
         for(uint32_t j = 0; j < max_frames_in_flight_; ++j)
         {
             char buffer[256];
@@ -1194,7 +1197,7 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create fence object");
             SetDebugName(fences_[j], buffer);
         }
-        fence_values_ = (uint64_t *)malloc(max_frames_in_flight_ * sizeof(uint64_t));
+        fence_values_ = (uint64_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint64_t));
         memset(fence_values_, 0, max_frames_in_flight_ * sizeof(uint64_t));
 
         return kGfxResult_NoError;
@@ -1268,9 +1271,9 @@ public:
         }
         populateDummyDescriptors();
 
-        constant_buffer_pool_ = (GfxBuffer *)malloc(max_frames_in_flight_ * sizeof(GfxBuffer));
-        constant_buffer_pool_cursors_ = (uint64_t *)malloc(max_frames_in_flight_ * sizeof(uint64_t));
-        timestamp_query_heaps_ = (TimestampQueryHeap *)malloc(max_frames_in_flight_ * sizeof(TimestampQueryHeap));
+        constant_buffer_pool_ = (GfxBuffer *)gfxMalloc(max_frames_in_flight_ * sizeof(GfxBuffer));
+        constant_buffer_pool_cursors_ = (uint64_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint64_t));
+        timestamp_query_heaps_ = (TimestampQueryHeap *)gfxMalloc(max_frames_in_flight_ * sizeof(TimestampQueryHeap));
         memset(constant_buffer_pool_cursors_, 0, max_frames_in_flight_ * sizeof(uint64_t));
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
@@ -1381,8 +1384,8 @@ public:
                 destroyBuffer(constant_buffer_pool_[i]);
                 constant_buffer_pool_[i].~GfxBuffer();
             }
-        free(constant_buffer_pool_);
-        free(constant_buffer_pool_cursors_);
+        gfxFree(constant_buffer_pool_);
+        gfxFree(constant_buffer_pool_cursors_);
 
         for(std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it)
         {
@@ -1433,7 +1436,7 @@ public:
                 destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
                 timestamp_query_heaps_[i].~TimestampQueryHeap();
             }
-        free(timestamp_query_heaps_);
+        gfxFree(timestamp_query_heaps_);
 
         forceGarbageCollection();
         freelist_descriptors_.clear();
@@ -1461,7 +1464,7 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(command_allocators_[i] != nullptr)
                     command_allocators_[i]->Release();
-        free(command_allocators_);
+        gfxFree(command_allocators_);
 
         if(fence_event_)
             CloseHandle(fence_event_);
@@ -1469,8 +1472,8 @@ public:
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(fences_[i] != nullptr)
                     fences_[i]->Release();
-        free(fence_values_);
-        free(fences_);
+        gfxFree(fence_values_);
+        gfxFree(fences_);
 
         if(dxc_utils_ != nullptr)
             dxc_utils_->Release();
@@ -1487,14 +1490,14 @@ public:
                 for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                     if(back_buffer_allocations_[i] != nullptr)
                         back_buffer_allocations_[i]->Release();
-            free(back_buffer_allocations_);
+            gfxFree(back_buffer_allocations_);
         }
         if(back_buffers_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
                     back_buffers_[i]->Release();
-        free(back_buffer_rtvs_);
-        free(back_buffers_);
+        gfxFree(back_buffer_rtvs_);
+        gfxFree(back_buffers_);
 
         if(mem_allocator_ != nullptr)
             mem_allocator_->Release();
@@ -1600,10 +1603,10 @@ public:
         buffer.size = size;
         buffer.cpu_access = cpu_access;
         buffer.stride = sizeof(uint32_t);
-        gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
+        gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
         *gfx_buffer.reference_count_ = 1;   // retain
-        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
         GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
         *gfx_buffer.resource_state_ = resource_state;
         if(data != nullptr && cpu_access != kGfxCpuAccess_Write)
@@ -1722,7 +1725,7 @@ public:
             texture.width = width;
             texture.height = height;
         }
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.flags_ = flags;
         return texture;
@@ -1773,7 +1776,7 @@ public:
         texture.width = width;
         texture.height = height;
         texture.depth = slice_count;
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -1823,7 +1826,7 @@ public:
         texture.width = width;
         texture.height = height;
         texture.depth = depth;
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -1866,7 +1869,7 @@ public:
         texture.width = size;
         texture.height = size;
         texture.depth = 6;
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
         return texture;
     }
@@ -2075,30 +2078,6 @@ public:
         return gfx_acceleration_structure.bvh_data_size_;
     }
 
-    uint32_t getAccelerationStructureRaytracingPrimitiveCount(GfxAccelerationStructure const &acceleration_structure)
-    {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
-        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
-            return 0;
-        }
-        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
-        return (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
-    }
-
-    GfxRaytracingPrimitive const *getAccelerationStructureRaytracingPrimitives(GfxAccelerationStructure const &acceleration_structure)
-    {
-        if(dxr_device_ == nullptr) return nullptr;  // avoid spamming console output
-        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the raytracing primitives of an invalid acceleration structure object");
-            return nullptr;
-        }
-        AccelerationStructure const &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
-        return (!gfx_acceleration_structure.raytracing_primitives_.empty() ? gfx_acceleration_structure.raytracing_primitives_.data() : nullptr);
-    }
-
     GfxRaytracingPrimitive createRaytracingPrimitive(GfxAccelerationStructure const &acceleration_structure)
     {
         GfxRaytracingPrimitive raytracing_primitive = {};
@@ -2114,6 +2093,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
             return raytracing_primitive;
         }
+        raytracing_primitive.type = GfxRaytracingPrimitive::kType_Triangles;
         raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(raytracing_primitive);
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
@@ -2128,7 +2108,7 @@ public:
         return raytracing_primitive;
     }
 
-    GfxRaytracingPrimitive createRaytracingPrimitive(GfxRaytracingPrimitive raytracing_primitive)
+    GfxRaytracingPrimitive createRaytracingPrimitiveInstance(GfxRaytracingPrimitive raytracing_primitive)
     {
         GfxRaytracingPrimitive cloned_raytracing_primitive = {};
         if(dxr_device_ == nullptr)
@@ -2141,17 +2121,10 @@ public:
                 return cloned_raytracing_primitive;
             }
             RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
-            if(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles)
+            if(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance)
                 break;  // found parent raytracing primitive
-            switch(parent_raytracing_primitive.type_)
-            {
-            case RaytracingPrimitive::kType_Instance:
-                raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
-                break;
-            default:
-                GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
-                return cloned_raytracing_primitive; // invalid raytracing primitive type
-            }
+            raytracing_primitive = parent_raytracing_primitive.instance_.parent_;
+            break;
         }
         RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(parent_raytracing_primitive);
@@ -2161,6 +2134,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
             return cloned_raytracing_primitive;
         }
+        cloned_raytracing_primitive.type = GfxRaytracingPrimitive::kType_Instance;
         cloned_raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(cloned_raytracing_primitive);
@@ -2175,6 +2149,36 @@ public:
         return cloned_raytracing_primitive;
     }
 
+    GfxRaytracingPrimitive createRaytracingPrimitiveProcedural(GfxAccelerationStructure const &acceleration_structure)
+    {
+        GfxRaytracingPrimitive raytracing_primitive = {};
+        if(dxr_device_ == nullptr)
+            return raytracing_primitive;    // avoid spamming console output
+        if(isInterop(acceleration_structure))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a raytracing primitive using an interop acceleration structure object");
+            return raytracing_primitive;
+        }
+        if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing primitive using an invalid acceleration structure object");
+            return raytracing_primitive;
+        }
+        raytracing_primitive.type = GfxRaytracingPrimitive::kType_Procedural;
+        raytracing_primitive.handle = raytracing_primitive_handles_.allocate_handle();
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(raytracing_primitive);
+        AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+        gfx_raytracing_primitive.index_ = (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
+        for(uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
+            gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
+        gfx_acceleration_structure.raytracing_primitives_.push_back(raytracing_primitive);
+        gfx_raytracing_primitive.procedural_.acceleration_structure_ = acceleration_structure;
+        gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
+        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Procedural;
+        gfx_acceleration_structure.needs_rebuild_ = true;
+        return raytracing_primitive;
+    }
+
     GfxResult destroyRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive)
     {
         if(!raytracing_primitive)
@@ -2184,7 +2188,15 @@ public:
         RaytracingPrimitive const &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(gfx_raytracing_primitive);
         if(acceleration_structure_handles_.has_handle(acceleration_structure.handle))
+        {
             acceleration_structures_[acceleration_structure].needs_rebuild_ = true;
+            auto &primitives = acceleration_structures_[acceleration_structure].raytracing_primitives_;
+            if(gfx_raytracing_primitive.index_ < primitives.size() && primitives[gfx_raytracing_primitive.index_].handle == raytracing_primitive.handle)
+            {
+                auto it = primitives.begin() + gfx_raytracing_primitive.index_;
+                primitives.erase(it);
+            }
+        }
         collect(gfx_raytracing_primitive);  // release resources
         raytracing_primitives_.erase(raytracing_primitive); // destroy raytracing primitive
         raytracing_primitive_handles_.free_handle(raytracing_primitive.handle);
@@ -2207,7 +2219,11 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Triangles)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a non-triangle raytracing primitive object");
+        destroyBuffer(gfx_raytracing_primitive.triangles_.index_buffer_);
+        destroyBuffer(gfx_raytracing_primitive.triangles_.vertex_buffer_);
         gfx_raytracing_primitive.triangles_.build_flags_ = (uint32_t)build_flags;
+        gfx_raytracing_primitive.triangles_.index_buffer_ = {};
+        gfx_raytracing_primitive.triangles_.index_stride_ = 0;
         gfx_raytracing_primitive.triangles_.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.triangles_.vertex_stride_ = vertex_stride;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
@@ -2234,11 +2250,37 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Triangles)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a non-triangle raytracing primitive object");
+        destroyBuffer(gfx_raytracing_primitive.triangles_.index_buffer_);
+        destroyBuffer(gfx_raytracing_primitive.triangles_.vertex_buffer_);
         gfx_raytracing_primitive.triangles_.build_flags_ = (uint32_t)build_flags;
         gfx_raytracing_primitive.triangles_.index_buffer_ = createBufferRange(index_buffer, 0, index_buffer.size);
         gfx_raytracing_primitive.triangles_.index_stride_ = index_stride;
         gfx_raytracing_primitive.triangles_.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
         gfx_raytracing_primitive.triangles_.vertex_stride_ = vertex_stride;
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
+    }
+
+    GfxResult buildRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
+        if(!buffer_handles_.has_handle(aabb_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build a raytracing primitive using an invalid AABB buffer object");
+        aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
+        if(aabb_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with an AABB buffer object of stride `0'");
+        if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion AABBs");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Procedural)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a non-procedural raytracing primitive object");
+        destroyBuffer(gfx_raytracing_primitive.procedural_.procedural_buffer_);
+        gfx_raytracing_primitive.procedural_.build_flags_ = (uint32_t)build_flags;
+        gfx_raytracing_primitive.procedural_.procedural_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
+        gfx_raytracing_primitive.procedural_.procedural_stride_ = aabb_stride;
+        gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Procedural;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, false);
     }
 
@@ -2307,6 +2349,8 @@ public:
         {
         case RaytracingPrimitive::kType_Triangles:
             return gfx_raytracing_primitive.triangles_.bvh_data_size_;
+        case RaytracingPrimitive::kType_Procedural:
+            return gfx_raytracing_primitive.procedural_.bvh_data_size_;
         default:
             break;
         }
@@ -2322,6 +2366,31 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Triangles)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-triangle raytracing primitive object");
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
+    }
+
+    GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
+        if(!buffer_handles_.has_handle(vertex_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update a raytracing primitive using an invalid vertex buffer object");
+        vertex_stride = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
+        if(vertex_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with a vertex buffer object of stride `0'");
+        if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build a raytracing primitive with a buffer object containing more than 4 billion vertices");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Triangles)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-triangle raytracing primitive object");
+        destroyBuffer(gfx_raytracing_primitive.triangles_.index_buffer_);
+        destroyBuffer(gfx_raytracing_primitive.triangles_.vertex_buffer_);
+        gfx_raytracing_primitive.triangles_.index_buffer_ = {};
+        gfx_raytracing_primitive.triangles_.index_stride_ = 0;
+        gfx_raytracing_primitive.triangles_.vertex_buffer_ = createBufferRange(vertex_buffer, 0, vertex_buffer.size);
+        gfx_raytracing_primitive.triangles_.vertex_stride_ = vertex_stride;
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
@@ -2355,76 +2424,26 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
-    GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+    GfxResult updateRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, GfxBuffer const &aabb_buffer, uint32_t aabb_stride)
     {
-        GfxSbt sbt = {};
         if(dxr_device_ == nullptr)
-        {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create SBT");
-            return sbt; // invalid operation
-        }
-        sbt.handle = sbt_handles_.allocate_handle();
-        Sbt &gfx_sbt = sbts_.insert(sbt);
-        for(uint32_t i = 0; i < kernel_count; ++i)
-        {
-            Kernel const &gfx_kernel = kernels_[kernels[i]];
-            for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
-            {
-                gfx_sbt.sbt_max_record_stride_[j] = GFX_MAX(gfx_sbt.sbt_max_record_stride_[j], gfx_kernel.sbt_record_stride_[j]);
-            }
-        }
-        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
-        {
-            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_sbt.sbt_max_record_stride_[i] * entry_count[i];
-            gfx_sbt.sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
-            if(!gfx_sbt.sbt_buffers_[i])
-            {
-                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
-                return sbt;
-            }
-            gfx_sbt.sbt_buffers_[i].setName("gfx_SbtBuffer");
-        }
-        gfx_sbt.ray_generation_shader_record_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Raygen]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
-        gfx_sbt.miss_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            entry_count[kGfxShaderGroupType_Miss] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss],
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-        gfx_sbt.hit_group_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            entry_count[kGfxShaderGroupType_Hit] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit],
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-        gfx_sbt.callable_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable] ?
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
-            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
-            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
-            entry_count[kGfxShaderGroupType_Callable] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable],
-            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable]} :
-            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
-        return sbt;
-    }
-
-    GfxResult destroySbt(GfxSbt const &sbt)
-    {
-        if(!sbt)
-            return kGfxResult_NoError;
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid sbt object");
-        Sbt const &gfx_sbt = sbts_[sbt];
-        collect(gfx_sbt);  // release resources
-        sbts_.erase(sbt); // destroy sbt
-        sbt_handles_.free_handle(sbt.handle);
-        return kGfxResult_NoError;
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set geometry on an invalid raytracing primitive object");
+        if(!buffer_handles_.has_handle(aabb_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update a raytracing primitive using an invalid AABB buffer object");
+        aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
+        if(aabb_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with an AABB buffer object of stride `0'");
+        if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive with a buffer object containing more than 4 billion AABBs");
+        RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
+        if(gfx_raytracing_primitive.type_ != RaytracingPrimitive::kType_Procedural)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-procedural raytracing primitive object");
+        destroyBuffer(gfx_raytracing_primitive.procedural_.procedural_buffer_);
+        gfx_raytracing_primitive.procedural_.procedural_buffer_ = createBufferRange(aabb_buffer, 0, aabb_buffer.size);
+        gfx_raytracing_primitive.procedural_.procedural_stride_ = aabb_stride;
+        return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
     GfxProgram createProgram(char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
@@ -2564,63 +2583,6 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult sbtSetShaderGroup(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
-    {
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
-        if(!group_name || !*group_name)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
-        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        WCHAR wgroup_name[1024];
-        mbstowcs(wgroup_name, group_name, ARRAYSIZE(wgroup_name));
-        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name);
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtSetConstants(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
-    {
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
-        if(!parameter_name || !*parameter_name)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        if(!data && data_size > 0)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
-        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
-        uint32_t const parameter_prev_id = record_and_param.second.id_;
-        record_and_param.second.set(data, data_size);
-        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
-    {
-        if(!sbt_handles_.has_handle(sbt.handle))
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
-        if(!parameter_name || !*parameter_name)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
-        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
-        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
-        uint32_t const parameter_prev_id = record_and_param.second.id_;
-        record_and_param.second.set(&texture, &mip_level, 1);
-        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
-        return kGfxResult_NoError;
-    }
-
-    GfxResult sbtGetGpuVirtualAddressRangeAndStride(GfxSbt const &sbt,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
-        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
-    {
-        Sbt &gfx_sbt = sbts_[sbt];
-        *ray_generation_shader_record = gfx_sbt.ray_generation_shader_record_;
-        *miss_shader_table = gfx_sbt.miss_shader_table_;
-        *hit_group_table = gfx_sbt.hit_group_table_;
-        *callable_shader_table = gfx_sbt.callable_shader_table_;
-        return kGfxResult_NoError;
-    }
-
     GfxKernel createMeshKernel(GfxProgram const &program, GfxDrawState const &draw_state, char const *entry_point, char const **defines, uint32_t define_count)
     {
         GfxKernel mesh_kernel = {};
@@ -2653,7 +2615,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Mesh;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
+        gfx_kernel.num_threads_ = (uint32_t *)gfxMalloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         createKernel(gfx_program, gfx_kernel);  // create mesh kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {
@@ -2684,7 +2646,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Compute;
         GFX_ASSERT(define_count == 0 || defines != nullptr);
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
+        gfx_kernel.num_threads_ = (uint32_t *)gfxMalloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 1;
         createKernel(gfx_program, gfx_kernel);  // create compute kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
         {
@@ -2724,7 +2686,7 @@ public:
         gfx_kernel.type_ = Kernel::kType_Graphics;
         gfx_kernel.draw_state_ = gfx_draw_state->draw_state_;
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
+        gfx_kernel.num_threads_ = (uint32_t *)gfxMalloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         result = createKernel(gfx_program, gfx_kernel); // create graphics kernel
         if(result != kGfxResult_NoError)
         {
@@ -2772,13 +2734,14 @@ public:
         for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
         for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
         for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
-        WCHAR wgroup_name[1024];
+        std::wstring wgroup_name;
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
-            mbstowcs(wgroup_name, local_root_signature_associations[i].shader_group_name, ARRAYSIZE(wgroup_name));
+            wgroup_name.resize(mbstowcs(nullptr, local_root_signature_associations[i].shader_group_name, 0) + 1);
+            mbstowcs(wgroup_name.data(), local_root_signature_associations[i].shader_group_name, wgroup_name.size());
             gfx_kernel.local_root_signature_associations_[wgroup_name] = { local_root_signature_associations[i].local_root_signature_space, local_root_signature_associations[i].shader_group_type };
         }
-        gfx_kernel.num_threads_ = (uint32_t *)malloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
+        gfx_kernel.num_threads_ = (uint32_t *)gfxMalloc(3 * sizeof(uint32_t)); for(uint32_t i = 0; i < 3; ++i) gfx_kernel.num_threads_[i] = 0;
         for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i) gfx_kernel.sbt_record_stride_[i] = D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
         createKernel(gfx_program, gfx_kernel);  // create raytracing kernel
         if(!gfx_program.file_name_ && (gfx_kernel.root_signature_ == nullptr || gfx_kernel.pipeline_state_ == nullptr))
@@ -2803,10 +2766,12 @@ public:
         return kGfxResult_NoError;
     }
 
+    static uint32_t const kNumThreads_Invalid[3];
+
     uint32_t const *getKernelNumThreads(GfxKernel const &kernel)
     {
         if(!kernel_handles_.has_handle(kernel.handle))
-            return nullptr; // invalid kernel object
+            return kNumThreads_Invalid; // invalid kernel object
         Kernel const &gfx_kernel = kernels_[kernel];
         GFX_ASSERT(gfx_kernel.num_threads_ != nullptr);
         return gfx_kernel.num_threads_;
@@ -2816,6 +2781,135 @@ public:
     {
         for(uint32_t i = 0; i < kernels_.size(); ++i)
             reloadKernel(kernels_.data()[i]);
+        return kGfxResult_NoError;
+    }
+
+    GfxSbt createSbt(GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+    {
+        GfxSbt sbt = {};
+        if(dxr_device_ == nullptr)
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create SBT");
+            return sbt; // invalid operation
+        }
+        sbt.handle = sbt_handles_.allocate_handle();
+        Sbt &gfx_sbt = sbts_.insert(sbt);
+        for(uint32_t i = 0; i < kernel_count; ++i)
+        {
+            Kernel const &gfx_kernel = kernels_[kernels[i]];
+            for(uint32_t j = 0; j < kGfxShaderGroupType_Count; ++j)
+            {
+                gfx_sbt.sbt_max_record_stride_[j] = GFX_MAX(gfx_sbt.sbt_max_record_stride_[j], gfx_kernel.sbt_record_stride_[j]);
+            }
+        }
+        for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+        {
+            size_t sbt_buffer_size = D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT - 1 + gfx_sbt.sbt_max_record_stride_[i] * entry_count[i];
+            gfx_sbt.sbt_buffers_[i] = createBuffer(sbt_buffer_size, nullptr, kGfxCpuAccess_None);
+            if(!gfx_sbt.sbt_buffers_[i])
+            {
+                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory for shader binding table");
+                return sbt;
+            }
+            gfx_sbt.sbt_buffers_[i].setName("gfx_SbtBuffer");
+        }
+        gfx_sbt.ray_generation_shader_record_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Raygen]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Raygen]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE{};
+        gfx_sbt.miss_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Miss]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Miss] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Miss]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        gfx_sbt.hit_group_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Hit]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Hit] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Hit]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        gfx_sbt.callable_shader_table_ = gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable] ?
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{
+            GFX_ALIGN(buffers_[gfx_sbt.sbt_buffers_[kGfxShaderGroupType_Callable]].resource_->GetGPUVirtualAddress(),
+            D3D12_RAYTRACING_SHADER_TABLE_BYTE_ALIGNMENT),
+            entry_count[kGfxShaderGroupType_Callable] * gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable],
+            gfx_sbt.sbt_max_record_stride_[kGfxShaderGroupType_Callable]} :
+            D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE{};
+        return sbt;
+    }
+
+    GfxResult destroySbt(GfxSbt const &sbt)
+    {
+        if(!sbt)
+            return kGfxResult_NoError;
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid sbt object");
+        Sbt const &gfx_sbt = sbts_[sbt];
+        collect(gfx_sbt);  // release resources
+        sbts_.erase(sbt); // destroy sbt
+        sbt_handles_.free_handle(sbt.handle);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetShaderGroup(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!group_name || !*group_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a shader group with an invalid name");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        std::vector<WCHAR> wgroup_name(mbstowcs(nullptr, group_name, 0) + 1);
+        mbstowcs(wgroup_name.data(), group_name, wgroup_name.size());
+        gfx_sbt.insertSbtRecordShaderIdentifier(shader_group_type, index, wgroup_name.data());
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetConstants(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        if(!data && data_size > 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter to a null pointer");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
+        uint32_t const parameter_prev_id = record_and_param.second.id_;
+        record_and_param.second.set(data, data_size);
+        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtSetTexture(GfxSbt const &sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+    {
+        if(!sbt_handles_.has_handle(sbt.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set a parameter onto an invalid sbt object");
+        if(!parameter_name || !*parameter_name)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set a program parameter with an invalid name");
+        Sbt &gfx_sbt = sbts_[sbt];  // get hold of sbt object
+        auto record_and_param = gfx_sbt.insertSbtRecordParameter(shader_group_type, index, parameter_name);
+        uint32_t const parameter_prev_id = record_and_param.second.id_;
+        record_and_param.second.set(&texture, &mip_level, 1);
+        record_and_param.first.id_ += parameter_prev_id != record_and_param.second.id_;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult sbtGetGpuVirtualAddressRangeAndStride(GfxSbt const &sbt,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+        D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
+    {
+        Sbt &gfx_sbt = sbts_[sbt];
+        *ray_generation_shader_record = gfx_sbt.ray_generation_shader_record_;
+        *miss_shader_table = gfx_sbt.miss_shader_table_;
+        *hit_group_table = gfx_sbt.hit_group_table_;
+        *callable_shader_table = gfx_sbt.callable_shader_table_;
         return kGfxResult_NoError;
     }
 
@@ -3314,6 +3408,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if((kernel.isMesh() && mesh_command_list_ == nullptr))
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!kernel_handles_.has_handle(kernel.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot bind invalid kernel object");
         if(bound_kernel_.handle == kernel.handle) return kGfxResult_NoError;    // already bound
@@ -3642,8 +3738,10 @@ public:
 
     GfxResult encodeDrawMesh(uint32_t num_groups_x, uint32_t num_groups_y, uint32_t num_groups_z)
     {
-        if(mesh_command_list_ == nullptr)
+        if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(mesh_command_list_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!num_groups_x || !num_groups_y || !num_groups_z)
             return kGfxResult_NoError;  // nothing to draw
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
@@ -3663,6 +3761,8 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        if(mesh_command_list_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!buffer_handles_.has_handle(args_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot draw using an invalid arguments buffer object");
         if(args_buffer.cpu_access == kGfxCpuAccess_Read)
@@ -3840,7 +3940,7 @@ public:
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 1 billion keys"); // TODO: implement 3-level scan? (gboisse)
-        uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
+        uint64_t scratch_buffer_size = ((uint64_t)num_groups_level_1 + num_groups_level_2 + 10) << 2;
         if(texture_upload_buffer_.size < scratch_buffer_size)
         {
             destroyBuffer(texture_upload_buffer_);
@@ -3851,12 +3951,12 @@ public:
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for scan");
             texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
         }
-        GfxBuffer const scan_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, num_groups_level_1 << 2);
-        GfxBuffer const scan_level_2_buffer = createBufferRange(texture_upload_buffer_, num_groups_level_1 << 2, num_groups_level_2 << 2);
-        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2) << 2, 4);
-        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
-        GfxBuffer const scan_level_1_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
-        GfxBuffer const scan_level_2_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
+        GfxBuffer const scan_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, (uint64_t)num_groups_level_1 << 2);
+        GfxBuffer const scan_level_2_buffer = createBufferRange(texture_upload_buffer_, (uint64_t)num_groups_level_1 << 2, (uint64_t)num_groups_level_2 << 2);
+        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2) << 2, 4);
+        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
+        GfxBuffer const scan_level_1_args_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
+        GfxBuffer const scan_level_2_args_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
         if(!scan_level_1_buffer || !scan_level_2_buffer || !num_groups_level_1_buffer || !num_groups_level_2_buffer || !scan_level_1_args_buffer || !scan_level_2_args_buffer)
         {
             destroyBuffer(scan_level_1_buffer); destroyBuffer(scan_level_2_buffer);
@@ -3971,7 +4071,7 @@ public:
         uint32_t const num_groups_level_2 = (num_groups_level_1 + keys_per_group - 1) / keys_per_group;
         if(num_groups_level_2 > keys_per_group)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot reduce buffer object of more than 1 billion keys");   // TODO: implement 3-level reduction? (gboisse)
-        uint64_t scratch_buffer_size = (num_groups_level_1 + num_groups_level_2 + 10) << 2;
+        uint64_t scratch_buffer_size = ((uint64_t)num_groups_level_1 + num_groups_level_2 + 10) << 2;
         if(texture_upload_buffer_.size < scratch_buffer_size)
         {
             destroyBuffer(texture_upload_buffer_);
@@ -3982,12 +4082,12 @@ public:
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for scan");
             texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
         }
-        GfxBuffer const reduce_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, num_groups_level_1 << 2);
-        GfxBuffer const reduce_level_2_buffer = createBufferRange(texture_upload_buffer_, num_groups_level_1 << 2, num_groups_level_2 << 2);
-        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2) << 2, 4);
-        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
-        GfxBuffer const reduce_level_1_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
-        GfxBuffer const reduce_level_2_args_buffer = createBufferRange(texture_upload_buffer_, (num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
+        GfxBuffer const reduce_level_1_buffer = createBufferRange(texture_upload_buffer_, 0, (uint64_t)num_groups_level_1 << 2);
+        GfxBuffer const reduce_level_2_buffer = createBufferRange(texture_upload_buffer_, (uint64_t)num_groups_level_1 << 2, (uint64_t)num_groups_level_2 << 2);
+        GfxBuffer const num_groups_level_1_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2) << 2, 4);
+        GfxBuffer const num_groups_level_2_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2 + 1) << 2, 4);
+        GfxBuffer const reduce_level_1_args_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2 + 2) << 2, 4 << 2);
+        GfxBuffer const reduce_level_2_args_buffer = createBufferRange(texture_upload_buffer_, ((uint64_t)num_groups_level_1 + num_groups_level_2 + 6) << 2, 4 << 2);
         if(!reduce_level_1_buffer || !reduce_level_2_buffer || !num_groups_level_1_buffer || !num_groups_level_2_buffer || !reduce_level_1_args_buffer || !reduce_level_2_args_buffer)
         {
             destroyBuffer(reduce_level_1_buffer); destroyBuffer(reduce_level_2_buffer);
@@ -4079,7 +4179,7 @@ public:
         uint32_t const num_keys = (uint32_t)(keys_src.size >> 2);
         uint32_t const num_groups = (num_keys + keys_per_group - 1) / keys_per_group;
         uint32_t const num_histogram_values = num_bins * num_groups;
-        uint64_t scratch_buffer_size = (2 * num_keys + num_histogram_values + 5) << 2;
+        uint64_t scratch_buffer_size = (2ULL * num_keys + num_histogram_values + 5) << 2;
         if(sort_scratch_buffer_.size < scratch_buffer_size)
         {
             destroyBuffer(sort_scratch_buffer_);
@@ -4090,11 +4190,11 @@ public:
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate scratch memory for sort");
             sort_scratch_buffer_.setName("gfx_SortScratchBuffer");
         }
-        GfxBuffer const scratch_keys = createBufferRange(sort_scratch_buffer_, 0, num_keys << 2);
-        GfxBuffer const scratch_values = createBufferRange(sort_scratch_buffer_, num_keys << 2, num_keys << 2);
-        GfxBuffer const group_histograms = createBufferRange(sort_scratch_buffer_, (2 * num_keys) << 2, num_histogram_values << 2);
-        GfxBuffer const args_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values) << 2, 4 << 2);
-        GfxBuffer const count_buffer = createBufferRange(sort_scratch_buffer_, (2 * num_keys + num_histogram_values + 4) << 2, 4);
+        GfxBuffer const scratch_keys = createBufferRange(sort_scratch_buffer_, 0, (uint64_t)num_keys << 2);
+        GfxBuffer const scratch_values = createBufferRange(sort_scratch_buffer_, (uint64_t)num_keys << 2, (uint64_t)num_keys << 2);
+        GfxBuffer const group_histograms = createBufferRange(sort_scratch_buffer_, (2ULL * num_keys) << 2, (uint64_t)num_histogram_values << 2);
+        GfxBuffer const args_buffer = createBufferRange(sort_scratch_buffer_, (2ULL * num_keys + num_histogram_values) << 2, 4 << 2);
+        GfxBuffer const count_buffer = createBufferRange(sort_scratch_buffer_, (2ULL * num_keys + num_histogram_values + 4) << 2, 4);
         if(!scratch_keys || !scratch_values || !group_histograms || !args_buffer || !count_buffer)
         {
             destroyBuffer(group_histograms);
@@ -4360,12 +4460,10 @@ public:
         buffer.cpu_access = kGfxCpuAccess_None;
         buffer.stride = sizeof(uint32_t);
         gfx_buffer.flags_ = Object::kFlag_Named;
-        gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
-        GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
+        gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         *gfx_buffer.reference_count_ = 1;   // retain
-        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
         gfx_buffer.initial_resource_state_ = resource_state;
-        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
         *gfx_buffer.resource_state_ = resource_state;
         gfx_buffer.resource_ = resource;
         resource->AddRef(); // retain
@@ -4403,7 +4501,7 @@ public:
         texture.format = resource_desc.Format;
         texture.mip_levels = (uint32_t)resource_desc.MipLevels;
         ResolveClearValueForTexture(gfx_texture, nullptr, texture.format);
-        memcpy(texture.clear_value_, gfx_texture.clear_value_, sizeof(float) * 4);
+        memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
             for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
             {
@@ -4451,11 +4549,9 @@ public:
         gfx_acceleration_structure.bvh_buffer_.stride = sizeof(uint32_t);
         gfx_buffer.flags_ = Object::kFlag_Named;
         gfx_buffer.data_offset_ = byte_offset;
-        gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
-        GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
+        gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         *gfx_buffer.reference_count_ = 1;   // retain
-        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
-        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);  // out of memory
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
         gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
         *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
         gfx_buffer.resource_ = resource;
@@ -4566,11 +4662,9 @@ public:
             gfx_buffer.resource_ = resource;
             gfx_buffer.allocation_ = allocation;
             gfx_buffer.flags_ &= ~Object::kFlag_Named;
-            gfx_buffer.reference_count_ = (uint32_t *)malloc(sizeof(uint32_t));
-            GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
+            gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
             *gfx_buffer.reference_count_ = 1;   // retain
-            gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)malloc(sizeof(D3D12_RESOURCE_STATES));
-            GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
+            gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
             *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
         WCHAR wname[ARRAYSIZE(buffer.name)] = {};
@@ -4744,23 +4838,23 @@ private:
     template<typename TYPE>
     static inline void SetObjectName(TYPE &object, char const *name)
     {
-        WCHAR buffer[1024];
         GFX_ASSERT(name != nullptr);
         if(!*name || (object.Object::flags_ & Object::kFlag_Named) != 0)
             return; // no name or already named
-        mbstowcs(buffer, name, ARRAYSIZE(buffer));
+        std::vector<WCHAR> buffer(mbstowcs(nullptr, name, 0) + 1);
+        mbstowcs(buffer.data(), name, buffer.size());
         object.Object::flags_ |= Object::kFlag_Named;
         GFX_ASSERT(object.resource_ != nullptr);
-        object.resource_->SetName(buffer);
+        object.resource_->SetName(buffer.data());
     }
 
     static inline void SetDebugName(ID3D12Object *object, char const *debug_name)
     {
-        WCHAR buffer[1024];
         GFX_ASSERT(object != nullptr);
         debug_name = (debug_name ? debug_name : "");
-        mbstowcs(buffer, debug_name, ARRAYSIZE(buffer));
-        object->SetName(buffer);
+        std::vector<WCHAR> buffer(mbstowcs(nullptr, debug_name, 0) + 1);
+        mbstowcs(buffer.data(), debug_name, buffer.size());
+        object->SetName(buffer.data());
     }
 
     static inline D3D12_SHADER_BYTECODE GetShaderBytecode(IDxcBlob *shader_bytecode)
@@ -5165,8 +5259,8 @@ private:
         }
         collect(buffer.resource_);
         collect(buffer.allocation_);
-        free(buffer.resource_state_);
-        free(buffer.reference_count_);
+        gfxFree(buffer.resource_state_);
+        gfxFree(buffer.reference_count_);
     }
 
     void collect(Texture const &texture)
@@ -5199,9 +5293,6 @@ private:
     void collect(AccelerationStructure const &acceleration_structure)
     {
         destroyBuffer(acceleration_structure.bvh_buffer_);
-        for(size_t i = 0; i < acceleration_structure.raytracing_primitives_.size(); ++i)
-            if(raytracing_primitive_handles_.has_handle(acceleration_structure.raytracing_primitives_[i].handle))
-                destroyRaytracingPrimitive(acceleration_structure.raytracing_primitives_[i]);
     }
 
     void collect(RaytracingPrimitive const &raytracing_primitive)
@@ -5215,6 +5306,10 @@ private:
             break;
         case RaytracingPrimitive::kType_Instance:
             break;  // nothing to collect on instanced primitives
+        case RaytracingPrimitive::kType_Procedural:
+            destroyBuffer(raytracing_primitive.procedural_.bvh_buffer_);
+            destroyBuffer(raytracing_primitive.procedural_.procedural_buffer_);
+            break;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
             break;  // invalid raytracing primitive type
@@ -5248,7 +5343,7 @@ private:
 
     void collect(Kernel const &kernel)
     {
-        free(kernel.num_threads_);
+        gfxFree(kernel.num_threads_);
         collect(kernel.cs_bytecode_);
         collect(kernel.as_bytecode_);
         collect(kernel.ms_bytecode_);
@@ -5273,10 +5368,10 @@ private:
             freeDescriptor(kernel.parameters_[i].descriptor_slot_);
             for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
                 kernel.parameters_[i].variables_[j].~Variable();
-            free(kernel.parameters_[i].variables_);
+            gfxFree(kernel.parameters_[i].variables_);
             kernel.parameters_[i].~Parameter();
         }
-        free(kernel.parameters_);
+        gfxFree(kernel.parameters_);
     }
 
     void collect(DescriptorHeap const &descriptor_heap)
@@ -5466,7 +5561,7 @@ private:
         {
             GFX_NON_COPYABLE(MemoryReleaser);
             inline MemoryReleaser(std::vector<void *> &allocated_memory) : allocated_memory_(allocated_memory) {}
-            inline ~MemoryReleaser() { for(size_t i = 0; i < allocated_memory_.size(); ++i) free(allocated_memory_[i]); }
+            inline ~MemoryReleaser() { for(size_t i = 0; i < allocated_memory_.size(); ++i) gfxFree(allocated_memory_[i]); }
             std::vector<void *> allocated_memory_;
         };
         MemoryReleaser const memory_releaser(allocated_memory);
@@ -5543,9 +5638,8 @@ private:
                             constant_buffer->GetDesc(&buffer_desc);
                             if(buffer_desc.Size > 256 && !is_local_root_signature_paramter)  // https://microsoft.github.io/DirectX-Specs/d3d/ResourceBinding.html#root-argument-limits
                                 is_root_constant = false;   // if exceeding the global root parameters size limit, go through the constant buffer pool
-                            kernel_parameter.variables_ = (Kernel::Parameter::Variable *)malloc(buffer_desc.Variables * sizeof(Kernel::Parameter::Variable));
+                            kernel_parameter.variables_ = (Kernel::Parameter::Variable *)gfxMalloc(buffer_desc.Variables * sizeof(Kernel::Parameter::Variable));
                             allocated_memory.push_back(kernel_parameter.variables_);
-                            GFX_ASSERT(kernel_parameter.variables_ != nullptr);
                             kernel_parameter.variable_count_ = buffer_desc.Variables;
                             kernel_parameter.variable_size_ = buffer_desc.Size;
                             for(uint32_t k = 0; k < buffer_desc.Variables; ++k)
@@ -5753,8 +5847,7 @@ private:
         if(kernel.root_signature_)
         {
             kernel.parameter_count_ = (uint32_t)global_root_signature_parameters.root_parameters.size();
-            kernel.parameters_ = (!global_root_signature_parameters.root_parameters.empty() ? (Kernel::Parameter *)malloc(kernel.parameter_count_ * sizeof(Kernel::Parameter)) : nullptr);
-            GFX_ASSERT(kernel.parameters_ != nullptr || kernel.parameter_count_ == 0);
+            kernel.parameters_ = (!global_root_signature_parameters.root_parameters.empty() ? (Kernel::Parameter *)gfxMalloc(kernel.parameter_count_ * sizeof(Kernel::Parameter)) : nullptr);
             GFX_ASSERT(global_root_signature_parameters.root_parameters.size() == global_root_signature_parameters.kernel_parameters.size());
             for(uint32_t i = 0; i < kernel.parameter_count_; ++i)
                 new(&kernel.parameters_[i]) Kernel::Parameter(global_root_signature_parameters.kernel_parameters[i]);
@@ -6027,19 +6120,19 @@ private:
         for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
             max_export_length = GFX_MAX(max_export_length, strlen(kernel.subobjects_[i].c_str()));
         max_export_length += 1;
-        char *lib_export = (char *)alloca(max_export_length);
-        WCHAR *wexport = (WCHAR *)alloca(max_export_length << 1);
+        std::vector<char> lib_export(max_export_length);
+        std::vector<WCHAR> wexport(max_export_length);
         for(size_t i = 0; i < kernel.exports_.size(); ++i)
         {
-            GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
-            mbstowcs(wexport, lib_export, max_export_length);
-            exports.push_back(wexport);
+            GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", kernel.exports_[i].c_str());
+            mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+            exports.push_back(wexport.data());
         }
         for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
         {
-            GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.subobjects_[i].c_str());
-            mbstowcs(wexport, lib_export, max_export_length);
-            exports.push_back(wexport);
+            GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", kernel.subobjects_[i].c_str());
+            mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+            exports.push_back(wexport.data());
         }
         for(size_t i = 0; i < exports.size(); ++i)
         {
@@ -6591,7 +6684,7 @@ private:
         D3D12_GPU_VIRTUAL_ADDRESS gpu_addr = {};
         Buffer *constant_buffer = buffers_.at(constant_buffer_pool_[fence_index_]);
         uint64_t constant_buffer_size = (constant_buffer != nullptr ? constant_buffer->resource_->GetDesc().Width : 0);
-        if(constant_buffer_pool_cursors_[fence_index_] * 256 + data_size > constant_buffer_size)
+        if(constant_buffer_pool_cursors_[fence_index_] * 256 + data_size > constant_buffer_size || constant_buffer == nullptr)
         {
             constant_buffer_size += data_size;
             constant_buffer_size += ((constant_buffer_size + 2) >> 1);
@@ -6630,6 +6723,25 @@ private:
 
     GfxResult buildRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
+        switch(gfx_raytracing_primitive.type_)
+        {
+        case RaytracingPrimitive::kType_Triangles:
+            GFX_TRY(buildRaytracingPrimitiveTriangles(raytracing_primitive, gfx_raytracing_primitive, update));
+            break;
+        case RaytracingPrimitive::kType_Instance:
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot build an instance raytracing primitive");
+        case RaytracingPrimitive::kType_Procedural:
+            GFX_TRY(buildRaytracingPrimitiveProcedural(raytracing_primitive, gfx_raytracing_primitive, update));
+            break;
+        default:
+            GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
+            break;
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult buildRaytracingPrimitiveTriangles(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    {
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles); // should never happen
         if(gfx_raytracing_primitive.triangles_.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.index_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid index buffer object");
@@ -6653,9 +6765,9 @@ private:
         geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
         if((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Opaque) != 0)
             geometry_desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-        if(gfx_raytracing_primitive.triangles_.index_stride_ != 0)
+        GFX_ASSERT(gfx_raytracing_primitive.triangles_.index_stride_ == 0 || gfx_index_buffer != nullptr);  // should never happen
+        if(gfx_index_buffer != nullptr)
         {
-            GFX_ASSERT(gfx_index_buffer != nullptr);    // should never happen
             geometry_desc.Triangles.IndexFormat = (gfx_raytracing_primitive.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT);
             geometry_desc.Triangles.IndexCount = (uint32_t)(gfx_raytracing_primitive.triangles_.index_buffer_.size / gfx_raytracing_primitive.triangles_.index_stride_);
             geometry_desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
@@ -6713,6 +6825,76 @@ private:
         return kGfxResult_NoError;
     }
 
+    GfxResult buildRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
+    {
+        GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural); // should never happen
+        if(!buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.procedural_buffer_.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid procedural buffer object");
+        GFX_ASSERT(gfx_raytracing_primitive.procedural_.procedural_stride_ > 0 && gfx_raytracing_primitive.procedural_.procedural_buffer_.size / gfx_raytracing_primitive.procedural_.procedural_stride_ <= 0xFFFFFFFFull);
+        GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
+        if(gfx_raytracing_primitive.procedural_.procedural_buffer_.size == 0)
+        {
+            destroyBuffer(gfx_raytracing_primitive.procedural_.bvh_buffer_);
+            gfx_raytracing_primitive.procedural_.bvh_buffer_ = {};
+            return kGfxResult_NoError;
+        }
+        D3D12_RAYTRACING_GEOMETRY_DESC geometry_desc = {};
+        geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+        if((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Opaque) != 0)
+            geometry_desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+        Buffer &gfx_aabb_buffer = buffers_[gfx_raytracing_primitive.procedural_.procedural_buffer_];
+        SetObjectName(gfx_aabb_buffer, gfx_raytracing_primitive.procedural_.procedural_buffer_.name);
+        geometry_desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+        geometry_desc.AABBs.AABBCount = 1;
+        geometry_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+        geometry_desc.AABBs.AABBs.StartAddress = gfx_aabb_buffer.resource_->GetGPUVirtualAddress() + gfx_aabb_buffer.data_offset_;
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
+        blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
+        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        blas_inputs.NumDescs = 1;
+        blas_inputs.pGeometryDescs = &geometry_desc;
+        if(update)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
+        dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
+        uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
+        GFX_TRY(allocateRaytracingScratch(scratch_data_size));  // ensure scratch is large enough
+        uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
+        if(bvh_data_size > gfx_raytracing_primitive.procedural_.bvh_buffer_.size)
+        {
+            if(!gfx_raytracing_primitive.procedural_.bvh_buffer_)
+            {
+                GfxAccelerationStructure const &acceleration_structure = gfx_raytracing_primitive.procedural_.acceleration_structure_;
+                GFX_ASSERT(acceleration_structure_handles_.has_handle(acceleration_structure.handle));  // checked in `updateRaytracingPrimitive()'
+                AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
+                gfx_acceleration_structure.needs_rebuild_ = true;   // raytracing primitive has been built, rebuild the acceleration structure
+            }
+            destroyBuffer(gfx_raytracing_primitive.procedural_.bvh_buffer_);
+            blas_inputs.Flags &= ~D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+            gfx_raytracing_primitive.procedural_.bvh_buffer_ = createBuffer(bvh_data_size, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+            if(!gfx_raytracing_primitive.procedural_.bvh_buffer_)
+                return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create raytracing primitive buffer");
+        }
+        gfx_raytracing_primitive.procedural_.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
+        GFX_ASSERT(buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.bvh_buffer_.handle));
+        GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
+        Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.procedural_.bvh_buffer_];
+        Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
+        SetObjectName(gfx_buffer, raytracing_primitive.name);
+        transitionResource(buffers_[gfx_raytracing_primitive.procedural_.procedural_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        submitPipelineBarriers();   // ensure scratch is not in use
+        D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
+        build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+        build_desc.Inputs = blas_inputs;
+        if((blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
+            build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+        build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
+        GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
+        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+        return kGfxResult_NoError;
+    }
+
     GfxResult updateRaytracingPrimitive(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive)
     {
         GfxAccelerationStructure const &acceleration_structure = getRaytracingPrimitiveAccelerationStructure(gfx_raytracing_primitive);
@@ -6745,9 +6927,11 @@ private:
                 if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.instance_.parent_.handle))
                     return invalid_buffer;  // cannot get buffer from an invalid raytracing primitive
                 RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive.instance_.parent_];
-                GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
-                return parent_raytracing_primitive.triangles_.bvh_buffer_;
+                GFX_ASSERT(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance);  // should never happen
+                return getRaytracingPrimitiveBuffer(parent_raytracing_primitive);
             }
+        case RaytracingPrimitive::kType_Procedural:
+            return raytracing_primitive.procedural_.bvh_buffer_;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
             break;  // invalid raytracing primitive type
@@ -6767,9 +6951,11 @@ private:
                 if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.instance_.parent_.handle))
                     return invalid_acceleration_structure;  // cannot get acceleration structure from an invalid raytracing primitive
                 RaytracingPrimitive const &parent_raytracing_primitive = raytracing_primitives_[raytracing_primitive.instance_.parent_];
-                GFX_ASSERT(parent_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles);  // should never happen
-                return parent_raytracing_primitive.triangles_.acceleration_structure_;
+                GFX_ASSERT(parent_raytracing_primitive.type_ != RaytracingPrimitive::kType_Instance);  // should never happen
+                return getRaytracingPrimitiveAccelerationStructure(parent_raytracing_primitive);
             }
+        case RaytracingPrimitive::kType_Procedural:
+            return raytracing_primitive.procedural_.acceleration_structure_;
         default:
             GFX_ASSERTMSG(0, "An invalid raytracing primitive type was supplied");
             break;  // invalid raytracing primitive type
@@ -7441,11 +7627,11 @@ private:
     {
         bool const invalidate_descriptor = parameter.parameter_ != nullptr && (invalidate_descriptors || parameter.id_ != parameter.parameter_->id_);
         if(parameter.parameter_ != nullptr) parameter.id_ = parameter.parameter_->id_;
-        GFX_ASSERT(parameter.parameter_ != nullptr || parameter.variable_size_ > 0);
         switch(parameter.type_)
         {
         case Kernel::Parameter::kType_Buffer:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
@@ -7509,6 +7695,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWBuffer:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
@@ -7577,6 +7764,7 @@ private:
             break;
         case Kernel::Parameter::kType_Texture2D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -7637,6 +7825,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture2D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
@@ -7700,6 +7889,7 @@ private:
             break;
         case Kernel::Parameter::kType_Texture2DArray:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
@@ -7761,6 +7951,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture2DArray:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
@@ -7825,6 +8016,7 @@ private:
             break;
         case Kernel::Parameter::kType_Texture3D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
@@ -7885,6 +8077,7 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture3D:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
@@ -7949,6 +8142,7 @@ private:
             break;
         case Kernel::Parameter::kType_TextureCube:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -8009,6 +8203,7 @@ private:
             break;
         case Kernel::Parameter::kType_AccelerationStructure:
             {
+                GFX_ASSERT(parameter.parameter_ != nullptr);
                 if(parameter.parameter_->type_ != Program::Parameter::kType_AccelerationStructure)
                 {
                     GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected an acceleration structure object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
@@ -8060,68 +8255,73 @@ private:
                     if(data != nullptr) populateRootConstants(program, program.parameters_, parameter, (uint32_t *)data);
                     cbv_desc.SizeInBytes = GFX_ALIGN(parameter.variable_size_, 256);
                 }
-                else if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
-                {
-                    cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
-                    if(data != nullptr) memcpy(data, parameter.parameter_->data_.constants_, parameter.parameter_->data_size_);
-                    cbv_desc.SizeInBytes = GFX_ALIGN(parameter.parameter_->data_size_, 256);
-                }
-                else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
-                {
-                    if(parameter.parameter_->data_.buffer_.buffer_count > 1)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        break;  // user set an invalid buffer object
-                    }
-                    if(parameter.parameter_->data_.buffer_.buffer_count < 1)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        break;  // user set an invalid buffer object
-                    }
-                    GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
-                    if(!buffer_handles_.has_handle(buffer.handle))
-                    {
-                        if(buffer.handle != 0)
-                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        descriptor_slot = dummy_descriptors_[parameter.type_];
-                        freeDescriptor(parameter.descriptor_slot_);
-                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                        break;  // user set an invalid buffer object
-                    }
-                    if(buffer.cpu_access != kGfxCpuAccess_Write)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that does not have write CPU access as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        descriptor_slot = dummy_descriptors_[parameter.type_];
-                        freeDescriptor(parameter.descriptor_slot_);
-                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                        break;  // user set an invalid buffer object
-                    }
-                    if(buffer.size > 0xFFFFFFFFull)
-                    {
-                        GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that's larger than 4GiB as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                        descriptor_slot = dummy_descriptors_[parameter.type_];
-                        freeDescriptor(parameter.descriptor_slot_);
-                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                        break;  // constant buffer is too large
-                    }
-                    Buffer &gfx_buffer = buffers_[buffer];
-                    SetObjectName(gfx_buffer, buffer.name);
-                    GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
-                    GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
-                    cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
-                    cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
-                }
                 else
                 {
-                    GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected constant or buffer object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
-                    descriptor_slot = dummy_descriptors_[parameter.type_];
-                    freeDescriptor(parameter.descriptor_slot_);
-                    parameter.descriptor_slot_ = 0xFFFFFFFFu;
-                    break;  // user set an unrelated parameter type
+                    GFX_ASSERT(parameter.parameter_ != nullptr);
+                    if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
+                    {
+                        cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
+                        if(data != nullptr) memcpy(data, parameter.parameter_->data_.constants_, parameter.parameter_->data_size_);
+                        cbv_desc.SizeInBytes = GFX_ALIGN(parameter.parameter_->data_size_, 256);
+                    }
+                    else if(parameter.parameter_->type_ == Program::Parameter::kType_Buffer)
+                    {
+                        if(parameter.parameter_->data_.buffer_.buffer_count > 1)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found several buffer objects for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            break;  // user set an invalid buffer object
+                        }
+                        if(parameter.parameter_->data_.buffer_.buffer_count < 1)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found no buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str (),    program.file_name_.c_str());
+                            break;  // user set an invalid buffer object
+                        }
+                        GfxBuffer const &buffer = parameter.parameter_->data_.buffer_.buffers_[0];
+                        if(!buffer_handles_.has_handle(buffer.handle))
+                        {
+                            if(buffer.handle != 0)
+                                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Found invalid buffer object for parameter `%s' of program `%s/%s'; cannot bind to pipeline", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an invalid buffer object
+                        }
+                        if(buffer.cpu_access != kGfxCpuAccess_Write)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that does not have write CPU access as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // user set an invalid buffer object
+                        }
+                        if(buffer.size > 0xFFFFFFFFull)
+                        {
+                            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot bind buffer object that's larger than 4GiB as a constant shader resource for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str (),  program.file_path_.c_str(), program.file_name_.c_str());
+                            descriptor_slot = dummy_descriptors_[parameter.type_];
+                            freeDescriptor(parameter.descriptor_slot_);
+                            parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                            break;  // constant buffer is too large
+                        }
+                        Buffer &gfx_buffer = buffers_[buffer];
+                        SetObjectName(gfx_buffer, buffer.name);
+                        GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
+                        GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
+                        cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
+                        cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
+                    }
+                    else
+                    {
+                        GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected constant or buffer object", parameter.parameter_->getTypeName(),   parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                        descriptor_slot = dummy_descriptors_[parameter.type_];
+                        freeDescriptor(parameter.descriptor_slot_);
+                        parameter.descriptor_slot_ = 0xFFFFFFFFu;
+                        break;  // user set an unrelated parameter type
+                    }
                 }
                 if(cbv_desc.BufferLocation == 0)
                 {
-                    GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate constant memory for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                    if(parameter.parameter_ != nullptr)
+                        GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to allocate constant memory for parameter `%s' of program `%s/%s'", parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                     descriptor_slot = dummy_descriptors_[parameter.type_];
                     freeDescriptor(parameter.descriptor_slot_);
                     parameter.descriptor_slot_ = 0xFFFFFFFFu;
@@ -8289,7 +8489,6 @@ private:
 
     GfxResult createKernel(Program const &program, Kernel &kernel)
     {
-        char buffer[2048];
         char const *kernel_type = nullptr;
         GfxResult result = kGfxResult_NoError;
         GFX_ASSERT(kernel.num_threads_ != nullptr);
@@ -8347,15 +8546,16 @@ private:
         }
         else
             return GFX_SET_ERROR(kGfxResult_InternalError, "Cannot create unsupported kernel type");
+        std::vector<char> buffer((program.file_name_ ? program.file_name_.size() : program.file_path_.size() + kernel.entry_point_.size() + strlen(kernel_type)) + 21);
         if(kernel.root_signature_ != nullptr)
         {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
-            SetDebugName(kernel.root_signature_, buffer);
+            GFX_SNPRINTF(buffer.data(), buffer.size(), "%s::%s_%sRootSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
+            SetDebugName(kernel.root_signature_, buffer.data());
         }
         if(kernel.pipeline_state_ != nullptr)
         {
-            GFX_SNPRINTF(buffer, sizeof(buffer), "%s::%s_%sPipelineSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
-            SetDebugName(kernel.pipeline_state_, buffer);
+            GFX_SNPRINTF(buffer.data(), buffer.size(), "%s::%s_%sPipelineSignature", program.file_name_ ? program.file_name_.c_str() : program.file_path_.c_str(), kernel.entry_point_.c_str(), kernel_type);
+            SetDebugName(kernel.pipeline_state_, buffer.data());
         }
         return result;
     }
@@ -8387,10 +8587,10 @@ private:
             freeDescriptor(kernel.parameters_[i].descriptor_slot_);
             for(uint32_t j = 0; j < kernel.parameters_[i].variable_count_; ++j)
                 kernel.parameters_[i].variables_[j].~Variable();
-            free(kernel.parameters_[i].variables_);
+            gfxFree(kernel.parameters_[i].variables_);
             kernel.parameters_[i].~Parameter();
         }
-        free(kernel.parameters_);
+        gfxFree(kernel.parameters_);
         kernel.parameters_ = nullptr;
         kernel.parameter_count_ = 0;
         kernel.vertex_stride_ = 0;
@@ -8400,27 +8600,29 @@ private:
     template<typename REFLECTION_TYPE>
     void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, REFLECTION_TYPE *&reflection)
     {
-        char shader_file[4096];
         DxcBuffer shader_source = {};
         IDxcBlobEncoding *dxc_source = nullptr;
-        WCHAR wshader_file[ARRAYSIZE(shader_file)];
+        std::vector<char> shader_file(program.file_path_.size() + program.file_name_.size() + strlen(shader_extensions_[shader_type]) + 2);
+        std::vector<WCHAR> wshader_file;
         GFX_ASSERT(shader_type < kShaderType_Count);
 
         if(program.file_name_)
         {
-            GFX_SNPRINTF(shader_file, sizeof(shader_file), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
-            mbstowcs(wshader_file, shader_file, ARRAYSIZE(shader_file));
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s%s", program.file_path_.c_str(), program.file_name_.c_str(), shader_extensions_[shader_type]);
+            wshader_file.resize(mbstowcs(nullptr, shader_file.data(), 0) + 1);
+            mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             // Check file existence before LoadFile call. LoadFile spams hlsl::Exception messages if file not found.
-            if(GetFileAttributesW(wshader_file) == INVALID_FILE_ATTRIBUTES) return;
-            dxc_utils_->LoadFile(wshader_file, nullptr, &dxc_source);
+            if(GetFileAttributesW(wshader_file.data()) == INVALID_FILE_ATTRIBUTES) return;
+            dxc_utils_->LoadFile(wshader_file.data(), nullptr, &dxc_source);
             if(!dxc_source) return; // failed to load source file
             shader_source.Ptr = dxc_source->GetBufferPointer();
             shader_source.Size = dxc_source->GetBufferSize();
         }
         else
         {
-            GFX_SNPRINTF(shader_file, sizeof(shader_file), "%s%s", program.file_path_.c_str(), shader_extensions_[shader_type]);
-            mbstowcs(wshader_file, shader_file, ARRAYSIZE(shader_file));
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s%s", program.file_path_.c_str(), shader_extensions_[shader_type]);
+            wshader_file.resize(mbstowcs(nullptr, shader_file.data(), 0) + 1);
+            mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             switch(shader_type)
             {
             case kShaderType_CS:
@@ -8466,16 +8668,17 @@ private:
         static_assert(shader_profile_count == kShaderType_Count, "An invalid number of shader profiles was supplied");
         for(uint32_t i = 0; i < shader_profile_count; ++i) strcpy(shader_profiles[i] + strlen(shader_profiles[i]), program.shader_model_.c_str());
 
-        WCHAR wentry_point[2048], wshader_profile[16];
-        mbstowcs(wentry_point, kernel.entry_point_.c_str(), ARRAYSIZE(wentry_point));
-        mbstowcs(wshader_profile, shader_profiles[shader_type], ARRAYSIZE(wshader_profile));
+        std::vector<WCHAR> wentry_point(mbstowcs(nullptr, kernel.entry_point_.c_str(), 0) + 1);
+        mbstowcs(wentry_point.data(), kernel.entry_point_.c_str(), wentry_point.size());
+        std::vector<WCHAR> wshader_profile(mbstowcs(nullptr, shader_profiles[shader_type], 0) + 1);
+        mbstowcs(wshader_profile.data(), shader_profiles[shader_type], wshader_profile.size());
 
         std::vector<LPCWSTR> shader_args;
-        shader_args.push_back(wshader_file);
+        shader_args.push_back(wshader_file.data());
         if(dxr_device_ != nullptr)
             shader_args.push_back(L"-enable-16bit-types");
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
-        shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile);
+        shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
         if(experimental_shaders_ == true)
         {
@@ -8492,13 +8695,13 @@ private:
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
                     max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
                 max_export_length += 1;
-                char *lib_export = (char *)alloca(max_export_length);
-                WCHAR *wexport = (WCHAR *)alloca(max_export_length << 1);
+                std::vector<char> lib_export(max_export_length);
+                std::vector<WCHAR> wexport(max_export_length);
                 for(size_t i = 0; i < kernel.exports_.size(); ++i)
                 {
-                    GFX_SNPRINTF(lib_export, max_export_length, "%s", kernel.exports_[i].c_str());
-                    mbstowcs(wexport, lib_export, max_export_length);
-                    exports.push_back(wexport);
+                    GFX_SNPRINTF(lib_export.data(), lib_export.size(), "%s", kernel.exports_[i].c_str());
+                    mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+                    exports.push_back(wexport.data());
                 }
                 for(size_t i = 0; i < exports.size(); ++i)
                 {
@@ -8510,7 +8713,7 @@ private:
         }
         else
         {
-            shader_args.push_back(L"-E"); shader_args.push_back(wentry_point);
+            shader_args.push_back(L"-E"); shader_args.push_back(wentry_point.data());
         }
 
         if(debug_shaders_)
@@ -8573,7 +8776,7 @@ private:
         if(FAILED(result_code))
         {
             bool const has_errors = (dxc_error != nullptr && dxc_error->GetBufferPointer() != nullptr);
-            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file, kernel.entry_point_.c_str(), has_errors ? ":\r\n" : "", has_errors ? (char const *)dxc_error->GetBufferPointer() : "");
+            GFX_PRINTLN("Error: Failed to compile `%s' for entry point `%s'%s%s", shader_file.data(), kernel.entry_point_.c_str(), has_errors ? ":\r\n" : "", has_errors ? (char const *)dxc_error->GetBufferPointer() : "");
             if(dxc_error) dxc_error->Release(); dxc_result->Release();
             return; // failed to compile
         }
@@ -8581,7 +8784,7 @@ private:
         {
             bool const has_warnings = (dxc_error->GetBufferPointer() != nullptr);
             if(has_warnings)
-                GFX_PRINTLN("Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file, kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
+                GFX_PRINTLN("Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file.data(), kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
             dxc_error->Release();
         }
 
@@ -8604,12 +8807,12 @@ private:
         }
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
-            char pdb_name[1024];
             static bool created_shader_pdb_directory;
             char const *shader_pdb_directory = "./shader_pdb";
             std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
-            wcstombs(pdb_name, wpdb_name.c_str(), ARRAYSIZE(pdb_name)); // retrieve PDB file name
-            GFX_SNPRINTF(shader_file, ARRAYSIZE(shader_file), "%s/%s", shader_pdb_directory, pdb_name);
+            std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
+            wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory, pdb_name.data());
             if(!created_shader_pdb_directory)
             {
                 int32_t const result = _mkdir(shader_pdb_directory);
@@ -8617,7 +8820,7 @@ private:
                     GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory);
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
-            FILE *fd = fopen(shader_file, "wb");
+            FILE *fd = fopen(shader_file.data(), "wb");
             if(fd != nullptr)
             {
                 fwrite(dxc_pdb->GetBufferPointer(), dxc_pdb->GetBufferSize(), 1, fd);
@@ -8776,7 +8979,7 @@ private:
     {
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
-            char buffer[256];
+            char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
             if(!SUCCEEDED(swap_chain_->GetBuffer(i, IID_PPV_ARGS(&back_buffers_[i]))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to acquire back buffer");
@@ -8790,7 +8993,7 @@ private:
     {
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
-            char buffer[256];
+            char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
 
             D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
@@ -8913,6 +9116,13 @@ char const *GfxInternal::shader_extensions_[] =
     ".geom",
     ".frag",
     ".rt"
+};
+
+uint32_t const GfxInternal::kNumThreads_Invalid[] =
+{
+    1,
+    1,
+    1
 };
 
 GfxArray<GfxInternal::DrawState> GfxInternal::draw_states_;
@@ -9137,20 +9347,6 @@ uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAcceleration
     return gfx->getAccelerationStructureDataSize(acceleration_structure);
 }
 
-uint32_t gfxAccelerationStructureGetRaytracingPrimitiveCount(GfxContext context, GfxAccelerationStructure acceleration_structure)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return 0;  // invalid context
-    return gfx->getAccelerationStructureRaytracingPrimitiveCount(acceleration_structure);
-}
-
-GfxRaytracingPrimitive const *gfxAccelerationStructureGetRaytracingPrimitives(GfxContext context, GfxAccelerationStructure acceleration_structure)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;    // invalid context
-    return gfx->getAccelerationStructureRaytracingPrimitives(acceleration_structure);
-}
-
 GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure)
 {
     GfxRaytracingPrimitive const raytracing_primitive = {};
@@ -9159,12 +9355,20 @@ GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccel
     return gfx->createRaytracingPrimitive(acceleration_structure);
 }
 
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveInstance(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
 {
     GfxRaytracingPrimitive const cloned_raytracing_primitive = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return cloned_raytracing_primitive;    // invalid context
-    return gfx->createRaytracingPrimitive(raytracing_primitive);
+    return gfx->createRaytracingPrimitiveInstance(raytracing_primitive);
+}
+
+GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveProcedural(GfxContext context, GfxAccelerationStructure acceleration_structure)
+{
+    GfxRaytracingPrimitive const raytracing_primitive = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return raytracing_primitive;   // invalid context
+    return gfx->createRaytracingPrimitiveProcedural(acceleration_structure);
 }
 
 GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive)
@@ -9186,6 +9390,13 @@ GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->buildRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride, build_flags);
+}
+
+GfxResult gfxRaytracingPrimitiveBuildProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride, GfxBuildRaytracingPrimitiveFlags build_flags)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->buildRaytracingPrimitiveProcedural(raytracing_primitive, aabb_buffer, aabb_stride, build_flags);
 }
 
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform)
@@ -9230,6 +9441,13 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     return gfx->updateRaytracingPrimitive(raytracing_primitive);
 }
 
+GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->updateRaytracingPrimitive(raytracing_primitive, vertex_buffer, vertex_stride);
+}
+
 GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9237,19 +9455,11 @@ GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitiv
     return gfx->updateRaytracingPrimitive(raytracing_primitive, index_buffer, vertex_buffer, vertex_stride);
 }
 
-GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
-{
-    GfxSbt const sbt = {};
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return sbt;   // invalid context
-    return gfx->createSbt(kernels, kernel_count, entry_count);
-}
-
-GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
+GfxResult gfxRaytracingPrimitiveUpdateProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->destroySbt(sbt);
+    return gfx->updateRaytracingPrimitiveProcedural(raytracing_primitive, aabb_buffer, aabb_stride);
 }
 
 GfxDrawState::GfxDrawState()
@@ -9395,43 +9605,6 @@ GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char co
     return gfx->setProgramConstants(program, parameter_name, data, data_size);
 }
 
-GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtSetShaderGroup(sbt, shader_group_type, index, group_name);
-}
-
-GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
-}
-
-GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtSetTexture(sbt, shader_group_type, index, parameter_name, texture, mip_level);
-}
-
-GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
-    GfxSbt sbt,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
-    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->sbtGetGpuVirtualAddressRangeAndStride(sbt,
-        ray_generation_shader_record,
-        miss_shader_table,
-        hit_group_table,
-        callable_shader_table);
-}
-
 GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const *entry_point, char const **defines, uint32_t define_count)
 {
     GfxDrawState const default_draw_state = {};
@@ -9490,7 +9663,7 @@ GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;    // invalid context
+    if(!gfx) return GfxInternal::kNumThreads_Invalid;
     return gfx->getKernelNumThreads(kernel);
 }
 
@@ -9499,6 +9672,58 @@ GfxResult gfxKernelReloadAll(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->reloadAllKernels();
+}
+
+GfxSbt gfxCreateSbt(GfxContext context, GfxKernel const *kernels, uint32_t kernel_count, uint32_t entry_count[kGfxShaderGroupType_Count])
+{
+    GfxSbt const sbt = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return sbt;   // invalid context
+    return gfx->createSbt(kernels, kernel_count, entry_count);
+}
+
+GfxResult gfxDestroySbt(GfxContext context, GfxSbt sbt)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->destroySbt(sbt);
+}
+
+GfxResult gfxSbtSetShaderGroup(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *group_name)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetShaderGroup(sbt, shader_group_type, index, group_name);
+}
+
+GfxResult gfxSbtSetConstants(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, void const *data, uint32_t data_size)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetConstants(sbt, shader_group_type, index, parameter_name, data, data_size);
+}
+
+GfxResult gfxSbtSetTexture(GfxContext context, GfxSbt sbt, GfxShaderGroupType shader_group_type, uint32_t index, char const *parameter_name, GfxTexture texture, uint32_t mip_level)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtSetTexture(sbt, shader_group_type, index, parameter_name, texture, mip_level);
+}
+
+GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
+    GfxSbt sbt,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE *ray_generation_shader_record,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *miss_shader_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *hit_group_table,
+    D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->sbtGetGpuVirtualAddressRangeAndStride(sbt,
+        ray_generation_shader_record,
+        miss_shader_table,
+        hit_group_table,
+        callable_shader_table);
 }
 
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src)
