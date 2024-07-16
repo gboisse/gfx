@@ -115,13 +115,15 @@ int32_t main()
     }
 
     GfxAccelerationStructure rt_scene = gfxCreateAccelerationStructure(gfx);
+    std::vector<GfxRaytracingPrimitive> rt_meshes(instance_count);
 
     for(uint32_t i = 0; i < instance_count; ++i)
     {
-        GfxConstRef<GfxInstance> instance_ref = gfxSceneGetInstanceHandle(scene, i);
-        GfxRaytracingPrimitive   rt_mesh      = gfxCreateRaytracingPrimitive(gfx, rt_scene);
+        rt_meshes[i] = gfxCreateRaytracingPrimitive(gfx, rt_scene);
 
-        gfxRaytracingPrimitiveBuild(gfx, rt_mesh, index_buffers[instance_ref->mesh], vertex_buffers[instance_ref->mesh]);
+        GfxConstRef<GfxInstance> instance_ref = gfxSceneGetInstanceHandle(scene, i);
+
+        gfxRaytracingPrimitiveBuild(gfx, rt_meshes[i], index_buffers[instance_ref->mesh], vertex_buffers[instance_ref->mesh]);
     }
 
     gfxAccelerationStructureUpdate(gfx, rt_scene);
@@ -270,6 +272,8 @@ int32_t main()
 
     gfxDestroySamplerState(gfx, texture_sampler);
     gfxDestroyAccelerationStructure(gfx, rt_scene);
+    for (GfxRaytracingPrimitive &rt_mesh : rt_meshes)
+        gfxDestroyRaytracingPrimitive(gfx, rt_mesh);
 
     for(uint32_t i = 0; i < index_buffers.size(); ++i)
         gfxDestroyBuffer(gfx, index_buffers.data()[i]);
