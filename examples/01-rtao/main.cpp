@@ -272,7 +272,7 @@ int32_t main()
 
     gfxDestroySamplerState(gfx, texture_sampler);
     gfxDestroyAccelerationStructure(gfx, rt_scene);
-    for (GfxRaytracingPrimitive &rt_mesh : rt_meshes)
+    for(GfxRaytracingPrimitive &rt_mesh : rt_meshes)
         gfxDestroyRaytracingPrimitive(gfx, rt_mesh);
 
     for(uint32_t i = 0; i < index_buffers.size(); ++i)
