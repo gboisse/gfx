@@ -8773,7 +8773,7 @@ private:
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
             static bool created_shader_pdb_directory;
-            const std::string_view shader_pdb_directory = "./shader_pdb";
+            std::string_view const shader_pdb_directory = "./shader_pdb";
             std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
             std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
             wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
