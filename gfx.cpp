@@ -8773,16 +8773,17 @@ private:
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
             static bool created_shader_pdb_directory;
-            char const *shader_pdb_directory = "./shader_pdb";
+            const std::string_view shader_pdb_directory = "./shader_pdb";
             std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
             std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
             wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
-            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory, pdb_name.data());
+            shader_file.resize(shader_pdb_directory.size() + pdb_name.size() + 1);
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory.data(), pdb_name.data());
             if(!created_shader_pdb_directory)
             {
-                int32_t const result = _mkdir(shader_pdb_directory);
+                int32_t const result = _mkdir(shader_pdb_directory.data());
                 if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory);
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory.data());
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
             FILE *fd = fopen(shader_file.data(), "wb");
