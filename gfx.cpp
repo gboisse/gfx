@@ -963,11 +963,13 @@ public:
             output->QueryInterface(&output6);
             DXGI_OUTPUT_DESC1 output_desc;
             output6->GetDesc1(&output_desc);
-            if(output_desc.BitsPerColor > 8
-                || output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+            if(output_desc.BitsPerColor > 8)
                 output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
             /*if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
-                output_type = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;*/
+            {
+                output_type = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+            }*/
         }
 
         DXGI_SWAP_CHAIN_DESC1
