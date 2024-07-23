@@ -33,6 +33,7 @@ SOFTWARE.
 #include <dxcapi.h>             // shader compiler
 #include <d3d12shader.h>        // shader reflection
 #include <D3D12MemAlloc.h>
+#include <dxgi1_6.h>             // IDXGIOutput6
 
 #ifdef __clang__
 #   pragma clang diagnostic push
@@ -953,11 +954,27 @@ public:
         window_width_ = window_rect.right - window_rect.left;
         window_height_ = window_rect.bottom - window_rect.top;
 
+        IDXGIOutput *output;
+        DXGI_FORMAT  output_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        DXGI_COLOR_SPACE_TYPE output_type   = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+        if(adapter_->EnumOutputs(0, &output) != DXGI_ERROR_NOT_FOUND)
+        {
+            IDXGIOutput6 *output6 = nullptr;
+            output->QueryInterface(&output6);
+            DXGI_OUTPUT_DESC1 output_desc;
+            output6->GetDesc1(&output_desc);
+            if(output_desc.BitsPerColor > 8
+                || output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+                output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+            /*if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+                output_type = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;*/
+        }
+
         DXGI_SWAP_CHAIN_DESC1
         swap_chain_desc                  = {};
         swap_chain_desc.Width            = window_width_;
         swap_chain_desc.Height           = window_height_;
-        swap_chain_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+        swap_chain_desc.Format           = output_format;
         swap_chain_desc.BufferCount      = max_frames_in_flight_;
         swap_chain_desc.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
@@ -971,6 +988,7 @@ public:
         if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        swap_chain_->SetColorSpace1(output_type);
 
         back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
@@ -1252,8 +1270,10 @@ public:
         if(dummy_rtv_descriptor_ == 0xFFFFFFFFu)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate dummy descriptors");
         {
+            DXGI_SWAP_CHAIN_DESC1 desc;
+            swap_chain_->GetDesc1(&desc);
             D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-            rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            rtv_desc.Format = desc.Format;
             rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             device_->CreateRenderTargetView(nullptr, &rtv_desc, rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_));
         }
@@ -5931,7 +5951,9 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = DXGI_FORMAT_R8G8B8A8_UNORM;
+                DXGI_SWAP_CHAIN_DESC1 desc;
+                swap_chain_->GetDesc1(&desc);
+                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = desc.Format;
                 pso_desc.RTVFormats.RTVFormats.NumRenderTargets = 1;
             }
         }
@@ -6059,7 +6081,9 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats[0]    = DXGI_FORMAT_R8G8B8A8_UNORM;
+                DXGI_SWAP_CHAIN_DESC1 desc;
+                swap_chain_->GetDesc1(&desc);
+                pso_desc.RTVFormats[0]    = desc.Format;
                 pso_desc.NumRenderTargets = 1;
             }
         }
@@ -8961,7 +8985,8 @@ private:
         {
             char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
-
+            DXGI_SWAP_CHAIN_DESC1 desc;
+            swap_chain_->GetDesc1(&desc);
             D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
             D3D12_RESOURCE_DESC
             resource_desc                  = {};
@@ -8970,7 +8995,7 @@ private:
             resource_desc.Height           = window_height_;
             resource_desc.DepthOrArraySize = 1;
             resource_desc.MipLevels        = 1;
-            resource_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+            resource_desc.Format           = desc.Format;
             resource_desc.SampleDesc.Count = 1;
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -9063,7 +9088,9 @@ private:
         sync(); // make sure the GPU is done with the previous swap chain before resizing
         window_width_  = window_width;
         window_height_ = window_height;
-        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
+        DXGI_SWAP_CHAIN_DESC1 desc;
+        swap_chain_->GetDesc1(&desc);
+        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, desc.Format, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         if(!SUCCEEDED(hr))
