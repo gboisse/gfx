@@ -938,6 +938,16 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
+        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
+        {
+            IID const features[] = { D3D12ExperimentalShaderModels };
+            if(!IsDeveloperModeEnabled())
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
+            if(!SUCCEEDED(D3D12EnableExperimentalFeatures(ARRAYSIZE(features), features, nullptr, nullptr)))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
+            experimental_shaders_ = true;
+        }
+
         struct DXGIFactoryReleaser
         {
             IDXGIFactory4 *factory;
@@ -1068,8 +1078,8 @@ public:
         else
         {
             IDXGIAdapter1 *adapters[8] = {};
+            DXGI_ADAPTER_DESC1 adapter_desc = {};
             uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
-            DXGI_ADAPTER_DESC1 adapter_desc;
             DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
             for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
             {
@@ -8680,7 +8690,7 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
-        if(experimental_shaders_ == true)
+        if(experimental_shaders_)
         {
             shader_args.push_back(L"-Vd");
             shader_args.push_back(L"-select-validator internal");
@@ -8808,16 +8818,17 @@ private:
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
             static bool created_shader_pdb_directory;
-            char const *shader_pdb_directory = "./shader_pdb";
+            std::string_view const shader_pdb_directory = "./shader_pdb";
             std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
             std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
             wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
-            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory, pdb_name.data());
+            shader_file.resize(shader_pdb_directory.size() + pdb_name.size() + 1);
+            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory.data(), pdb_name.data());
             if(!created_shader_pdb_directory)
             {
-                int32_t const result = _mkdir(shader_pdb_directory);
+                int32_t const result = _mkdir(shader_pdb_directory.data());
                 if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory);
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory.data());
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
             FILE *fd = fopen(shader_file.data(), "wb");
