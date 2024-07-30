@@ -105,6 +105,7 @@ class GfxInternal
     uint64_t *fence_values_ = nullptr;
 
     bool debug_shaders_ = false;
+    bool experimental_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -937,6 +938,16 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
+        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
+        {
+            IID const features[] = { D3D12ExperimentalShaderModels };
+            if(!IsDeveloperModeEnabled())
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
+            if(!SUCCEEDED(D3D12EnableExperimentalFeatures(ARRAYSIZE(features), features, nullptr, nullptr)))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
+            experimental_shaders_ = true;
+        }
+
         struct DXGIFactoryReleaser
         {
             IDXGIFactory4 *factory;
@@ -1056,8 +1067,8 @@ public:
         else
         {
             IDXGIAdapter1 *adapters[8] = {};
+            DXGI_ADAPTER_DESC1 adapter_desc = {};
             uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
-            DXGI_ADAPTER_DESC1 adapter_desc;
             DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
             for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
             {
@@ -8650,6 +8661,11 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
+        if(experimental_shaders_)
+        {
+            shader_args.push_back(L"-Vd");
+            shader_args.push_back(L"-select-validator internal");
+        }
 
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
