@@ -955,17 +955,6 @@ public:
             DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
-
-        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
-        {
-            IID features[] = { D3D12ExperimentalShaderModels };
-            if(!IsDeveloperModeEnabled())
-                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
-            if(!SUCCEEDED(D3D12EnableExperimentalFeatures( 1, features, nullptr, nullptr )))
-                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
-            experimental_shaders_ = true;
-        }
-
         DXGIFactoryReleaser const factory_releaser(factory);
         GFX_TRY(initializeDevice(flags, adapter, factory));
 
