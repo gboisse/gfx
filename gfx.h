@@ -179,8 +179,6 @@ GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_sta
 //! Acceleration structures.
 //!
 
-class GfxRaytracingPrimitive;   // forward declaration
-
 class GfxAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxAccelerationStructure); public: };
 
 GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context);
