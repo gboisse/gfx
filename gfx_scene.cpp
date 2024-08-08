@@ -2699,6 +2699,7 @@ private:
                 mipDepth = GFX_MAX(1U, mipDepth / 2);
             }
         }
+        std::fclose(file);
         image_ref->flags = (image_ref->channel_count != 4
             || (image_ref->format == DXGI_FORMAT_BC7_TYPELESS
             || image_ref->format == DXGI_FORMAT_BC7_UNORM
