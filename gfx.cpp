@@ -1083,7 +1083,7 @@ public:
                     switch(adapter_desc.VendorId)
                     {
                     case 0x1002u:   // AMD
-                        adapter_score = 3;
+                        adapter_score = 2;
                         break;
                     case 0x10DEu:   // NVIDIA
                         adapter_score = 2;
