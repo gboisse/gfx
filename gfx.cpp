@@ -3032,24 +3032,16 @@ public:
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
                 uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
                 uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
-                uint32_t const num_dispatches = (num_groups + max_num_groups - 1) / max_num_groups;
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                if(num_dispatches <= 1)
+                if(num_groups <= max_num_groups)
                     result = encodeDispatch(num_groups, 1, 1);
                 else
                 {
-                    GfxBuffer args_buffer = allocateConstantMemory(3 * num_dispatches * sizeof(uint32_t));
+                    GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
                     uint32_t *args = (uint32_t *)getBufferData(args_buffer); GFX_ASSERT(args != nullptr);
-                    for(uint32_t dispatch_index = 0; dispatch_index < num_dispatches; ++dispatch_index)
-                    {
-                        uint64_t const offset = (uint64_t)dispatch_index * group_size * max_num_groups;
-                        uint32_t const groups = (uint32_t)((num_uints - offset + group_size - 1) / group_size);
-                        args[3 * dispatch_index + 0] = GFX_MIN(groups, max_num_groups);
-                        args[3 * dispatch_index + 1] = 1;
-                        args[3 * dispatch_index + 2] = 1;
-                    }
-                    result = encodeMultiDispatchIndirect(args_buffer, num_dispatches);
-                    destroyBuffer(args_buffer); // release constant memory
+                    args[0] = num_groups; args[1] = 1; args[2] = 1; // use indirect dispatch to workaround group limit
+                    result = encodeDispatchIndirect(args_buffer);
+                    destroyBuffer(args_buffer);
                 }
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
