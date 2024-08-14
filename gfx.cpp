@@ -1355,7 +1355,7 @@ public:
         }
 
         GfxProgramDesc clear_buffer_program_desc = {};
-        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; uint DispatchIndex; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx + DispatchIndex] = ClearValue; }";
+        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; uint gfx_DispatchID; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx + 65535 * (gfx_DispatchID << 7)] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
@@ -2996,7 +2996,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear an invalid buffer object");
         if(buffer.size == 0) return kGfxResult_NoError; // nothing to clear
         uint64_t const data_size = GFX_ALIGN(buffer.size, 4);
-        uint32_t const num_uints = (uint32_t)(data_size / sizeof(uint32_t));
+        uint64_t const num_uints = data_size / sizeof(uint32_t);
         buffer.setStride(sizeof(uint32_t));
         switch(buffer.cpu_access)
         {
@@ -3005,7 +3005,7 @@ public:
                 Buffer &gfx_buffer = buffers_[buffer];
                 SetObjectName(gfx_buffer, buffer.name);
                 uint32_t *data = (uint32_t *)gfx_buffer.data_;
-                for(uint32_t i = 0; i < num_uints; ++i) data[i] = clear_value;
+                for(uint64_t i = 0; i < num_uints; ++i) data[i] = clear_value;
             }
             break;
         case kGfxCpuAccess_Read:
@@ -3017,7 +3017,7 @@ public:
                 if(!issued_clear_buffer_warning_)
                     GFX_PRINTLN("Warning: It is inefficient to clear a buffer object with read CPU access; prefer a copy instead");
                 issued_clear_buffer_warning_ = true;    // we've now warned the user...
-                for(uint32_t i = 0; i < num_uints; ++i) ((uint32_t *)data)[i] = clear_value;
+                for(uint64_t i = 0; i < num_uints; ++i) ((uint32_t *)data)[i] = clear_value;
                 Buffer &dst_buffer = buffers_[buffer], &src_buffer = buffers_[constant_buffer_pool_[fence_index_]];
                 SetObjectName(dst_buffer, buffer.name);
                 command_list_->CopyBufferRegion(dst_buffer.resource_, dst_buffer.data_offset_,
@@ -3030,13 +3030,27 @@ public:
                 setProgramBuffer(clear_buffer_program_, "OutputBuffer", buffer);
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
-                uint32_t const max_uints = 65535 * group_size;  // AMD doesn't allow to dispatch more than 65535 groups at once
+                uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
+                uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
+                uint32_t const num_dispatches = (num_groups + max_num_groups - 1) / max_num_groups;
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                for(uint32_t dispatch_index = 0; dispatch_index < num_uints; dispatch_index += max_uints)
+                if(num_dispatches <= 1)
+                    result = encodeDispatch(num_groups, 1, 1);
+                else
                 {
-                    uint32_t const num_groups = (GFX_MIN(num_uints - dispatch_index, max_uints) + group_size - 1) / group_size;
-                    setProgramConstants(clear_buffer_program_, "DispatchIndex", &dispatch_index, sizeof(dispatch_index));
-                    result = (result == kGfxResult_NoError ? encodeDispatch(num_groups, 1, 1) : result);
+                    GfxBuffer args_buffer = allocateConstantMemory(3 * num_dispatches * sizeof(uint32_t));
+                    uint32_t *args = (uint32_t *)getBufferData(args_buffer);
+                    GFX_ASSERT(args != nullptr);
+                    for(uint32_t dispatch_index = 0; dispatch_index < num_dispatches; ++dispatch_index)
+                    {
+                        uint64_t const offset = (uint64_t)dispatch_index * group_size * max_num_groups;
+                        uint32_t const groups = (uint32_t)((num_uints - offset + group_size - 1) / group_size);
+                        args[3 * dispatch_index + 0] = GFX_MIN(groups, max_num_groups);
+                        args[3 * dispatch_index + 1] = 1;
+                        args[3 * dispatch_index + 2] = 1;
+                    }
+                    result = encodeMultiDispatchIndirect(args_buffer, num_dispatches);
+                    destroyBuffer(args_buffer); // release constant memory
                 }
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
@@ -6682,6 +6696,30 @@ private:
             device_->CreateRenderTargetView(gfx_texture.resource_, &rtv_desc, rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]));
         }
         return kGfxResult_NoError;
+    }
+
+    GfxBuffer allocateConstantMemory(uint64_t data_size)
+    {
+        GfxBuffer buffer = {};
+        Buffer *constant_buffer = buffers_.at(constant_buffer_pool_[fence_index_]);
+        uint64_t constant_buffer_size = (constant_buffer != nullptr ? constant_buffer->resource_->GetDesc().Width : 0);
+        if(constant_buffer_pool_cursors_[fence_index_] * 256 + data_size > constant_buffer_size || constant_buffer == nullptr)
+        {
+            constant_buffer_size += data_size;
+            constant_buffer_size += ((constant_buffer_size + 2) >> 1);
+            constant_buffer_size = GFX_ALIGN(constant_buffer_size, 65536);
+            destroyBuffer(constant_buffer_pool_[fence_index_]); // release previous memory
+            constant_buffer_pool_[fence_index_] = createBuffer(constant_buffer_size, nullptr, kGfxCpuAccess_Write);
+            if(!constant_buffer_pool_[fence_index_]) { return buffer; } // out of memory
+            GFX_SNPRINTF(constant_buffer_pool_[fence_index_].name, sizeof(constant_buffer_pool_[fence_index_].name), "gfx_ConstantBufferPool%u", fence_index_);
+            constant_buffer = &buffers_[constant_buffer_pool_[fence_index_]];
+            SetObjectName(*constant_buffer, constant_buffer_pool_[fence_index_].name);
+        }
+        GFX_ASSERT(constant_buffer != nullptr && constant_buffer->data_ != nullptr);
+        uint64_t const data_offset = constant_buffer_pool_cursors_[fence_index_] * 256;
+        buffer = createBufferRange(constant_buffer_pool_[fence_index_], data_offset, data_size);
+        constant_buffer_pool_cursors_[fence_index_] += (data_size + 255) / 256;
+        return buffer;
     }
 
     D3D12_GPU_VIRTUAL_ADDRESS allocateConstantMemory(uint64_t data_size, void *&data)
