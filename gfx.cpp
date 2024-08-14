@@ -33,7 +33,7 @@ SOFTWARE.
 #include <dxcapi.h>             // shader compiler
 #include <d3d12shader.h>        // shader reflection
 #include <D3D12MemAlloc.h>
-#include <dxgi1_6.h>             // IDXGIOutput6
+#include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 
 #ifdef __clang__
 #   pragma clang diagnostic push
@@ -106,6 +106,7 @@ class GfxInternal
     uint64_t *fence_values_ = nullptr;
 
     bool debug_shaders_ = false;
+    bool experimental_shaders_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -938,6 +939,16 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
+        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
+        {
+            IID const features[] = { D3D12ExperimentalShaderModels };
+            if(!IsDeveloperModeEnabled())
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
+            if(!SUCCEEDED(D3D12EnableExperimentalFeatures(ARRAYSIZE(features), features, nullptr, nullptr)))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
+            experimental_shaders_ = true;
+        }
+
         struct DXGIFactoryReleaser
         {
             IDXGIFactory4 *factory;
@@ -1010,15 +1021,15 @@ public:
 
     GfxResult initialize(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
-        IDXGIFactory4 *factory = nullptr;
+        IDXGIFactory1 *factory = nullptr;
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
         struct DXGIFactoryReleaser
         {
-            IDXGIFactory4 *factory;
+            IDXGIFactory1 *factory;
             GFX_NON_COPYABLE(DXGIFactoryReleaser);
-            DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
+            DXGIFactoryReleaser(IDXGIFactory1 *factory) : factory(factory) {}
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
         DXGIFactoryReleaser const factory_releaser(factory);
@@ -1040,7 +1051,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
+    GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != 614)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
@@ -1061,7 +1072,10 @@ public:
         if(adapter != nullptr)
         {
             DXGI_ADAPTER_DESC desc = {}; adapter->GetDesc(&desc);
-            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
+            IDXGIFactory4 *factory4;
+            if(!SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory4))))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGIFactory4");
+            if(!SUCCEEDED(factory4->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
             if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
@@ -1075,45 +1089,60 @@ public:
         }
         else
         {
+            IDXGIFactory6 *factory6;
             IDXGIAdapter1 *adapters[8] = {};
-            uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
-            DXGI_ADAPTER_DESC1 adapter_desc;
-            DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
-            for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+            if(SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory6))))
             {
-                IDXGIAdapter1 *adapter1 = nullptr;
-                if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
-                    break;
-                uint32_t j, adapter_score;
-                adapter1->GetDesc1(&adapter_desc);
-                if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
-                    adapter_score = 0;
-                else
-                    switch(adapter_desc.VendorId)
-                    {
-                    case 0x1002u:   // AMD
-                        adapter_score = 3;
-                        break;
-                    case 0x10DEu:   // NVIDIA
-                        adapter_score = 2;
-                        break;
-                    default:
-                        adapter_score = 1;
-                        break;
-                    }
-                for(j = 0; j < i; ++j)
-                    if(adapter_score > adapter_scores[j] ||
-                       adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory)
-                        break;
-                for(uint32_t k = i; k > j; --k)
+                for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
                 {
-                    adapters[k] = adapters[k - 1];
-                    adapter_descs[k] = adapter_descs[k - 1];
-                    adapter_scores[k] = adapter_scores[k - 1];
+                    IDXGIAdapter1 *adapter1 = nullptr;
+                    if(!SUCCEEDED(factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter1))))
+                        break;
+                    adapters[i] = adapter1;
                 }
-                adapters[j] = adapter1;
-                adapter_descs[j] = adapter_desc;
-                adapter_scores[j] = adapter_score;
+            }
+            else
+            {
+                DXGI_ADAPTER_DESC1 adapter_desc = {};
+                uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
+                DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
+                for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+                {
+                    IDXGIAdapter1 *adapter1 = nullptr;
+                    if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
+                        break;
+                    uint32_t j, adapter_score;
+                    adapter1->GetDesc1(&adapter_desc);
+                    if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+                        adapter_score = 0;
+                    else
+                        switch(adapter_desc.VendorId)
+                        {
+                        case 0x1002u:   // AMD
+                            adapter_score = 2;
+                            break;
+                        case 0x10DEu:   // NVIDIA
+                            adapter_score = 2;
+                            break;
+                        default:
+                            adapter_score = 1;
+                            break;
+                        }
+                    for(j = 0; j < i; ++j)
+                        if(adapter_score > adapter_scores[j] ||
+                           adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory ||
+                           adapter_desc.SharedSystemMemory > adapter_descs[j].SharedSystemMemory)
+                            break;
+                    for(uint32_t k = i; k > j; --k)
+                    {
+                        adapters[k] = adapters[k - 1];
+                        adapter_descs[k] = adapter_descs[k - 1];
+                        adapter_scores[k] = adapter_scores[k - 1];
+                    }
+                    adapters[j] = adapter1;
+                    adapter_descs[j] = adapter_desc;
+                    adapter_scores[j] = adapter_score;
+                }
             }
 
             struct DXGIAdapterReleaser
@@ -8676,6 +8705,11 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
+        if(experimental_shaders_)
+        {
+            shader_args.push_back(L"-Vd");
+            shader_args.push_back(L"-select-validator internal");
+        }
 
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)

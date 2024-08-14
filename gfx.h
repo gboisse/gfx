@@ -42,9 +42,10 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 
 enum GfxCreateContextFlag
 {
-    kGfxCreateContextFlag_EnableDebugLayer       = 1 << 0,
-    kGfxCreateContextFlag_EnableShaderDebugging  = 1 << 1,
-    kGfxCreateContextFlag_EnableStablePowerState = 1 << 2
+    kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
+    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 1,
+    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 2,
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -177,8 +178,6 @@ GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_sta
 //!
 //! Acceleration structures.
 //!
-
-class GfxRaytracingPrimitive;   // forward declaration
 
 class GfxAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxAccelerationStructure); public: };
 

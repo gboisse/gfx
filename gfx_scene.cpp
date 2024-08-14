@@ -2699,6 +2699,7 @@ private:
                 mipDepth = GFX_MAX(1U, mipDepth / 2);
             }
         }
+        std::fclose(file);
         image_ref->flags = (image_ref->channel_count != 4
             || (image_ref->format == DXGI_FORMAT_BC7_TYPELESS
             || image_ref->format == DXGI_FORMAT_BC7_UNORM
@@ -2735,7 +2736,10 @@ private:
         if(result != KTX_SUCCESS)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to open image `%s': %s", asset_file, ktxErrorString(result));
         if(ktx_texture->numDimensions != 2)
+        {
+            ktxTexture_Destroy((ktxTexture *)ktx_texture);
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Only 2D textures are supported `%s'", asset_file);
+        }
         char const *file = GFX_MAX(strrchr(asset_file, '/'), strrchr(asset_file, '\\'));
         file = (file == nullptr ? asset_file : file + 1);   // retrieve file name
         GfxRef<GfxImage> image_ref = gfxSceneCreateImage(scene);
@@ -2794,7 +2798,10 @@ private:
             }
             result = ktxTexture2_TranscodeBasis(ktx_texture, tf, KTX_TF_HIGH_QUALITY);
             if(result != KTX_SUCCESS)
+            {
+                ktxTexture_Destroy((ktxTexture *)ktx_texture);
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to transcode image `%s': %s", asset_file, ktxErrorString(result));
+            }
             image_ref->data.reserve(ktxTexture_GetDataSize((ktxTexture*)ktx_texture));
             result = ktxTexture_IterateLevelFaces((ktxTexture*)ktx_texture, &IterateKtxImage, &image_ref);
         }
@@ -2803,7 +2810,10 @@ private:
             result = ktxTexture_IterateLoadLevelFaces((ktxTexture*)ktx_texture, &IterateKtxImage, &image_ref);
         }
         if(result != KTX_SUCCESS)
+        {
+            ktxTexture_Destroy((ktxTexture *)ktx_texture);
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Unable to load image `%s': %s", asset_file, ktxErrorString(result));
+        }
         image_ref->format = vk_to_dxgi(ktx_texture->vkFormat);
         image_ref->width = ktx_texture->baseWidth;
         image_ref->height = ktx_texture->baseHeight;
