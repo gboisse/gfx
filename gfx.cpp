@@ -1355,7 +1355,7 @@ public:
         }
 
         GfxProgramDesc clear_buffer_program_desc = {};
-        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
+        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; uint DispatchIndex; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx + DispatchIndex] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
@@ -2996,7 +2996,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear an invalid buffer object");
         if(buffer.size == 0) return kGfxResult_NoError; // nothing to clear
         uint64_t const data_size = GFX_ALIGN(buffer.size, 4);
-        uint64_t const num_uints = data_size / sizeof(uint32_t);
+        uint32_t const num_uints = (uint32_t)(data_size / sizeof(uint32_t));
         buffer.setStride(sizeof(uint32_t));
         switch(buffer.cpu_access)
         {
@@ -3005,7 +3005,7 @@ public:
                 Buffer &gfx_buffer = buffers_[buffer];
                 SetObjectName(gfx_buffer, buffer.name);
                 uint32_t *data = (uint32_t *)gfx_buffer.data_;
-                for(uint64_t i = 0; i < num_uints; ++i) data[i] = clear_value;
+                for(uint32_t i = 0; i < num_uints; ++i) data[i] = clear_value;
             }
             break;
         case kGfxCpuAccess_Read:
@@ -3017,7 +3017,7 @@ public:
                 if(!issued_clear_buffer_warning_)
                     GFX_PRINTLN("Warning: It is inefficient to clear a buffer object with read CPU access; prefer a copy instead");
                 issued_clear_buffer_warning_ = true;    // we've now warned the user...
-                for(uint64_t i = 0; i < num_uints; ++i) ((uint32_t *)data)[i] = clear_value;
+                for(uint32_t i = 0; i < num_uints; ++i) ((uint32_t *)data)[i] = clear_value;
                 Buffer &dst_buffer = buffers_[buffer], &src_buffer = buffers_[constant_buffer_pool_[fence_index_]];
                 SetObjectName(dst_buffer, buffer.name);
                 command_list_->CopyBufferRegion(dst_buffer.resource_, dst_buffer.data_offset_,
@@ -3030,9 +3030,14 @@ public:
                 setProgramBuffer(clear_buffer_program_, "OutputBuffer", buffer);
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
-                uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
+                uint32_t const max_uints = 65535 * group_size;  // AMD doesn't allow to dispatch more than 65535 groups at once
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                result = encodeDispatch(num_groups, 1, 1);
+                for(uint32_t dispatch_index = 0; dispatch_index < num_uints; dispatch_index += max_uints)
+                {
+                    uint32_t const num_groups = (GFX_MIN(num_uints - dispatch_index, max_uints) + group_size - 1) / group_size;
+                    setProgramConstants(clear_buffer_program_, "DispatchIndex", &dispatch_index, sizeof(dispatch_index));
+                    result = (result == kGfxResult_NoError ? encodeDispatch(num_groups, 1, 1) : result);
+                }
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
                 else
