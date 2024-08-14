@@ -3039,8 +3039,7 @@ public:
                 else
                 {
                     GfxBuffer args_buffer = allocateConstantMemory(3 * num_dispatches * sizeof(uint32_t));
-                    uint32_t *args = (uint32_t *)getBufferData(args_buffer);
-                    GFX_ASSERT(args != nullptr);
+                    uint32_t *args = (uint32_t *)getBufferData(args_buffer); GFX_ASSERT(args != nullptr);
                     for(uint32_t dispatch_index = 0; dispatch_index < num_dispatches; ++dispatch_index)
                     {
                         uint64_t const offset = (uint64_t)dispatch_index * group_size * max_num_groups;
