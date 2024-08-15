@@ -3031,8 +3031,18 @@ public:
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
                 uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
+                uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                result = encodeDispatch(num_groups, 1, 1);
+                if(num_groups <= max_num_groups)
+                    result = encodeDispatch(num_groups, 1, 1);
+                else
+                {
+                    GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
+                    uint32_t *args = (uint32_t *)getBufferData(args_buffer); GFX_ASSERT(args != nullptr);
+                    args[0] = num_groups; args[1] = 1; args[2] = 1; // use indirect dispatch to workaround group limit
+                    result = encodeDispatchIndirect(args_buffer);
+                    destroyBuffer(args_buffer);
+                }
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
                 else
@@ -6677,6 +6687,30 @@ private:
             device_->CreateRenderTargetView(gfx_texture.resource_, &rtv_desc, rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]));
         }
         return kGfxResult_NoError;
+    }
+
+    GfxBuffer allocateConstantMemory(uint64_t data_size)
+    {
+        GfxBuffer buffer = {};
+        Buffer *constant_buffer = buffers_.at(constant_buffer_pool_[fence_index_]);
+        uint64_t constant_buffer_size = (constant_buffer != nullptr ? constant_buffer->resource_->GetDesc().Width : 0);
+        if(constant_buffer_pool_cursors_[fence_index_] * 256 + data_size > constant_buffer_size || constant_buffer == nullptr)
+        {
+            constant_buffer_size += data_size;
+            constant_buffer_size += ((constant_buffer_size + 2) >> 1);
+            constant_buffer_size = GFX_ALIGN(constant_buffer_size, 65536);
+            destroyBuffer(constant_buffer_pool_[fence_index_]); // release previous memory
+            constant_buffer_pool_[fence_index_] = createBuffer(constant_buffer_size, nullptr, kGfxCpuAccess_Write);
+            if(!constant_buffer_pool_[fence_index_]) { return buffer; } // out of memory
+            GFX_SNPRINTF(constant_buffer_pool_[fence_index_].name, sizeof(constant_buffer_pool_[fence_index_].name), "gfx_ConstantBufferPool%u", fence_index_);
+            constant_buffer = &buffers_[constant_buffer_pool_[fence_index_]];
+            SetObjectName(*constant_buffer, constant_buffer_pool_[fence_index_].name);
+        }
+        GFX_ASSERT(constant_buffer != nullptr && constant_buffer->data_ != nullptr);
+        uint64_t const data_offset = constant_buffer_pool_cursors_[fence_index_] * 256;
+        buffer = createBufferRange(constant_buffer_pool_[fence_index_], data_offset, data_size);
+        constant_buffer_pool_cursors_[fence_index_] += (data_size + 255) / 256;
+        return buffer;
     }
 
     D3D12_GPU_VIRTUAL_ADDRESS allocateConstantMemory(uint64_t data_size, void *&data)
