@@ -32,7 +32,7 @@ SOFTWARE.
 #include <accctrl.h>            // EXPLICIT_ACCESS
 #include <dxcapi.h>             // shader compiler
 #include <d3d12shader.h>        // shader reflection
-#include <D3D12MemAlloc.h>
+#include <D3D12MemAlloc.h>      // D3D12 memory allocator
 #include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 
 #ifdef __clang__
@@ -965,22 +965,27 @@ public:
         window_width_ = window_rect.right - window_rect.left;
         window_height_ = window_rect.bottom - window_rect.top;
 
-        IDXGIOutput *output;
-        DXGI_FORMAT  output_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-        DXGI_COLOR_SPACE_TYPE output_type   = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-        if(adapter_->EnumOutputs(0, &output) != DXGI_ERROR_NOT_FOUND)
+        IDXGIOutput *output = nullptr;
+        DXGI_FORMAT output_format = DXGI_FORMAT_R8G8B8A8_UNORM;
+        DXGI_COLOR_SPACE_TYPE output_type = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+        if(SUCCEEDED(adapter_->EnumOutputs(0, &output)))
         {
             IDXGIOutput6 *output6 = nullptr;
             output->QueryInterface(&output6);
-            DXGI_OUTPUT_DESC1 output_desc;
-            output6->GetDesc1(&output_desc);
-            if(output_desc.BitsPerColor > 8)
-                output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
-            /*if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+            if(output6 != nullptr)
             {
-                output_type = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
-            }*/
+                DXGI_OUTPUT_DESC1 output_desc = {};
+                output6->GetDesc1(&output_desc);
+                if(output_desc.BitsPerColor > 8)
+                    output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+                //if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+                //{
+                //    output_type = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                //    output_format = DXGI_FORMAT_R10G10B10A2_UNORM;
+                //}
+                output6->Release();
+            }
+            output->Release();
         }
 
         DXGI_SWAP_CHAIN_DESC1
