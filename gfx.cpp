@@ -9020,6 +9020,7 @@ private:
         {
             char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
+
             D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
             D3D12_RESOURCE_DESC
             resource_desc                  = {};
