@@ -43,9 +43,10 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 enum GfxCreateContextFlag
 {
     kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
-    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 1,
-    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 2,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3
+    kGfxCreateContextFlag_EnableShaderCache         = 1 << 1,
+    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 2,
+    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 3,
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 4
 };
 typedef uint32_t GfxCreateContextFlags;
 
