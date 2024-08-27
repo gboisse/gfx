@@ -754,6 +754,15 @@ class GfxInternal
             GfxShaderGroupType shader_group_type = kGfxShaderGroupType_Count;
         };
 
+        struct ShaderBytecode
+        {
+            uint64_t hash_ = 0llu;
+            IDxcBlob *bytecode_ = nullptr;
+            ID3D12ShaderReflection *reflection_ = nullptr;
+        };
+
+        // TODO: + method to compute full hash (gboisse)
+
         String entry_point_;
         GfxProgram program_ = {};
         Type type_ = kType_Count;
@@ -780,7 +789,7 @@ class GfxInternal
         ID3D12LibraryReflection *lib_reflection_ = nullptr;
         ID3D12RootSignature *root_signature_ = nullptr;
         std::map<uint32_t, LocalParameter> local_parameters_;
-        size_t sbt_record_stride_[kGfxShaderGroupType_Count];
+        size_t sbt_record_stride_[kGfxShaderGroupType_Count] = {};
         ID3D12PipelineState *pipeline_state_ = nullptr;
         ID3D12StateObject *state_object_ = nullptr;
         Parameter *parameters_ = nullptr;
