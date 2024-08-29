@@ -45,7 +45,9 @@ enum GfxCreateContextFlag
     kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
     kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 1,
     kGfxCreateContextFlag_EnableStablePowerState    = 1 << 2,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3,
+    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 4,   // Create HDR swapchain format (requires HDR capcpable device+display to have an effect)
+    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 5    // Prefer a linear gamma swap chain format (Uses half precision float scRGB instead of 10b Rec2100 for HDR)
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -57,6 +59,21 @@ uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);
 uint32_t gfxGetBackBufferIndex(GfxContext context);
 uint32_t gfxGetBackBufferCount(GfxContext context);
+DXGI_FORMAT gfxGetBackBufferFormat(GfxContext context);
+DXGI_COLOR_SPACE_TYPE gfxGetBackBufferColorSpace(GfxContext context);
+
+class GfxDisplayDesc { public: inline GfxDisplayDesc() {}
+    float red_primary[2] = {0.0f, 0.0f};
+    float green_primary[2] = {0.0f, 0.0f};
+    float blue_primary[2] = {0.0f, 0.0f};
+    float white_point[2] = {0.0f, 0.0f};
+    float min_luminance = 0.0f;
+    float max_luminance = 0.0f;
+    float max_luminance_full_frame = 0.0f;
+    float reference_sdr_white_level = 200.0f;
+};
+
+GfxDisplayDesc gfxGetDisplayDescription(GfxContext context);
 
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
