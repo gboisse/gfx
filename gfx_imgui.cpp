@@ -58,51 +58,17 @@ class GfxImGuiInternal
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernel_ = {};
+    DXGI_COLOR_SPACE_TYPE colour_space_;
+    float reference_white_adjust_ = 1.0f;
 
 public:
     GfxImGuiInternal() {}
     ~GfxImGuiInternal() { terminate(); }
 
-    GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
+    GfxResult initializeKernels()
     {
-        if(!gfx)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
-        gfx_ = gfx; // keep reference to context
-
-        IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
-        ImGui::StyleColorsDark();
-        ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags |= flags;    // config flags
-        io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
-        io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
-        io.UserData = this; // set magic number
-
-        uint8_t *font_data;
-        int32_t font_width, font_height;
-        for(uint32_t i = 0; i < font_count; ++i)
-        {
-            if(i == 0 && font_configs != nullptr && font_configs[0].MergeMode == true)
-                io.Fonts->AddFontDefault();
-            float const font_size = (font_configs != nullptr && font_configs[i].SizePixels > 0.0f)
-                                ? font_configs[i].SizePixels
-                                : 16.0f;
-            io.Fonts->AddFontFromFileTTF(font_filenames[i], font_size, font_configs != nullptr ? &font_configs[i] : nullptr);
-        }
-        io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
-        GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
-        font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
-        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        if(!font_buffer || !font_buffer_ || !font_sampler_)
-        {
-            gfxDestroyBuffer(gfx_, font_buffer);
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
-        }
-        font_buffer_.setName("gfx_ImGuiFontBuffer");
-        io.Fonts->TexID = (ImTextureID)&font_buffer_;
-        gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
-        GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
-
+        gfxDestroyKernel(gfx_, imgui_kernel_);
+        gfxDestroyProgram(gfx_, imgui_program_);
         GfxDrawState imgui_draw_state;
         GfxProgramDesc imgui_program_desc = {};
         imgui_program_desc.vs =
@@ -133,11 +99,13 @@ public:
             "    output.pos = mul(ProjectionMatrix, float4(input.pos.xy, 0.0f, 1.0f));\r\n"
             "    output.uv  = input.uv;\r\n"
             "    output.col = col;\r\n"
+            "    output.col.xyz = select(col.xyz < 0.03929337067685376f, col.xyz / 12.92f, pow((col.xyz + 0.055010718947587f) / 1.055010718947587f, 2.4f));\r\n"
             "    return output;\r\n"
             "}\r\n";
         imgui_program_desc.ps =
             "Texture2D FontBuffer;\r\n"
             "SamplerState FontSampler;\r\n"
+            "float ReferenceWhiteAdjust;\r\n"
             "\r\n"
             "struct Pixel\r\n"
             "{\r\n"
@@ -148,14 +116,79 @@ public:
             "\r\n"
             "float4 main(in Pixel input) : SV_Target\r\n"
             "{\r\n"
-            "    return input.col * FontBuffer.SampleLevel(FontSampler, input.uv, 0.0f);\r\n"
+            "    float4 col = input.col * FontBuffer.SampleLevel(FontSampler, input.uv, 0.0f);\r\n"
+            "#ifdef OUTPUT_SRGB\r\n"
+            "    col.xyz = select(col.xyz < 0.003041282560128f, 12.92f * col.xyz, 1.055010718947587f * pow(col.xyz, 1.0f / 2.4f) - 0.055010718947587f);\r\n"
+            "#elif defined(OUTPUT_HDR10)\r\n"
+            "   color *= ReferenceWhiteAdjust * (1.0f / 10000.0f);\r\n"
+            "    const float3x3 mat = float3x3(0.6274178028f, 0.3292815089f, 0.04330066592f, 0.06909923255f, 0.919541657f, 0.01135913096f, 0.01639600657f, 0.08803547174f, 0.89556849f);\r\n"
+            "    col.xyz = mul(mat, col.xyz);\r\n"
+            "    float3 powM1 = pow(col.xyz, 0.1593017578125f);\r\n"
+            "    col.xyz = pow((0.8359375f + 18.8515625f * powM1) / (1.0f + 18.6875f * powM1), 78.84375f);\r\n"
+            "#else\r\n"
+            "    col.xyz *= ReferenceWhiteAdjust * (1.0f / 80.0f);\r\n"
+            "#endif\r\n"
+            "    return col;\r\n"
             "}\r\n";
         imgui_program_ = gfxCreateProgram(gfx_, imgui_program_desc, "gfx_ImGuiProgram");
         GFX_TRY(gfxDrawStateEnableAlphaBlending(imgui_draw_state)); // enable alpha blending
         GFX_TRY(gfxDrawStateSetCullMode(imgui_draw_state, D3D12_CULL_MODE_NONE));
-        imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state);
+        colour_space_ = gfxGetBackBufferColorSpace(gfx_);
+        std::vector<char const *> defines;
+        if(colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+            defines.push_back("OUTPUT_HDR10");
+        else if(colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
+            defines.push_back("OUTPUT_SRGB");
+        imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
         if(!imgui_program_ || !imgui_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
+        GfxDisplayDesc display_desc = gfxGetDisplayDescription(gfx_);
+        reference_white_adjust_     = display_desc.reference_sdr_white_level;
+
+        return kGfxResult_NoError;
+    }
+
+    GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
+    {
+        if(!gfx)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
+        gfx_ = gfx; // keep reference to context
+
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        ImGui::StyleColorsDark();
+        ImGuiIO &io = ImGui::GetIO();
+        io.ConfigFlags |= flags | ImGuiConfigFlags_IsSRGB; // config flags
+        io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
+        io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
+        io.UserData = this; // set magic number
+
+        uint8_t *font_data;
+        int32_t font_width, font_height;
+        for(uint32_t i = 0; i < font_count; ++i)
+        {
+            if(i == 0 && font_configs != nullptr && font_configs[0].MergeMode == true)
+                io.Fonts->AddFontDefault();
+            float const font_size = (font_configs != nullptr && font_configs[i].SizePixels > 0.0f)
+                                ? font_configs[i].SizePixels
+                                : 16.0f;
+            io.Fonts->AddFontFromFileTTF(font_filenames[i], font_size, font_configs != nullptr ? &font_configs[i] : nullptr);
+        }
+        io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
+        GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
+        font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
+        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
+        if(!font_buffer || !font_buffer_ || !font_sampler_)
+        {
+            gfxDestroyBuffer(gfx_, font_buffer);
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
+        }
+        font_buffer_.setName("gfx_ImGuiFontBuffer");
+        io.Fonts->TexID = (ImTextureID)&font_buffer_;
+        gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
+        GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
+
+        GFX_TRY(initializeKernels());
 
         index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         vertex_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -209,6 +242,11 @@ public:
         ImGui::Render();    // implicit ImGui::EndFrame()
         ImDrawData const *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
+        DXGI_COLOR_SPACE_TYPE colour_space = gfxGetBackBufferColorSpace(gfx_);
+        if (colour_space != colour_space_)
+        {
+            initializeKernels();
+        }
 
         if(draw_data->TotalVtxCount > 0)
         {
@@ -261,6 +299,7 @@ public:
                 { (R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f }
             };
             gfxProgramSetParameter(gfx_, imgui_program_, "ProjectionMatrix", projection_matrix);
+            gfxProgramSetParameter(gfx_, imgui_program_, "ReferenceWhiteAdjust", reference_white_adjust_);
 
             gfxCommandBindKernel(gfx_, imgui_kernel_);
             gfxCommandBindIndexBuffer(gfx_, index_buffer);
