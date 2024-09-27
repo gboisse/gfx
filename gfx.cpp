@@ -4709,6 +4709,24 @@ public:
         return handle;
     }
 
+    GfxResult execute()
+    {
+        if(isInterop())
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot synchronize commands when using an interop context");
+        command_list_->Close(); // close command list for submit
+        ID3D12CommandList *const command_lists[] = { command_list_ };
+        command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
+
+        return kGfxResult_NoError;
+    }
+
+    GfxResult resetCommandList()
+    {
+        command_list_->Reset(command_allocators_[fence_index_], nullptr);
+        resetState();   // re-install state
+        return kGfxResult_NoError;
+    }
+
     void resetState()
     {
         bound_kernel_ = {};
@@ -10241,4 +10259,18 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->createBufferSharedHandle(buffer);
+}
+
+GfxResult gfxExecute(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->execute();
+}
+
+GfxResult gfxResetCommandList( GfxContext context )
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->resetCommandList();
 }
