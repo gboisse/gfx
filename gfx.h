@@ -455,8 +455,6 @@ GfxResult gfxCommandSortRadix(GfxContext context, GfxBuffer keys_dst, GfxBuffer 
 
 GfxResult gfxFrame(GfxContext context, bool vsync = true);
 GfxResult gfxFinish(GfxContext context);
-GfxResult gfxExecute(GfxContext context);
-GfxResult gfxResetCommandList(GfxContext context);
 
 //!
 //! Interop interface.
@@ -482,6 +480,9 @@ D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer bu
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
 
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
+
+GfxResult gfxExecute(GfxContext context);
+GfxResult gfxResetCommandList(GfxContext context);
 
 //!
 //! Template helpers.
