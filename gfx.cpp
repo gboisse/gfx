@@ -32,7 +32,8 @@ SOFTWARE.
 #include <accctrl.h>            // EXPLICIT_ACCESS
 #include <dxcapi.h>             // shader compiler
 #include <d3d12shader.h>        // shader reflection
-#include <D3D12MemAlloc.h>
+#include <D3D12MemAlloc.h>      // D3D12 memory allocator
+#include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 
 #ifdef __clang__
 #   pragma clang diagnostic push
@@ -120,6 +121,7 @@ class GfxInternal
     std::vector<D3D12_RESOURCE_BARRIER> resource_barriers_;
     ID3D12Resource **back_buffers_ = nullptr;
     D3D12MA::Allocation **back_buffer_allocations_ = nullptr;
+    DXGI_FORMAT back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
 
@@ -964,11 +966,33 @@ public:
         window_width_ = window_rect.right - window_rect.left;
         window_height_ = window_rect.bottom - window_rect.top;
 
+        IDXGIOutput *output = nullptr;
+        DXGI_COLOR_SPACE_TYPE color_space = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+        if(SUCCEEDED(adapter_->EnumOutputs(0, &output)))
+        {
+            IDXGIOutput6 *output6 = nullptr;
+            output->QueryInterface(&output6);
+            if(output6 != nullptr)
+            {
+                DXGI_OUTPUT_DESC1 output_desc = {};
+                output6->GetDesc1(&output_desc);
+                if(output_desc.BitsPerColor > 8)
+                    back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
+                //if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+                //{
+                //    color_space = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                //    back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
+                //}
+                output6->Release();
+            }
+            output->Release();
+        }
+
         DXGI_SWAP_CHAIN_DESC1
         swap_chain_desc                  = {};
         swap_chain_desc.Width            = window_width_;
         swap_chain_desc.Height           = window_height_;
-        swap_chain_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+        swap_chain_desc.Format           = back_buffer_format_;
         swap_chain_desc.BufferCount      = max_frames_in_flight_;
         swap_chain_desc.BufferUsage      = DXGI_USAGE_RENDER_TARGET_OUTPUT;
         swap_chain_desc.SwapEffect       = DXGI_SWAP_EFFECT_FLIP_DISCARD;
@@ -982,6 +1006,7 @@ public:
         if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        swap_chain_->SetColorSpace1(color_space);
 
         back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
@@ -1001,15 +1026,15 @@ public:
 
     GfxResult initialize(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
-        IDXGIFactory4 *factory = nullptr;
+        IDXGIFactory1 *factory = nullptr;
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
         struct DXGIFactoryReleaser
         {
-            IDXGIFactory4 *factory;
+            IDXGIFactory1 *factory;
             GFX_NON_COPYABLE(DXGIFactoryReleaser);
-            DXGIFactoryReleaser(IDXGIFactory4 *factory) : factory(factory) {}
+            DXGIFactoryReleaser(IDXGIFactory1 *factory) : factory(factory) {}
             ~DXGIFactoryReleaser() { factory->Release(); }
         };
         DXGIFactoryReleaser const factory_releaser(factory);
@@ -1031,7 +1056,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory4 *factory)
+    GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != 614)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
@@ -1052,7 +1077,10 @@ public:
         if(adapter != nullptr)
         {
             DXGI_ADAPTER_DESC desc = {}; adapter->GetDesc(&desc);
-            if(!SUCCEEDED(factory->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
+            IDXGIFactory4 *factory4;
+            if(!SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory4))))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGIFactory4");
+            if(!SUCCEEDED(factory4->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
             if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
@@ -1066,45 +1094,60 @@ public:
         }
         else
         {
+            IDXGIFactory6 *factory6;
             IDXGIAdapter1 *adapters[8] = {};
-            DXGI_ADAPTER_DESC1 adapter_desc = {};
-            uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
-            DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
-            for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+            if(SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory6))))
             {
-                IDXGIAdapter1 *adapter1 = nullptr;
-                if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
-                    break;
-                uint32_t j, adapter_score;
-                adapter1->GetDesc1(&adapter_desc);
-                if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
-                    adapter_score = 0;
-                else
-                    switch(adapter_desc.VendorId)
-                    {
-                    case 0x1002u:   // AMD
-                        adapter_score = 3;
-                        break;
-                    case 0x10DEu:   // NVIDIA
-                        adapter_score = 2;
-                        break;
-                    default:
-                        adapter_score = 1;
-                        break;
-                    }
-                for(j = 0; j < i; ++j)
-                    if(adapter_score > adapter_scores[j] ||
-                       adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory)
-                        break;
-                for(uint32_t k = i; k > j; --k)
+                for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
                 {
-                    adapters[k] = adapters[k - 1];
-                    adapter_descs[k] = adapter_descs[k - 1];
-                    adapter_scores[k] = adapter_scores[k - 1];
+                    IDXGIAdapter1 *adapter1 = nullptr;
+                    if(!SUCCEEDED(factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter1))))
+                        break;
+                    adapters[i] = adapter1;
                 }
-                adapters[j] = adapter1;
-                adapter_descs[j] = adapter_desc;
-                adapter_scores[j] = adapter_score;
+            }
+            else
+            {
+                DXGI_ADAPTER_DESC1 adapter_desc = {};
+                uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
+                DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
+                for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+                {
+                    IDXGIAdapter1 *adapter1 = nullptr;
+                    if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
+                        break;
+                    uint32_t j, adapter_score;
+                    adapter1->GetDesc1(&adapter_desc);
+                    if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+                        adapter_score = 0;
+                    else
+                        switch(adapter_desc.VendorId)
+                        {
+                        case 0x1002u:   // AMD
+                            adapter_score = 2;
+                            break;
+                        case 0x10DEu:   // NVIDIA
+                            adapter_score = 2;
+                            break;
+                        default:
+                            adapter_score = 1;
+                            break;
+                        }
+                    for(j = 0; j < i; ++j)
+                        if(adapter_score > adapter_scores[j] ||
+                           adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory ||
+                           adapter_desc.SharedSystemMemory > adapter_descs[j].SharedSystemMemory)
+                            break;
+                    for(uint32_t k = i; k > j; --k)
+                    {
+                        adapters[k] = adapters[k - 1];
+                        adapter_descs[k] = adapter_descs[k - 1];
+                        adapter_scores[k] = adapter_scores[k - 1];
+                    }
+                    adapters[j] = adapter1;
+                    adapter_descs[j] = adapter_desc;
+                    adapter_scores[j] = adapter_score;
+                }
             }
 
             struct DXGIAdapterReleaser
@@ -1264,7 +1307,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate dummy descriptors");
         {
             D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-            rtv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+            rtv_desc.Format        = back_buffer_format_;
             rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             device_->CreateRenderTargetView(nullptr, &rtv_desc, rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_));
         }
@@ -3012,8 +3055,18 @@ public:
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
                 uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
+                uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                result = encodeDispatch(num_groups, 1, 1);
+                if(num_groups <= max_num_groups)
+                    result = encodeDispatch(num_groups, 1, 1);
+                else
+                {
+                    GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
+                    uint32_t *args = (uint32_t *)getBufferData(args_buffer); GFX_ASSERT(args != nullptr);
+                    args[0] = num_groups; args[1] = 1; args[2] = 1; // use indirect dispatch to workaround group limit
+                    result = encodeDispatchIndirect(args_buffer);
+                    destroyBuffer(args_buffer);
+                }
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
                 else
@@ -5960,7 +6013,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = DXGI_FORMAT_R8G8B8A8_UNORM;
+                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = back_buffer_format_;
                 pso_desc.RTVFormats.RTVFormats.NumRenderTargets = 1;
             }
         }
@@ -6088,7 +6141,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats[0]    = DXGI_FORMAT_R8G8B8A8_UNORM;
+                pso_desc.RTVFormats[0]    = back_buffer_format_;
                 pso_desc.NumRenderTargets = 1;
             }
         }
@@ -6676,6 +6729,30 @@ private:
             device_->CreateRenderTargetView(gfx_texture.resource_, &rtv_desc, rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]));
         }
         return kGfxResult_NoError;
+    }
+
+    GfxBuffer allocateConstantMemory(uint64_t data_size)
+    {
+        GfxBuffer buffer = {};
+        Buffer *constant_buffer = buffers_.at(constant_buffer_pool_[fence_index_]);
+        uint64_t constant_buffer_size = (constant_buffer != nullptr ? constant_buffer->resource_->GetDesc().Width : 0);
+        if(constant_buffer_pool_cursors_[fence_index_] * 256 + data_size > constant_buffer_size || constant_buffer == nullptr)
+        {
+            constant_buffer_size += data_size;
+            constant_buffer_size += ((constant_buffer_size + 2) >> 1);
+            constant_buffer_size = GFX_ALIGN(constant_buffer_size, 65536);
+            destroyBuffer(constant_buffer_pool_[fence_index_]); // release previous memory
+            constant_buffer_pool_[fence_index_] = createBuffer(constant_buffer_size, nullptr, kGfxCpuAccess_Write);
+            if(!constant_buffer_pool_[fence_index_]) { return buffer; } // out of memory
+            GFX_SNPRINTF(constant_buffer_pool_[fence_index_].name, sizeof(constant_buffer_pool_[fence_index_].name), "gfx_ConstantBufferPool%u", fence_index_);
+            constant_buffer = &buffers_[constant_buffer_pool_[fence_index_]];
+            SetObjectName(*constant_buffer, constant_buffer_pool_[fence_index_].name);
+        }
+        GFX_ASSERT(constant_buffer != nullptr && constant_buffer->data_ != nullptr);
+        uint64_t const data_offset = constant_buffer_pool_cursors_[fence_index_] * 256;
+        buffer = createBufferRange(constant_buffer_pool_[fence_index_], data_offset, data_size);
+        constant_buffer_pool_cursors_[fence_index_] += (data_size + 255) / 256;
+        return buffer;
     }
 
     D3D12_GPU_VIRTUAL_ADDRESS allocateConstantMemory(uint64_t data_size, void *&data)
@@ -9004,7 +9081,7 @@ private:
             resource_desc.Height           = window_height_;
             resource_desc.DepthOrArraySize = 1;
             resource_desc.MipLevels        = 1;
-            resource_desc.Format           = DXGI_FORMAT_R8G8B8A8_UNORM;
+            resource_desc.Format           = back_buffer_format_;
             resource_desc.SampleDesc.Count = 1;
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -9097,7 +9174,7 @@ private:
         sync(); // make sure the GPU is done with the previous swap chain before resizing
         window_width_  = window_width;
         window_height_ = window_height;
-        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
+        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, back_buffer_format_, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         if(!SUCCEEDED(hr))

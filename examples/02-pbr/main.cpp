@@ -36,7 +36,7 @@ char const *scene_path           = "data/SciFiHelmet/glTF/SciFiHelmet.gltf";
 
 } //! unnamed namespace
 
-int main()
+int32_t main()
 {
     GfxWindow  window = gfxCreateWindow(1280, 720, "gfx - PBR");
     GfxContext gfx    = gfxCreateContext(window);
