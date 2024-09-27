@@ -481,6 +481,9 @@ D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture 
 
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
 
+GfxResult gfxExecute(GfxContext context);
+GfxResult gfxResetCommandList(GfxContext context);
+
 //!
 //! Template helpers.
 //!
