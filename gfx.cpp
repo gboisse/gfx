@@ -4676,7 +4676,7 @@ public:
             allocation_desc                = {};
             allocation_desc.HeapType       = D3D12_HEAP_TYPE_DEFAULT;
             allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
-            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, nullptr, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared buffer object");
                 return handle;  // out of memory
@@ -4699,7 +4699,7 @@ public:
             gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
             *gfx_buffer.reference_count_ = 1;   // retain
             gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
-            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         }
         WCHAR wname[ARRAYSIZE(buffer.name)] = {};
         WindowsSecurityAttributes security_attributes;
