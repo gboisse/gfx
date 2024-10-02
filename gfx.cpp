@@ -4691,6 +4691,15 @@ public:
                 resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
                 command_list_->ResourceBarrier(1, &resource_barrier);
             }
+            {
+                D3D12_RESOURCE_BARRIER resource_barrier = {};
+                resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+                resource_barrier.Transition.pResource   = resource;
+                resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
+                resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
+                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+                command_list_->ResourceBarrier(1, &resource_barrier);
+            }
             collect(gfx_buffer);    // release previous buffer
             command_list_->CopyResource(resource, gfx_buffer.resource_);
             gfx_buffer.resource_ = resource;
@@ -4699,7 +4708,7 @@ public:
             gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
             *gfx_buffer.reference_count_ = 1;   // retain
             gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
-            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
         WCHAR wname[ARRAYSIZE(buffer.name)] = {};
         WindowsSecurityAttributes security_attributes;
