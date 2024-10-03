@@ -9007,6 +9007,7 @@ private:
         dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
 
         if(shader_key != 0 && dxc_bytecode != nullptr && reflection != nullptr)
+        {
             if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
             {
                 GFX_ASSERT(shaders_.find(shader_key) == shaders_.end());
@@ -9026,6 +9027,7 @@ private:
                     fclose(fd); // write out reflection for shader caching
                 }
             }
+        }
         if(reflection) shader_bytecode = dxc_bytecode;
         if(!reflection) dxc_bytecode->Release();
         if(dxc_pdb_name) dxc_pdb_name->Release();
