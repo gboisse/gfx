@@ -8857,6 +8857,10 @@ private:
         }
 
         uint64_t shader_key = 0;
+        std::string shader_key_bytecode;
+        std::string shader_key_reflection;
+        std::vector<WCHAR> wshader_key_bytecode;
+        std::vector<WCHAR> wshader_key_reflection;
         if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
         {
             IDxcResult *dxc_preprocess = nullptr;
@@ -8890,6 +8894,45 @@ private:
                     if(dxc_source) dxc_source->Release();
                     return; // done
                 }
+                std::string shader_key_file = "./shader_cache/";
+                static bool created_shader_cache_directory;
+                if(!created_shader_cache_directory)
+                {
+                    int32_t const result = _mkdir(shader_key_file.c_str());
+                    if(result < 0 && errno != EEXIST)
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                    created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
+                }
+                shader_key_file += std::to_string(shader_key);
+                shader_key_bytecode = shader_key_file + ".bytecode";
+                shader_key_reflection = shader_key_file + ".reflection";
+                wshader_key_bytecode.resize((shader_key_bytecode.size() + 1) << 1);
+                wshader_key_reflection.resize((shader_key_reflection.size() + 1) << 1);
+                memset(wshader_key_bytecode.data(), 0, wshader_key_bytecode.size() * sizeof(WCHAR));
+                memset(wshader_key_reflection.data(), 0, wshader_key_reflection.size() * sizeof(WCHAR));
+                mbstowcs(wshader_key_bytecode.data(), shader_key_bytecode.data(), shader_key_bytecode.size());
+                mbstowcs(wshader_key_reflection.data(), shader_key_reflection.data(), shader_key_reflection.size());
+                IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
+                dxc_utils_->LoadFile(wshader_key_bytecode.data(), nullptr, &bytecode_blob);
+                dxc_utils_->LoadFile(wshader_key_reflection.data(), nullptr, &reflection_blob);
+                if(bytecode_blob && reflection_blob)
+                {
+                    DxcBuffer reflection_data = {};
+                    reflection_data.Size = reflection_blob->GetBufferSize();
+                    reflection_data.Ptr = reflection_blob->GetBufferPointer();
+                    dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
+                    if(reflection != nullptr)
+                    {
+                        Shader &shader = shaders_[shader_key];
+                        shader.shader_bytecode_ = bytecode_blob;
+                        shader.shader_reflection_ = reflection;
+                        shader_bytecode = bytecode_blob;
+                        reflection_blob->Release();
+                        return; // done
+                    }
+                }
+                if(bytecode_blob) bytecode_blob->Release();
+                if(reflection_blob) reflection_blob->Release();
             }
         }
 
@@ -8962,20 +9005,32 @@ private:
         reflection_data.Size = dxc_reflection->GetBufferSize();
         reflection_data.Ptr = dxc_reflection->GetBufferPointer();
         dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
+
+        if(shader_key != 0 && dxc_bytecode != nullptr && reflection != nullptr)
+            if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
+            {
+                GFX_ASSERT(shaders_.find(shader_key) == shaders_.end());
+                Shader &shader = shaders_[shader_key];
+                shader.shader_bytecode_ = dxc_bytecode;
+                shader.shader_reflection_ = reflection;
+                FILE *fd = fopen(shader_key_bytecode.c_str(), "wb");
+                if(fd)
+                {
+                    fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
+                    fclose(fd); // write out bytecode for shader caching
+                }
+                fd = fopen(shader_key_reflection.c_str(), "wb");
+                if(fd)
+                {
+                    fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
+                    fclose(fd); // write out reflection for shader caching
+                }
+            }
         if(reflection) shader_bytecode = dxc_bytecode;
         if(!reflection) dxc_bytecode->Release();
         if(dxc_pdb_name) dxc_pdb_name->Release();
         if(dxc_pdb) dxc_pdb->Release();
         dxc_reflection->Release();
-
-        if(shader_key != 0 && shader_bytecode != nullptr && reflection != nullptr)
-            if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
-            {
-                GFX_ASSERT(shaders_.find(shader_key) == shaders_.end());
-                Shader &shader = shaders_[shader_key];
-                shader.shader_bytecode_ = shader_bytecode;
-                shader.shader_reflection_ = reflection;
-            }
     }
 
     GfxResult createResource(D3D12MA::ALLOCATION_DESC const &allocation_desc, D3D12_RESOURCE_DESC const &resource_desc,
