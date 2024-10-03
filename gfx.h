@@ -45,9 +45,7 @@ enum GfxCreateContextFlag
     kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
     kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 1,
     kGfxCreateContextFlag_EnableStablePowerState    = 1 << 2,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3,
-    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 4,   // Create HDR swapchain format (requires HDR capcpable device+display to have an effect)
-    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 5    // Prefer a linear gamma swap chain format (Uses half precision float scRGB instead of 10b Rec2100 for HDR)
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3
 };
 typedef uint32_t GfxCreateContextFlags;
 

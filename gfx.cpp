@@ -999,22 +999,6 @@ public:
                 output6->GetDesc1(&output_desc);
                 if(output_desc.BitsPerColor > 8)
                     back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
-                if((flags & kGfxCreateContextFlag_EnableHDRSwapChain) != 0)
-                {
-                    if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
-                    {
-                        if((flags & kGfxCreateContextFlag_EnableLinearSwapChain) == 0)
-                        {
-                            color_space_        = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                            back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
-                        }
-                        else
-                        {
-                            color_space_        = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
-                            back_buffer_format_ = DXGI_FORMAT_R16G16B16A16_FLOAT;
-                        }
-                    }
-                }
                 output6->Release();
             }
             output->Release();
