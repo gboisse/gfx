@@ -250,8 +250,8 @@ public:
             }
 
             float const L = 0.0f;
-            float const R = io.DisplaySize.x;
-            float const B = io.DisplaySize.y;
+            float const R = io.DisplaySize.x / draw_data->FramebufferScale.x;
+            float const B = io.DisplaySize.y / draw_data->FramebufferScale.y;
             float const T = 0.0f;
             float const projection_matrix[4][4] =
             {
@@ -283,10 +283,10 @@ public:
                         GfxTexture const *font_buffer = (GfxTexture const *)cmd->TextureId;
                         if(font_buffer != nullptr)
                             gfxProgramSetParameter(gfx_, imgui_program_, "FontBuffer", *font_buffer);
-                        gfxCommandSetScissorRect(gfx_, (int32_t)cmd->ClipRect.x,
-                                                       (int32_t)cmd->ClipRect.y,
-                                                       (int32_t)(cmd->ClipRect.z - cmd->ClipRect.x),
-                                                       (int32_t)(cmd->ClipRect.w - cmd->ClipRect.y));
+                        gfxCommandSetScissorRect(gfx_, (int32_t)(cmd->ClipRect.x * draw_data->FramebufferScale.x),
+                                                       (int32_t)(cmd->ClipRect.y * draw_data->FramebufferScale.y),
+                                                       (int32_t)((cmd->ClipRect.z - cmd->ClipRect.x) * draw_data->FramebufferScale.x),
+                                                       (int32_t)((cmd->ClipRect.w - cmd->ClipRect.y) * draw_data->FramebufferScale.y));
                         gfxCommandDrawIndexed(gfx_, cmd->ElemCount, 1, idx_offset, vtx_offset);
                     }
                     idx_offset += cmd->ElemCount;
