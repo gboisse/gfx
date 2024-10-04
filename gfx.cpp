@@ -122,6 +122,7 @@ class GfxInternal
     ID3D12Resource **back_buffers_ = nullptr;
     D3D12MA::Allocation **back_buffer_allocations_ = nullptr;
     DXGI_FORMAT back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
+    DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
 
@@ -967,8 +968,28 @@ public:
         window_height_ = window_rect.bottom - window_rect.top;
 
         IDXGIOutput *output = nullptr;
-        DXGI_COLOR_SPACE_TYPE color_space = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-        if(SUCCEEDED(adapter_->EnumOutputs(0, &output)))
+        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+        UINT output_i  = 0;
+        LONG best_area = -1;
+        IDXGIOutput *current_output;
+        while(adapter_->EnumOutputs(output_i, &current_output) != DXGI_ERROR_NOT_FOUND)
+        {
+            DXGI_OUTPUT_DESC output_desc;
+            if(SUCCEEDED(current_output->GetDesc(&output_desc))) {
+                RECT rect = output_desc.DesktopCoordinates;
+                int intersect_area =
+                    GFX_MAX(0L, GFX_MIN(window_rect.right, rect.right) - GFX_MAX(window_rect.left, rect.left)) *
+                    GFX_MAX(0l, GFX_MIN(window_rect.bottom, rect.bottom) - GFX_MAX(window_rect.top, rect.top));
+                if(intersect_area > best_area)
+                {
+                    output    = current_output;
+                    best_area = intersect_area;
+                }
+            }
+            if(current_output != output) current_output->Release();
+            output_i++;
+        }
+        if(output != nullptr)
         {
             IDXGIOutput6 *output6 = nullptr;
             output->QueryInterface(&output6);
@@ -978,11 +999,6 @@ public:
                 output6->GetDesc1(&output_desc);
                 if(output_desc.BitsPerColor > 8)
                     back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
-                //if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
-                //{
-                //    color_space = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                //    back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
-                //}
                 output6->Release();
             }
             output->Release();
@@ -1006,7 +1022,7 @@ public:
         if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
-        swap_chain_->SetColorSpace1(color_space);
+        swap_chain_->SetColorSpace1(color_space_);
 
         back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
@@ -1575,6 +1591,105 @@ public:
     inline uint32_t getBackBufferCount() const
     {
         return max_frames_in_flight_;
+    }
+
+    inline DXGI_FORMAT getBackBufferFormat() const
+    {
+        return back_buffer_format_;
+    }
+
+    inline DXGI_COLOR_SPACE_TYPE getBackBufferColorSpace() const
+    {
+        return color_space_;
+    }
+
+    inline GfxDisplayDesc getDisplayDescription() const
+    {
+        IDXGIOutput *output      = nullptr;
+        RECT         window_rect = {};
+        GetClientRect(window_, &window_rect);
+        UINT           output_i  = 0;
+        LONG           best_area = -1;
+        IDXGIOutput   *current_output;
+        while(adapter_->EnumOutputs(output_i, &current_output) != DXGI_ERROR_NOT_FOUND)
+        {
+            DXGI_OUTPUT_DESC output_desc;
+            if(SUCCEEDED(current_output->GetDesc(&output_desc))) {
+                RECT rect = output_desc.DesktopCoordinates;
+                int intersect_area =
+                    GFX_MAX(0L, GFX_MIN(window_rect.right, rect.right) - GFX_MAX(window_rect.left, rect.left)) *
+                    GFX_MAX(0l, GFX_MIN(window_rect.bottom, rect.bottom) - GFX_MAX(window_rect.top, rect.top));
+                if(intersect_area > best_area)
+                {
+                    output    = current_output;
+                    best_area = intersect_area;
+                }
+            }
+            if(current_output != output) current_output->Release();
+            output_i++;
+        }
+        GfxDisplayDesc desc;
+        if(output != nullptr)
+        {
+            IDXGIOutput6 *output6 = nullptr;
+            output->QueryInterface(&output6);
+            if(output6 != nullptr)
+            {
+                DXGI_OUTPUT_DESC1 output_desc = {};
+                output6->GetDesc1(&output_desc);
+                memcpy(&desc.red_primary, output_desc.RedPrimary, sizeof(float) * 2);
+                memcpy(&desc.blue_primary, output_desc.BluePrimary, sizeof(float) * 2);
+                memcpy(&desc.green_primary, output_desc.GreenPrimary, sizeof(float) * 2);
+                memcpy(&desc.white_point, output_desc.WhitePoint, sizeof(float) * 2);
+                desc.min_luminance = output_desc.MinLuminance;
+                desc.max_luminance = output_desc.MaxLuminance;
+                desc.max_luminance_full_frame = output_desc.MaxFullFrameLuminance;
+
+                // Get the monitor name.
+                MONITORINFOEXW monitor_info;
+                monitor_info.cbSize = sizeof(monitor_info);
+                if(GetMonitorInfoW(output_desc.Monitor, &monitor_info))
+                {
+                    uint32_t num_path_array_elements      = 0;
+                    uint32_t num_mode_info_array_elements = 0;
+                    if(GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &num_path_array_elements, &num_mode_info_array_elements) == ERROR_SUCCESS)
+                    {
+                        std::vector<DISPLAYCONFIG_PATH_INFO> path_info_list(num_path_array_elements);
+                        std::vector<DISPLAYCONFIG_MODE_INFO> mode_info_list(num_mode_info_array_elements);
+                        if(QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &num_path_array_elements, path_info_list.data(), &num_mode_info_array_elements, mode_info_list.data(), nullptr) == ERROR_SUCCESS)
+                        {
+                            for(uint32_t i = 0; i < num_path_array_elements; i++)
+                            {
+                                DISPLAYCONFIG_SOURCE_DEVICE_NAME device_name;
+                                device_name.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+                                device_name.header.size      = sizeof(device_name);
+                                device_name.header.adapterId = path_info_list[i].sourceInfo.adapterId;
+                                device_name.header.id        = path_info_list[i].sourceInfo.id;
+                                if(DisplayConfigGetDeviceInfo(&device_name.header) == ERROR_SUCCESS)
+                                {
+                                    if(wcscmp(monitor_info.szDevice, device_name.viewGdiDeviceName) == 0)
+                                    {
+                                        DISPLAYCONFIG_SDR_WHITE_LEVEL white_level = {};
+                                        white_level.header.type =
+                                            DISPLAYCONFIG_DEVICE_INFO_GET_SDR_WHITE_LEVEL;
+                                        white_level.header.size      = sizeof(white_level);
+                                        white_level.header.adapterId = path_info_list[i].targetInfo.adapterId;
+                                        white_level.header.id        = path_info_list[i].targetInfo.id;
+                                        if(DisplayConfigGetDeviceInfo(&white_level.header) == ERROR_SUCCESS)
+                                        {
+                                            desc.reference_sdr_white_level = (float)white_level.SDRWhiteLevel * 80.0f / 1000.0f;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                output6->Release();
+            }
+            output->Release();
+        }
+        return desc;
     }
 
     inline bool isRaytracingSupported() const
@@ -4341,7 +4456,9 @@ public:
                 uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
                 fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
                 if(window_width != window_width_ || window_height != window_height_)
-                    resizeCallback(window_width, window_height);    // reset fence index
+                {
+                    resizeCallback(window_width, window_height); // reset fence index
+                }
                 if(fences_[fence_index_]->GetCompletedValue() < fence_values_[fence_index_])
                 {
                     fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
@@ -9281,6 +9398,27 @@ uint32_t gfxGetBackBufferCount(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBackBufferCount();
+}
+
+DXGI_FORMAT gfxGetBackBufferFormat(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return DXGI_FORMAT_UNKNOWN;  // invalid context
+    return gfx->getBackBufferFormat();
+}
+
+DXGI_COLOR_SPACE_TYPE gfxGetBackBufferColorSpace(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return DXGI_COLOR_SPACE_RESERVED;  // invalid context
+    return gfx->getBackBufferColorSpace();
+}
+
+GfxDisplayDesc gfxGetDisplayDescription(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return GfxDisplayDesc{};  // invalid context
+    return gfx->getDisplayDescription();
 }
 
 bool gfxIsRaytracingSupported(GfxContext context)

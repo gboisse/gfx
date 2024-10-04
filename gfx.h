@@ -57,6 +57,21 @@ uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);
 uint32_t gfxGetBackBufferIndex(GfxContext context);
 uint32_t gfxGetBackBufferCount(GfxContext context);
+DXGI_FORMAT gfxGetBackBufferFormat(GfxContext context);
+DXGI_COLOR_SPACE_TYPE gfxGetBackBufferColorSpace(GfxContext context);
+
+class GfxDisplayDesc { public: inline GfxDisplayDesc() {}
+    float red_primary[2] = {0.0f, 0.0f};
+    float green_primary[2] = {0.0f, 0.0f};
+    float blue_primary[2] = {0.0f, 0.0f};
+    float white_point[2] = {0.0f, 0.0f};
+    float min_luminance = 0.0f;
+    float max_luminance = 0.0f;
+    float max_luminance_full_frame = 0.0f;
+    float reference_sdr_white_level = 200.0f;
+};
+
+GfxDisplayDesc gfxGetDisplayDescription(GfxContext context);
 
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
