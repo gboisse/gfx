@@ -380,11 +380,13 @@ GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
 
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src);
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_offset, GfxBuffer src, uint64_t src_offset, uint64_t size);
+GfxResult gfxCommandSwapBuffer(GfxContext context, GfxBuffer &buf1, GfxBuffer &buf2);
 GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value = 0);
 
 GfxResult gfxCommandClearBackBuffer(GfxContext context);    // clears to (0.0, 0.0, 0.0, 1.0)
 GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
+GfxResult gfxCommandSwapTexture(GfxContext context, GfxTexture &tex1, GfxTexture &tex2);
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);

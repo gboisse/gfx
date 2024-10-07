@@ -3126,6 +3126,15 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult encodeSwapBuffer(GfxBuffer &buf1, GfxBuffer &buf2)
+    {
+        std::swap(buf1.handle, buf2.handle);
+        std::swap(buf1.size, buf2.size);
+        std::swap(buf1.stride, buf2.stride);
+        std::swap(buf1.cpu_access, buf2.cpu_access);
+        return kGfxResult_NoError;
+    }
+
     GfxResult encodeClearBuffer(GfxBuffer buffer, uint32_t clear_value)
     {
         GfxResult result = kGfxResult_NoError;
@@ -3256,6 +3265,19 @@ public:
                 command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
             }
         }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult encodeSwapTexture(GfxTexture &tex1, GfxTexture &tex2)
+    {
+        std::swap(tex1.handle, tex2.handle);
+        std::swap(tex1.width, tex2.width);
+        std::swap(tex1.height, tex2.height);
+        std::swap(tex1.depth, tex2.depth);
+        std::swap(tex1.format, tex2.format);
+        std::swap(tex1.mip_levels, tex2.mip_levels);
+        std::swap(tex1.type, tex2.type);
+        std::swap(tex1.clear_value, tex2.clear_value);
         return kGfxResult_NoError;
     }
 
@@ -9964,6 +9986,13 @@ GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_o
     return gfx->encodeCopyBuffer(dst, dst_offset, src, src_offset, size);
 }
 
+GfxResult gfxCommandSwapBuffer(GfxContext context, GfxBuffer& buf1, GfxBuffer& buf2)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeSwapBuffer(buf1, buf2);
+}
+
 GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9990,6 +10019,13 @@ GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture s
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeCopyTexture(dst, src);
+}
+
+GfxResult gfxCommandSwapTexture(GfxContext context, GfxTexture &tex1, GfxTexture &tex2)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeSwapTexture(tex1, tex2);
 }
 
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level, uint32_t slice)
