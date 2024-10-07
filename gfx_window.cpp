@@ -267,23 +267,40 @@ private:
                 }
                 break;
             case WM_CHAR:
-            case WM_SETCURSOR:
-            case WM_DEVICECHANGE:
             case WM_KEYUP: case WM_SYSKEYUP:
             case WM_KEYDOWN: case WM_SYSKEYDOWN:
+                {
+#   ifdef GFX_ENABLE_GUI
+                    bool imgui_captured = false;
+                    if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr)
+                    {
+                        ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
+                        imgui_captured = ImGui::GetIO().WantCaptureKeyboard;
+                    }
+                    if(!imgui_captured && (w_param < ARRAYSIZE(is_key_down_)))
+                        gfx_window->updateKeyBinding(message, (uint32_t)w_param);
+#   else
+                    if(w_param < ARRAYSIZE(is_key_down_))
+                        gfx_window->updateKeyBinding(message, (uint32_t)w_param);
+#   endif
+                }
+                break;
+            case WM_SETCURSOR:
             case WM_LBUTTONUP: case WM_RBUTTONUP:
             case WM_MBUTTONUP: case WM_XBUTTONUP:
             case WM_MOUSEWHEEL: case WM_MOUSEHWHEEL:
             case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK:
             case WM_RBUTTONDOWN: case WM_RBUTTONDBLCLK:
             case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK:
-            case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
-                if(w_param < ARRAYSIZE(is_key_down_))
-                    gfx_window->updateKeyBinding(message, (uint32_t)w_param);
-#    ifdef GFX_ENABLE_GUI
-                if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr)
-                    ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
+            case WM_XBUTTONDOWN:
+            case WM_XBUTTONDBLCLK:
+            case WM_DEVICECHANGE:
+                {
+#   ifdef GFX_ENABLE_GUI
+                    if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr)
+                        ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
 #   endif
+                }
                 break;
             default:
                 break;
