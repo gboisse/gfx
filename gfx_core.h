@@ -60,10 +60,6 @@ enum GfxConstant
 //! Public macros.
 //!
 
-#define GFX_ASSERT(X)   // skip it
-
-#define GFX_ASSERTMSG(X, ...)
-
 #define GFX_MIN(X, Y)   ((std::min)(X, Y))
 
 #define GFX_MAX(X, Y)   ((std::max)(X, Y))
@@ -77,11 +73,15 @@ enum GfxConstant
 #define GFX_ALIGN(VAL, ALIGN)   \
     (((VAL) + (static_cast<decltype(VAL)>(ALIGN) - 1)) & ~(static_cast<decltype(VAL)>(ALIGN) - 1))
 
+#ifdef _DEBUG
 #define GFX_BREAKPOINT          \
     GFX_MULTI_LINE_MACRO_BEGIN  \
         if(IsDebuggerPresent()) \
             DebugBreak();       \
     GFX_MULTI_LINE_MACRO_END
+#else
+#define GFX_BREAKPOINT  // skip it
+#endif  // _DEBUG
 
 #define GFX_TRY(X)                                                          \
     GFX_MULTI_LINE_MACRO_BEGIN                                              \
@@ -107,9 +107,6 @@ enum GfxConstant
 //! Debug macros.
 //!
 
-#ifdef _DEBUG
-
-#undef GFX_ASSERT
 #define GFX_ASSERT(X)                       \
     GFX_MULTI_LINE_MACRO_BEGIN              \
         if(!(X))                            \
@@ -119,7 +116,6 @@ enum GfxConstant
         }                                   \
     GFX_MULTI_LINE_MACRO_END
 
-#undef GFX_ASSERTMSG
 #define GFX_ASSERTMSG(X, ...)                                   \
     GFX_MULTI_LINE_MACRO_BEGIN                                  \
         if(!(X))                                                \
@@ -128,8 +124,6 @@ enum GfxConstant
             GFX_BREAKPOINT;                                     \
         }                                                       \
     GFX_MULTI_LINE_MACRO_END
-
-#endif //! _DEBUG
 
 //!
 //! Internal macros.
