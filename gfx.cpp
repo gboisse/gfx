@@ -9040,7 +9040,7 @@ private:
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
                     dxc_utils_->LoadFile(wshader_key_bytecode.data(), nullptr, &bytecode_blob);
                     dxc_utils_->LoadFile(wshader_key_reflection.data(), nullptr, &reflection_blob);
-                    if(bytecode_blob && reflection_blob)
+                    if(bytecode_blob != nullptr && reflection_blob != nullptr)
                     {
                         DxcBuffer reflection_data = {};
                         reflection_data.Size = reflection_blob->GetBufferSize();
