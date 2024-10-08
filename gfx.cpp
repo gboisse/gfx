@@ -3177,18 +3177,8 @@ public:
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
                 uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
                 uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
-                uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                if(num_groups <= max_num_groups)
-                    result = encodeDispatch(num_groups, 1, 1);
-                else
-                {
-                    GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
-                    uint32_t *args = (uint32_t *)getBufferData(args_buffer); GFX_ASSERT(args != nullptr);
-                    args[0] = num_groups; args[1] = 1; args[2] = 1; // use indirect dispatch to workaround group limit
-                    result = encodeDispatchIndirect(args_buffer);
-                    destroyBuffer(args_buffer);
-                }
+                result = encodeDispatch(num_groups, 1, 1);
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
                 else
@@ -3763,6 +3753,17 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(!num_groups_x || !num_groups_y || !num_groups_z)
             return kGfxResult_NoError;  // nothing to dispatch
+        uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
+        if(num_groups_x > max_num_groups || num_groups_y > max_num_groups || num_groups_z > max_num_groups)
+        {
+            GfxResult result;
+            GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
+            uint32_t *args = (uint32_t *)getBufferData(args_buffer); GFX_ASSERT(args != nullptr);
+            args[0] = num_groups_x; args[1] = num_groups_y; args[2] = num_groups_z;
+            result = encodeDispatchIndirect(args_buffer);   // use indirect dispatch to workaround group limit
+            destroyBuffer(args_buffer);
+            return result;
+        }
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
