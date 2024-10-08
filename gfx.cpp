@@ -8978,8 +8978,6 @@ private:
         uint64_t shader_key = 0;
         std::string shader_key_bytecode;
         std::string shader_key_reflection;
-        std::vector<WCHAR> wshader_key_bytecode;
-        std::vector<WCHAR> wshader_key_reflection;
         if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
         {
             IDxcResult *dxc_preprocess = nullptr;
@@ -9027,8 +9025,8 @@ private:
                     shader_key_file += std::to_string(shader_key);
                     shader_key_bytecode = shader_key_file + ".bytecode";
                     shader_key_reflection = shader_key_file + ".reflection";
-                    wshader_key_bytecode.resize((shader_key_bytecode.size() + 1) << 1);
-                    wshader_key_reflection.resize((shader_key_reflection.size() + 1) << 1);
+                    std::vector<WCHAR> wshader_key_bytecode(shader_key_bytecode.size() + 1);
+                    std::vector<WCHAR> wshader_key_reflection(shader_key_reflection.size() + 1);
                     memset(wshader_key_bytecode.data(), 0, wshader_key_bytecode.size() * sizeof(WCHAR));
                     memset(wshader_key_reflection.data(), 0, wshader_key_reflection.size() * sizeof(WCHAR));
                     mbstowcs(wshader_key_bytecode.data(), shader_key_bytecode.data(), shader_key_bytecode.size());
