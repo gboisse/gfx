@@ -8993,7 +8993,7 @@ private:
                     HashCombine(shader_key, Hash(kernel.entry_point_.c_str()));
                     for(size_t i = 1; i < shader_args.size(); ++i)
                     {
-                        char buffer[256] = {};
+                        char buffer[64] = {};
                         wcstombs(buffer, shader_args[i], sizeof(buffer));
                         HashCombine(shader_key, Hash(buffer));
                     }
