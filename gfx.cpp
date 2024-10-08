@@ -8990,6 +8990,8 @@ private:
                 if(dxc_hlsl != nullptr)
                 {
                     std::string const hlsl((char *)dxc_hlsl->GetBufferPointer(), dxc_hlsl->GetBufferSize());
+                    HashCombine(shader_key, (((uint32_t)debug_shaders_) << 1) | ((uint32_t)experimental_shaders_));
+                    HashCombine(shader_key, Hash(program.shader_model_.c_str()));
                     HashCombine(shader_key, Hash(kernel.entry_point_.c_str()));
                     for(String const &define : kernel.defines_)
                         HashCombine(shader_key, Hash(define.c_str()));
