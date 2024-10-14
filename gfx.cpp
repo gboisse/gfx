@@ -1831,8 +1831,6 @@ public:
         Buffer &gfx_buf1 = buffers_[buf1], &gfx_buf2 = buffers_[buf2];
         gfx_buf1.Object::flags_ &= ~Object::kFlag_Named;
         gfx_buf2.Object::flags_ &= ~Object::kFlag_Named;
-        SetObjectName(gfx_buf1, buf1.name);
-        SetObjectName(gfx_buf2, buf2.name);
         return kGfxResult_NoError;
     }
 
@@ -2070,8 +2068,6 @@ public:
         Texture &gfx_tex1 = textures_[tex1], &gfx_tex2 = textures_[tex2];
         gfx_tex1.Object::flags_ &= ~Object::kFlag_Named;
         gfx_tex2.Object::flags_ &= ~Object::kFlag_Named;
-        SetObjectName(gfx_tex1, tex1.name);
-        SetObjectName(gfx_tex2, tex2.name);
         return kGfxResult_NoError;
     }
 
