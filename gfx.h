@@ -100,6 +100,7 @@ class GfxBuffer { GFX_INTERNAL_NAMED_HANDLE(GfxBuffer); uint64_t size; uint32_t 
 GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data = nullptr, GfxCpuAccess cpu_access = kGfxCpuAccess_None);
 GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t byte_offset, uint64_t size = 0);  // fast path for (sub-)allocating during a frame
 GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer);
+GfxResult gfxSwapBuffer(GfxContext context, GfxBuffer &buf1, GfxBuffer &buf2);
 
 void *gfxBufferGetData(GfxContext context, GfxBuffer buffer);
 
@@ -151,6 +152,7 @@ GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t 
 GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
+GfxResult gfxSwapTexture(GfxContext context, GfxTexture &tex1, GfxTexture &tex2);
 
 //!
 //! Helper functions.
@@ -380,13 +382,11 @@ GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
 
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, GfxBuffer src);
 GfxResult gfxCommandCopyBuffer(GfxContext context, GfxBuffer dst, uint64_t dst_offset, GfxBuffer src, uint64_t src_offset, uint64_t size);
-GfxResult gfxCommandSwapBuffer(GfxContext context, GfxBuffer &buf1, GfxBuffer &buf2);
 GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t clear_value = 0);
 
 GfxResult gfxCommandClearBackBuffer(GfxContext context);    // clears to (0.0, 0.0, 0.0, 1.0)
 GfxResult gfxCommandClearTexture(GfxContext context, GfxTexture texture);
 GfxResult gfxCommandCopyTexture(GfxContext context, GfxTexture dst, GfxTexture src);
-GfxResult gfxCommandSwapTexture(GfxContext context, GfxTexture &tex1, GfxTexture &tex2);
 GfxResult gfxCommandClearImage(GfxContext context, GfxTexture texture, uint32_t mip_level = 0, uint32_t slice = 0);
 
 GfxResult gfxCommandCopyTextureToBackBuffer(GfxContext context, GfxTexture texture);
