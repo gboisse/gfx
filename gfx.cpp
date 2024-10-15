@@ -10538,7 +10538,7 @@ GfxResult gfxExecute(GfxContext context)
     return gfx->execute();
 }
 
-GfxResult gfxResetCommandList( GfxContext context )
+GfxResult gfxResetCommandList(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
