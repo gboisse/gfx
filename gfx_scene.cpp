@@ -2340,8 +2340,11 @@ private:
                 }
                 numDimensions = 3;
                 break;
+            default:
+                std::fclose(file);
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                    "Unable to load image `%s' : Invalid dds header", asset_file);
             }
-
         }
 
         if(format == DXGI_FORMAT_UNKNOWN || format > DXGI_FORMAT_B4G4R4A4_UNORM)

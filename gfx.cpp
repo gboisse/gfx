@@ -1750,19 +1750,16 @@ public:
             return buffer;
         }
         if(cpu_access != kGfxCpuAccess_None)
-            switch(cpu_access)
+            if(cpu_access == kGfxCpuAccess_Write)
             {
-            case kGfxCpuAccess_Write:
-                {
-                    D3D12_RANGE read_range = {};
-                    gfx_buffer.resource_->Map(0, &read_range, &gfx_buffer.data_);
-                    memset(gfx_buffer.data_, 0, (size_t)resource_desc.Width);
-                    if(data) memcpy(gfx_buffer.data_, data, (size_t)size);
-                }
-                break;
-            default:
+                D3D12_RANGE read_range = {};
+                gfx_buffer.resource_->Map(0, &read_range, &gfx_buffer.data_);
+                memset(gfx_buffer.data_, 0, (size_t)resource_desc.Width);
+                if(data) memcpy(gfx_buffer.data_, data, (size_t)size);
+            }
+            else
+            {
                 gfx_buffer.resource_->Map(0, nullptr, &gfx_buffer.data_);
-                break;
             }
         buffer.size = size;
         buffer.cpu_access = cpu_access;
@@ -5983,19 +5980,18 @@ private:
             for(size_t i = 0; i < root_signature_parameters.root_parameters.size(); ++i)
             {
                 Kernel::Parameter const &kernel_parameter = root_signature_parameters.kernel_parameters[i];
-                switch(kernel_parameter.type_)
+                if(kernel_parameter.type_ == Kernel::Parameter::kType_Constants)
                 {
-                case Kernel::Parameter::kType_Constants:
                     root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
                     root_signature_parameters.root_parameters[i].Constants.Num32BitValues = kernel_parameter.variable_size_ / sizeof(uint32_t);
                     root_signature_parameters.root_parameters[i].Constants.ShaderRegister = root_signature_parameters.descriptor_ranges[i].BaseShaderRegister;
                     root_signature_parameters.root_parameters[i].Constants.RegisterSpace = root_signature_parameters.descriptor_ranges[i].RegisterSpace;
-                    break;
-                default:
+                }
+                else
+                {
                     root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
                     root_signature_parameters.root_parameters[i].DescriptorTable.pDescriptorRanges = &root_signature_parameters.descriptor_ranges[i];
                     root_signature_parameters.root_parameters[i].DescriptorTable.NumDescriptorRanges = 1;
-                    break;
                 }
             }
         };
@@ -6066,13 +6062,13 @@ private:
             for(size_t i = 0; i < local_parameters.parameters_.size(); ++i)
             {
                 Kernel::Parameter const &kernel_parameter = local_parameters.parameters_[i];
-                switch(kernel_parameter.type_)
+                if(kernel_parameter.type_ == Kernel::Parameter::kType_Constants)
                 {
-                case Kernel::Parameter::kType_Constants:
                     local_root_signature_parameters_size += GFX_ALIGN(kernel_parameter.variable_size_, sizeof(D3D12_GPU_VIRTUAL_ADDRESS));
                     local_root_signature_parameters.root_parameters[i].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
-                    break;
-                default:
+                }
+                else
+                {
                     local_root_signature_parameters_size += sizeof(D3D12_GPU_DESCRIPTOR_HANDLE);
                     break;
                 }
@@ -7830,13 +7826,17 @@ private:
 
     void initDescriptorParameter(Kernel const &kernel, Program const &program, bool const invalidate_descriptors, Kernel::Parameter &parameter, uint32_t &descriptor_slot)
     {
+        if(parameter.parameter_ == nullptr && !(parameter.type_ == Kernel::Parameter::kType_ConstantBuffer && parameter.variable_size_ > 0))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found invalid parameter");
+            return;
+        }
         bool const invalidate_descriptor = parameter.parameter_ != nullptr && (invalidate_descriptors || parameter.id_ != parameter.parameter_->id_);
         if(parameter.parameter_ != nullptr) parameter.id_ = parameter.parameter_->id_;
         switch(parameter.type_)
         {
         case Kernel::Parameter::kType_Buffer:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
@@ -7900,7 +7900,6 @@ private:
             break;
         case Kernel::Parameter::kType_RWBuffer:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
@@ -7969,7 +7968,6 @@ private:
             break;
         case Kernel::Parameter::kType_Texture2D:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
@@ -8030,7 +8028,6 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture2D:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
@@ -8094,7 +8091,6 @@ private:
             break;
         case Kernel::Parameter::kType_Texture2DArray:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
@@ -8156,7 +8152,6 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture2DArray:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
@@ -8221,7 +8216,6 @@ private:
             break;
         case Kernel::Parameter::kType_Texture3D:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
@@ -8282,7 +8276,6 @@ private:
             break;
         case Kernel::Parameter::kType_RWTexture3D:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
@@ -8347,7 +8340,6 @@ private:
             break;
         case Kernel::Parameter::kType_TextureCube:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 D3D12_SHADER_RESOURCE_VIEW_DESC dummy_srv_desc = {};
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
@@ -8408,7 +8400,6 @@ private:
             break;
         case Kernel::Parameter::kType_AccelerationStructure:
             {
-                GFX_ASSERT(parameter.parameter_ != nullptr);
                 if(parameter.parameter_->type_ != Program::Parameter::kType_AccelerationStructure)
                 {
                     GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Found unrelated type `%s' for parameter `%s' of program `%s/%s'; expected an acceleration structure object", parameter.parameter_->getTypeName(), parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
@@ -8462,7 +8453,6 @@ private:
                 }
                 else
                 {
-                    GFX_ASSERT(parameter.parameter_ != nullptr);
                     if(parameter.parameter_->type_ == Program::Parameter::kType_Constants)
                     {
                         cbv_desc.BufferLocation = allocateConstantMemory(parameter.parameter_->data_size_, data);
