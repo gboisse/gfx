@@ -1927,7 +1927,19 @@ private:
             std::vector<GfxConstRef<GfxAnimation>> const &parent_animations, uint64_t parent_handle) -> uint64_t
         {
             glm::mat4 local_transform(1.0); // default to identity
-            cgltf_node_transform_local(gltf_node, (float*)&local_transform);
+            if(gltf_node->has_matrix)
+            {
+                memcpy(&local_transform, gltf_node->matrix, sizeof(float) * 16);
+            }
+            else
+            {
+                local_transform = glm::translate(local_transform, glm::vec3(
+                    gltf_node->translation[0], gltf_node->translation[1], gltf_node->translation[2]));
+                local_transform *= glm::mat4_cast(glm::normalize(glm::quat(gltf_node->rotation[3], gltf_node->rotation[0],
+                    gltf_node->rotation[1], gltf_node->rotation[2])));
+                local_transform = glm::scale(local_transform,
+                    glm::vec3(gltf_node->scale[0], gltf_node->scale[1], gltf_node->scale[2]));
+            }
             std::vector<GfxRef<GfxInstance>> instances;
             glm::mat4 const transform = parent_transform * local_transform;
             GfxRef<GfxSkin> skin;
