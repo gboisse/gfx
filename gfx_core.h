@@ -43,6 +43,7 @@ enum GfxResult
     kGfxResult_InvalidOperation,
     kGfxResult_OutOfMemory,
     kGfxResult_InternalError,
+    kGfxResult_DeviceError,
 
     kGfxResult_Count
 };
@@ -188,6 +189,8 @@ static inline char const *gfxResultGetString(GfxResult result)
         return "Out of memory";
     case kGfxResult_InternalError:
         return "Internal error";
+    case kGfxResult_DeviceError:
+        return "Device error";
     default:
         GFX_ASSERT(0);
         break;  // unknown error
