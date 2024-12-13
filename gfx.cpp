@@ -9623,7 +9623,7 @@ GfxResult gfxDestroyContext(GfxContext context)
     return kGfxResult_NoError;
 }
 
-bool gfxIsValid(GfxContext context)
+bool gfxContextIsValid(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return false;
