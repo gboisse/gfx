@@ -8882,6 +8882,10 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
+        shader_args.push_back(L"-Wno-parameter-usage");
+        shader_args.push_back(L"-Wno-uninitialized");
+        shader_args.push_back(L"-Wno-conditional-uninitialized");
+        shader_args.push_back(L"-Wno-sometimes-uninitialized");
         if(experimental_shaders_)
         {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
