@@ -198,58 +198,52 @@ static inline char const *gfxResultGetString(GfxResult result)
 static inline void GFX_PRINTLN_IMPL(char const *file_name, uint32_t line_number, char const *format, ...)
 {
     va_list args;
-    char message[2048];
     va_start(args, format);
     GFX_ASSERT(file_name != nullptr);
-    uint32_t const hsize = 16, bsize = 1024;
-    uint32_t const length = (uint32_t)strlen(file_name);
-    uint32_t const offset = (length >= hsize ? (length - hsize) + 1 : 0);
-    uint32_t const start = (offset ? 0 : hsize - (length + 1));
-    char header[hsize], body[bsize]; memset(header, ' ', hsize);
-    snprintf(header + start, hsize - start, "%s", file_name + offset);
-    snprintf(body, bsize - 1, "[%s:%-4u] %s\n", header, line_number, format);
-    vsnprintf(message, sizeof(message), body, args);
-    OutputDebugStringA(message);
-    vprintf(body, args);
+    int32_t size = snprintf(nullptr, 0, "%s(%-4u): %s", file_name, line_number, format);
+    std::vector<char> body(size + 1);
+    snprintf(body.data(), body.size(), "%s(%-4u): %s", file_name, line_number, format);
+    size = vsnprintf(nullptr, 0, body.data(), args);
+    std::vector<char> message(size + 2);
+    vsnprintf(message.data(), message.size(), body.data(), args);
     va_end(args);
+    message[message.size() - 2] = '\n';
+    OutputDebugStringA(message.data());
+    puts(message.data());
 }
 
 static inline void GFX_PRINT_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...)
 {
     va_list args;
-    char message[2048];
     va_start(args, format);
     GFX_ASSERT(file_name != nullptr);
-    uint32_t const hsize = 16, bsize = 1024;
-    uint32_t const length = (uint32_t)strlen(file_name);
-    uint32_t const offset = (length >= hsize ? (length - hsize) + 1 : 0);
-    uint32_t const start = (offset ? 0 : hsize - (length + 1));
-    char header[hsize], body[bsize]; memset(header, ' ', hsize);
-    snprintf(header + start, hsize - start, "%s", file_name + offset);
-    snprintf(body, bsize - 1, "[%s:%-4u] Error: %s (0x%x: %s)\n", header, line_number, format, (uint32_t)result, gfxResultGetString(result));
-    vsnprintf(message, sizeof(message), body, args);
-    OutputDebugStringA(message);
-    vprintf(body, args);
+    int32_t size = snprintf(nullptr, 0, "%s(%-4u): error: %s (0x%x: %s)", file_name, line_number, format, (uint32_t)result, gfxResultGetString(result));
+    std::vector<char> body(size + 1);
+    snprintf(body.data(), body.size(), "%s(%-4u): error: %s (0x%x: %s)", file_name, line_number, format, (uint32_t)result, gfxResultGetString(result));
+    size = vsnprintf(nullptr, 0, body.data(), args);
+    std::vector<char> message(size + 2);
+    vsnprintf(message.data(), message.size(), body.data(), args);
     va_end(args);
+    message[message.size() - 2] = '\n';
+    OutputDebugStringA(message.data());
+    puts(message.data());
 }
 
 static inline GfxResult GFX_SET_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...)
 {
     va_list args;
-    char message[2048];
     va_start(args, format);
     GFX_ASSERT(file_name != nullptr);
-    uint32_t const hsize = 16, bsize = 1024;
-    uint32_t const length = (uint32_t)strlen(file_name);
-    uint32_t const offset = (length >= hsize ? (length - hsize) + 1 : 0);
-    uint32_t const start = (offset ? 0 : hsize - (length + 1));
-    char header[hsize], body[bsize]; memset(header, ' ', hsize);
-    snprintf(header + start, hsize - start, "%s", file_name + offset);
-    snprintf(body, bsize - 1, "[%s:%-4u] Error: %s (0x%x: %s)\n", header, line_number, format, (uint32_t)result, gfxResultGetString(result));
-    vsnprintf(message, sizeof(message), body, args);
-    OutputDebugStringA(message);
-    vprintf(body, args);
+    int32_t size = snprintf(nullptr, 0, "%s(%-4u): error: %s (0x%x: %s)", file_name, line_number, format, (uint32_t)result, gfxResultGetString(result));
+    std::vector<char> body(size + 1);
+    snprintf(body.data(), body.size(), "%s(%-4u): error: %s (0x%x: %s)", file_name, line_number, format, (uint32_t)result, gfxResultGetString(result));
+    size = vsnprintf(nullptr, 0, body.data(), args);
+    std::vector<char> message(size + 2);
+    vsnprintf(message.data(), message.size(), body.data(), args);
     va_end(args);
+    message[message.size() - 2] = '\n';
+    OutputDebugStringA(message.data());
+    puts(message.data());
     return result;
 }
 
