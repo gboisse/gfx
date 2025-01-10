@@ -34,6 +34,7 @@ SOFTWARE.
 #include <d3d12shader.h>        // shader reflection
 #include <D3D12MemAlloc.h>      // D3D12 memory allocator
 #include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
+#include <filesystem>
 
 #ifdef __clang__
 #   pragma clang diagnostic push
@@ -1209,9 +1210,9 @@ public:
                                                D3D12_MESSAGE_ID, LPCSTR description, void *)
                 {
                     if(severity <= D3D12_MESSAGE_SEVERITY_ERROR)
-                        GFX_ASSERTMSG(0, "D3D12 Error: %s", description);
+                        GFX_ASSERTMSG(0, "D3D12 error: %s", description);
                     else if(severity == D3D12_MESSAGE_SEVERITY_WARNING)
-                        GFX_PRINTLN("D3D12 Warning: %s", description);
+                        GFX_PRINTLN("D3D12 warning: %s", description);
                 };
                 debug_callback->RegisterMessageCallback(callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
                 debug_callback->Release();
@@ -2621,7 +2622,8 @@ public:
         Program &gfx_program = programs_.insert(program);
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_name_ = file_name;
-        gfx_program.file_path_ = file_path;
+        std::string const absolute_path = absolute(std::filesystem::path(file_path)).string();
+        gfx_program.file_path_ = absolute_path.c_str();
         for(uint32_t i = 0; i < include_path_count; ++i) gfx_program.include_paths_.push_back(include_paths[i]);
         return program;
     }
@@ -8896,6 +8898,11 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
+        shader_args.push_back(L"-Wno-parameter-usage");
+        shader_args.push_back(L"-Wno-uninitialized");
+        shader_args.push_back(L"-Wno-conditional-uninitialized");
+        shader_args.push_back(L"-Wno-sometimes-uninitialized");
+        shader_args.push_back(L"-fdiagnostics-format=msvc");
         if(experimental_shaders_)
         {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
@@ -8935,7 +8942,7 @@ private:
         if(debug_shaders_)
         {
             shader_args.push_back(DXC_ARG_DEBUG);
-            shader_args.push_back(DXC_ARG_OPTIMIZATION_LEVEL0);
+            shader_args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
         }
 
