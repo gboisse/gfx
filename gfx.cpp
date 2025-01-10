@@ -3858,6 +3858,20 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!width || !height || !depth)
             return kGfxResult_NoError;  // nothing to dispatch
+        uint32_t const max_num_groups = 65535; // AMD doesn't allow to dispatch more than 65535 groups at once
+        if(width > max_num_groups || height > max_num_groups || depth > max_num_groups)
+        {
+            GfxResult result;
+            GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
+            uint32_t *args        = (uint32_t *)getBufferData(args_buffer);
+            GFX_ASSERT(args != nullptr);
+            args[0] = width;
+            args[1] = height;
+            args[2] = depth;
+            result  = encodeDispatchRaysIndirect(sbt, args_buffer); // use indirect dispatch to workaround group limit
+            destroyBuffer(args_buffer);
+            return result;
+        }
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
         Kernel &kernel = kernels_[bound_kernel_];
