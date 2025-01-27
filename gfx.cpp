@@ -1431,13 +1431,21 @@ public:
     GfxResult terminate()
     {
         destroyBuffer(draw_id_buffer_);
+        draw_id_buffer_ = {};
         destroyKernel(clear_buffer_kernel_);
+        clear_buffer_kernel_ = {};
         destroyProgram(clear_buffer_program_);
+        clear_buffer_program_ = {};
         destroyKernel(copy_to_backbuffer_kernel_);
+        copy_to_backbuffer_kernel_ = {};
         destroyProgram(copy_to_backbuffer_program_);
+        copy_to_backbuffer_program_ = {};
         destroyBuffer(texture_upload_buffer_);
+        texture_upload_buffer_ = {};
         destroyBuffer(raytracing_scratch_buffer_);
+        raytracing_scratch_buffer_ = {};
         destroyBuffer(sort_scratch_buffer_);
+        sort_scratch_buffer_ = {};
 
         if(constant_buffer_pool_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
@@ -1446,18 +1454,22 @@ public:
                 constant_buffer_pool_[i].~GfxBuffer();
             }
         gfxFree(constant_buffer_pool_);
+        constant_buffer_pool_ = nullptr;
         gfxFree(constant_buffer_pool_cursors_);
+        constant_buffer_pool_cursors_ = nullptr;
 
         for(std::map<uint64_t, Shader>::const_iterator it = shaders_.begin(); it != shaders_.end(); ++it)
         {
             (*it).second.shader_bytecode_->Release();
             (*it).second.shader_reflection_->Release();
         }
+        shaders_.clear();
         for(std::map<uint32_t, MipKernels>::const_iterator it = mip_kernels_.begin(); it != mip_kernels_.end(); ++it)
         {
             destroyProgram((*it).second.mip_program_);
             destroyKernel((*it).second.mip_kernel_);
         }
+        mip_kernels_.clear();
         for(std::map<uint32_t, ScanKernels>::const_iterator it = scan_kernels_.begin(); it != scan_kernels_.end(); ++it)
         {
             destroyProgram((*it).second.scan_program_);
@@ -1466,6 +1478,7 @@ public:
             destroyKernel((*it).second.scan_kernel_);
             destroyKernel((*it).second.args_kernel_);
         }
+        scan_kernels_.clear();
         for(std::map<uint32_t, SortKernels>::const_iterator it = sort_kernels_.begin(); it != sort_kernels_.end(); ++it)
         {
             destroyProgram((*it).second.sort_program_);
@@ -1473,11 +1486,20 @@ public:
             destroyKernel((*it).second.scatter_kernel_);
             destroyKernel((*it).second.args_kernel_);
         }
+        sort_kernels_.clear();
 
         collect(descriptors_);
+        descriptors_.descriptor_heap_        = nullptr;
+        descriptors_.descriptor_handle_size_ = 0;
         collect(dsv_descriptors_);
+        dsv_descriptors_.descriptor_heap_        = nullptr;
+        dsv_descriptors_.descriptor_handle_size_ = 0;
         collect(rtv_descriptors_);
+        rtv_descriptors_.descriptor_heap_        = nullptr;
+        rtv_descriptors_.descriptor_handle_size_ = 0;
         collect(sampler_descriptors_);
+        sampler_descriptors_.descriptor_heap_        = nullptr;
+        sampler_descriptors_.descriptor_handle_size_ = 0;
 
         for(uint32_t i = 0; i < buffers_.size(); ++i)
             collect(buffers_.data()[i]);
@@ -1492,7 +1514,10 @@ public:
         for(uint32_t i = 0; i < sbts_.size(); ++i)
             collect(sbts_.data()[i]);
         for(uint32_t i = 0; i < kernels_.size(); ++i)
+        {
+            command_list_->ClearState(kernels_.data()[i].pipeline_state_);
             collect(kernels_.data()[i]);
+        }
         for(uint32_t i = 0; i < programs_.size(); ++i)
             collect(programs_.data()[i]);
         if(timestamp_query_heaps_ != nullptr)
@@ -1503,82 +1528,160 @@ public:
                 timestamp_query_heaps_[i].~TimestampQueryHeap();
             }
         gfxFree(timestamp_query_heaps_);
+        timestamp_query_heaps_ = nullptr;
 
         forceGarbageCollection();
+        buffers_.clear();
+        textures_.clear();
+        sampler_states_.clear();
+        acceleration_structures_.clear();
+        raytracing_primitives_.clear();
+        sbts_.clear();
+        kernels_.clear();
+        programs_.clear();
         freelist_descriptors_.clear();
         freelist_dsv_descriptors_.clear();
         freelist_rtv_descriptors_.clear();
         freelist_sampler_descriptors_.clear();
 
         if(device_ != nullptr)
+        {
             device_->Release();
+            device_ = nullptr;
+        }
         if(dxr_device_ != nullptr)
+        {
             dxr_device_->Release();
+            dxr_device_ = nullptr;
+        }
         if(mesh_device_ != nullptr)
+        {
             mesh_device_->Release();
+            mesh_device_ = nullptr;
+        }
         for(IAmdExtD3DDevice1 *amd_ext_device : amd_ext_devices_)
             amd_ext_device->Release();
+        amd_ext_devices_.clear();
         if(command_queue_ != nullptr)
+        {
             command_queue_->Release();
+            command_queue_ = nullptr;
+        }
         if(command_list_ != nullptr)
+        {
+            command_list_->ClearState(nullptr);
             command_list_->Release();
+            command_list_ = nullptr;
+        }
         if(dxr_command_list_ != nullptr)
+        {
             dxr_command_list_->Release();
+            dxr_command_list_ = nullptr;
+        }
         if(mesh_command_list_ != nullptr)
+        {
             mesh_command_list_->Release();
+            mesh_command_list_ = nullptr;
+        }
         if(command_allocators_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(command_allocators_[i] != nullptr)
                     command_allocators_[i]->Release();
         gfxFree(command_allocators_);
+        command_allocators_ = nullptr;
 
         if(fence_event_)
+        {
             CloseHandle(fence_event_);
+            fence_event_ = {};
+        }
         if(fences_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(fences_[i] != nullptr)
                     fences_[i]->Release();
         gfxFree(fence_values_);
+        fence_values_ = nullptr;
         gfxFree(fences_);
+        fences_ = nullptr;
 
         if(dxc_utils_ != nullptr)
+        {
             dxc_utils_->Release();
+            dxc_utils_ = nullptr;
+        }
         if(dxc_compiler_ != nullptr)
+        {
             dxc_compiler_->Release();
+            dxc_compiler_ = nullptr;
+        }
         if(dxc_include_handler_ != nullptr)
+        {
             dxc_include_handler_->Release();
+            dxc_include_handler_ = nullptr;
+        }
 
         if(swap_chain_ != nullptr)
-            swap_chain_->Release();
-        else
         {
-            if(back_buffer_allocations_ != nullptr)
-                for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-                    if(back_buffer_allocations_[i] != nullptr)
-                        back_buffer_allocations_[i]->Release();
-            gfxFree(back_buffer_allocations_);
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
         }
+        if(back_buffer_allocations_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+                if(back_buffer_allocations_[i] != nullptr)
+                    back_buffer_allocations_[i]->Release();
+        gfxFree(back_buffer_allocations_);
+        back_buffer_allocations_ = nullptr;
         if(back_buffers_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffers_[i] != nullptr)
                     back_buffers_[i]->Release();
         gfxFree(back_buffer_rtvs_);
+        back_buffer_rtvs_ = nullptr;
         gfxFree(back_buffers_);
+        back_buffers_ = nullptr;
 
         if(mem_allocator_ != nullptr)
+        {
             mem_allocator_->Release();
+            mem_allocator_ = nullptr;
+        }
         if(dispatch_signature_ != nullptr)
+        {
             dispatch_signature_->Release();
+            dispatch_signature_ = nullptr;
+        }
         if(multi_draw_signature_ != nullptr)
+        {
             multi_draw_signature_->Release();
+            multi_draw_signature_ = nullptr;
+        }
         if(multi_draw_indexed_signature_ != nullptr)
+        {
             multi_draw_indexed_signature_->Release();
+            multi_draw_indexed_signature_ = nullptr;
+        }
         if(dispatch_rays_signature_ != nullptr)
+        {
             dispatch_rays_signature_->Release();
+            dispatch_rays_signature_ = nullptr;
+        }
         if(draw_mesh_signature_ != nullptr)
+        {
             draw_mesh_signature_->Release();
+            draw_mesh_signature_ = nullptr;
+        }
+
+#ifdef PIX_AMD_EXT
+        tls_pAmdExtDeviceObject = nullptr;
+        tls_checkAmdDriver = true;
+#endif
 
         return kGfxResult_NoError;
+    }
+
+    bool isValid() const
+    {
+        return device_ != nullptr && mem_allocator_ != nullptr && device_->GetDeviceRemovedReason() == S_OK;
     }
 
     inline uint32_t getBackBufferWidth() const
@@ -4472,13 +4575,21 @@ public:
                 ID3D12CommandList *const command_lists[] = { command_list_ };
                 command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
                 command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
-                swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING);
+                HRESULT hr = swap_chain_->Present(vsync ? 1 : 0, vsync ? 0 : DXGI_PRESENT_ALLOW_TEARING);
+                if(hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_HUNG)
+                {
+                    GFX_TRY(handleDeviceLost());
+                }
+                else if(FAILED(hr))
+                {
+                    return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during present: %s", hr);
+                }
                 uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
                 uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
                 fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
                 if(window_width != window_width_ || window_height != window_height_)
                 {
-                    resizeCallback(window_width, window_height); // reset fence index
+                    GFX_TRY(resizeCallback(window_width, window_height)); // reset fence index
                 }
                 if(fences_[fence_index_]->GetCompletedValue() < fence_values_[fence_index_])
                 {
@@ -9435,12 +9546,39 @@ private:
         window_width_  = window_width;
         window_height_ = window_height;
         HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, back_buffer_format_, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
+        if(hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_HUNG)
+        {
+            GFX_TRY(handleDeviceLost());
+        }
+        else if(FAILED(hr))
+        {
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during resizeBuffers: %s", hr);
+        }
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
-        if(!SUCCEEDED(hr))
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to resize the swap chain buffers");
         GFX_TRY(createBackBufferRTVs());
         return kGfxResult_NoError;
+    }
+
+    GfxResult handleDeviceLost()
+    {
+        HRESULT const reason = device_->GetDeviceRemovedReason();
+        LPSTR error_text = nullptr;
+        DWORD const result = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, nullptr, reason,
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&error_text), 0, nullptr);
+        if (command_list_ != nullptr)
+        {
+            command_list_->Release();
+            command_list_ = nullptr;
+        }
+        if(result > 0)
+        {
+            GFX_PRINT_ERROR(kGfxResult_DeviceError, "Device error \"%s\", DXGI_ERROR code: 0x%X", error_text, reason);
+            LocalFree(error_text);
+        }
+        else
+            GFX_PRINT_ERROR(kGfxResult_DeviceError, "Device error, DXGI_ERROR code: 0x%X", reason);
+        return GFX_SET_ERROR(kGfxResult_DeviceError, "Device failed");
     }
 };
 
@@ -9502,8 +9640,15 @@ GfxResult gfxDestroyContext(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_NoError; // nothing to destroy
-    if(!gfx->isInterop()) GFX_TRY(gfx->finish()); delete gfx;
+    if(!gfx->isInterop() && gfx->isValid()) GFX_TRY(gfx->finish()); delete gfx;
     return kGfxResult_NoError;
+}
+
+bool gfxContextIsValid(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;
+    return gfx->isValid();
 }
 
 uint32_t gfxGetBackBufferWidth(GfxContext context)

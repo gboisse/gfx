@@ -53,6 +53,7 @@ typedef uint32_t GfxCreateContextFlags;
 GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags = 0, IDXGIAdapter *adapter = nullptr);
 GfxContext gfxCreateContext(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter = nullptr);
 GfxResult gfxDestroyContext(GfxContext context);
+bool      gfxContextIsValid(GfxContext context);
 
 uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);
