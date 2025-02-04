@@ -1854,6 +1854,7 @@ public:
             return buffer;
         }
         if(cpu_access != kGfxCpuAccess_None)
+        {
             if(cpu_access == kGfxCpuAccess_Write)
             {
                 D3D12_RANGE read_range = {};
@@ -1862,9 +1863,8 @@ public:
                 if(data) memcpy(gfx_buffer.data_, data, (size_t)size);
             }
             else
-            {
                 gfx_buffer.resource_->Map(0, nullptr, &gfx_buffer.data_);
-            }
+        }
         buffer.size = size;
         buffer.cpu_access = cpu_access;
         buffer.stride = sizeof(uint32_t);
@@ -3544,8 +3544,8 @@ public:
             uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
             if(buffer_offset + buffer_size > src.size)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to mip level %u from buffer object with insufficient storage", mip_level);
-            D3D12_TEXTURE_COPY_LOCATION dst_location = {gfx_texture.resource_, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, subresource_index};
-            D3D12_TEXTURE_COPY_LOCATION src_location = {gfx_buffer.resource_, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, subresource_footprints[mip_level]};
+            D3D12_TEXTURE_COPY_LOCATION dst_location = {.pResource = gfx_texture.resource_, .Type = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX, .SubresourceIndex = subresource_index};
+            D3D12_TEXTURE_COPY_LOCATION src_location = {gfx_buffer.resource_, D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, {subresource_footprints[mip_level]}};
             command_list_->CopyTextureRegion(&dst_location, 0, 0, 0, &src_location, nullptr);
             buffer_offset += buffer_size;   // advance the buffer offset
         }

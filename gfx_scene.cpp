@@ -1417,7 +1417,7 @@ private:
                             {
                                 pos += tag.length();
                                 std::string clipped = json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
-                                const auto index = stoi(clipped);
+                                auto const index = stoull(clipped);
                                 if(index < gltf_model->textures_count)
                                 {
                                     cgltf_texture const *split_text = &gltf_model->textures[index];
