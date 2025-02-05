@@ -234,9 +234,9 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.0
+        GIT_TAG        1.0.1
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
-        FIND_PACKAGE_ARGS 1.0.0 NAMES glm
+        FIND_PACKAGE_ARGS NAMES glm
     )
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
         set(GLM_ENABLE_SIMD_AVX2 ON CACHE BOOL "")
