@@ -92,7 +92,7 @@ set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocat
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v2.0.1
+    GIT_TAG        1509c7819695b51ad6f2b49b9f849ec7e2f821fe
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
     FIND_PACKAGE_ARGS NAMES d3d12-memory-allocator
 )
