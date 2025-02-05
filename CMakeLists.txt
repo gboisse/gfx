@@ -222,7 +222,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             cgltf
             GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-            GIT_TAG        v1.13
+            GIT_TAG        v1.14
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/"
         )
         FetchContent_MakeAvailable(cgltf)
