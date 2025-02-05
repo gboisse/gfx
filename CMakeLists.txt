@@ -182,7 +182,7 @@ if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.90.4
+        GIT_TAG        v1.91.8
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
