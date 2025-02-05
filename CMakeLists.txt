@@ -35,6 +35,7 @@ elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
         target_compile_options(gfx PRIVATE /bigobj)
     else()
         target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -pedantic -Werror>)
+        target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-language-extension-token>) # anonymous types declared in an anonymous union
         target_compile_options(gfx PRIVATE -Wa,-mbig-obj)
     endif()
     include(CheckCXXSymbolExists)
@@ -277,6 +278,10 @@ if(GFX_ENABLE_SCENE)
     if(NOT tinyexr_FOUND)
         #tinyexr cmake is currently broken when not using miniz
         target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
+        # Workaround compilation failures with current version
+        if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")        
+            target_compile_options(tinyexr PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-sign-conversion -Wno-nonportable-system-include-path -Wno-tautological-type-limit-compare -Wno-old-style-cast>)
+        endif()
         target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr")
         target_link_libraries(gfx PRIVATE tinyexr)
         set_target_properties(tinyexr PROPERTIES FOLDER "${GFX_TP_FOLDER}")

@@ -29,40 +29,40 @@ SOFTWARE.
 #include <functional>
 #include <ios>
 #include <fstream>
-#define CGLTF_IMPLEMENTATION
-#ifdef _MSC_VER
-#   pragma warning(push)
-#   pragma warning(disable:4789)   // buffer will be overrun
-#endif
-#include <cgltf.h>              // glTF loader
-#ifdef _MSC_VER
-#   pragma warning(pop)
-#endif
 #include <tiny_obj_loader.h>   // obj loader
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include <tinyexr.h>
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#ifdef __clang__
-#   pragma clang diagnostic push
-#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
-#elif defined(__GNUC__)
-#   pragma GCC diagnostic push
-#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-#endif
-#include <stb_image_write.h>
-#ifdef __clang__
-#   pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#   pragma GCC diagnostic pop
-#endif
-#ifdef GFX_ENABLE_SCENE_KTX
-#include <ktx.h>
-#include <vulkan/vulkan.h>
-#endif
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#ifdef GFX_ENABLE_SCENE_KTX
+#    include <ktx.h>
+#    include <vulkan/vulkan.h>
+#endif
+#ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wlanguage-extension-token"
+#    pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wlanguage-extension-token"
+#    pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#elif defined(_MSC_VER)
+#   pragma warning(push)
+#   pragma warning(disable:4789)   // buffer will be overrun
+#endif
+#define CGLTF_IMPLEMENTATION
+#include <cgltf.h>              // glTF loader
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+#ifdef __clang__
+#    pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
 
 class GfxSceneInternal
 {

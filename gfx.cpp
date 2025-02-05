@@ -32,35 +32,37 @@ SOFTWARE.
 #include <accctrl.h>            // EXPLICIT_ACCESS
 #include <dxcapi.h>             // shader compiler
 #include <d3d12shader.h>        // shader reflection
-#include <D3D12MemAlloc.h>      // D3D12 memory allocator
 #include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 #include <filesystem>
 
 #ifdef __clang__
-#   pragma clang diagnostic push
-#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
-#   pragma clang diagnostic ignored "-Wmisleading-indentation"
-#   pragma clang diagnostic ignored "-Wswitch"
-#   pragma clang diagnostic ignored "-Wunused-parameter"
-#   pragma clang diagnostic ignored "-Wtautological-undefined-compare"
-#   pragma clang diagnostic ignored "-Wunused-but-set-variable"
-#   pragma clang diagnostic ignored "-Wunused-function"
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wnested-anon-types"
+#    pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#    pragma clang diagnostic ignored "-Wmisleading-indentation"
+#    pragma clang diagnostic ignored "-Wswitch"
+#    pragma clang diagnostic ignored "-Wunused-parameter"
+#    pragma clang diagnostic ignored "-Wtautological-undefined-compare"
+#    pragma clang diagnostic ignored "-Wunused-but-set-variable"
+#    pragma clang diagnostic ignored "-Wunused-function"
 #elif defined(__GNUC__)
-#   pragma GCC diagnostic push
-#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-#   pragma GCC diagnostic ignored "-Wmisleading-indentation"
-#   pragma GCC diagnostic ignored "-Wswitch"
-#   pragma GCC diagnostic ignored "-Wunused-parameter"
-#   pragma GCC diagnostic ignored "-Wtautological-undefined-compare"
-#   pragma GCC diagnostic ignored "-Wunused-but-set-variable"
-#   pragma GCC diagnostic ignored "-Wunused-function"
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wnested-anon-types"
+#    pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#    pragma GCC diagnostic ignored "-Wmisleading-indentation"
+#    pragma GCC diagnostic ignored "-Wswitch"
+#    pragma GCC diagnostic ignored "-Wunused-parameter"
+#    pragma GCC diagnostic ignored "-Wtautological-undefined-compare"
+#    pragma GCC diagnostic ignored "-Wunused-but-set-variable"
+#    pragma GCC diagnostic ignored "-Wunused-function"
 #elif defined(_MSC_VER)
-#   pragma warning(push)
-#   pragma warning(disable:4100)   // unreferenced formal parameter
-#   pragma warning(disable:4127)   // conditional expression is constant
-#   pragma warning(disable:4189)   // local variable is initialized but not referenced
-#   pragma warning(disable:4211)   // nonstandard extension used: redefined extern to static
+#    pragma warning(push)
+#    pragma warning(disable : 4100) // unreferenced formal parameter
+#    pragma warning(disable : 4127) // conditional expression is constant
+#    pragma warning(disable : 4189) // local variable is initialized but not referenced
+#    pragma warning(disable : 4211) // nonstandard extension used: redefined extern to static
 #endif
+#include <D3D12MemAlloc.h>      // D3D12 memory allocator
 #include <WinPixEventRuntime/pix3.h>
 #ifdef __clang__
 #    pragma clang diagnostic pop
