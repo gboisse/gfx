@@ -268,7 +268,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-        GIT_TAG        v1.0.8
+        GIT_TAG        v1.0.10
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/"
         FIND_PACKAGE_ARGS NAMES tinyexr
     )
