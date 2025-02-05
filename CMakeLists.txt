@@ -208,7 +208,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             Stb
             GIT_REPOSITORY https://github.com/nothings/stb.git
-            GIT_TAG        ae721c50eaf761660b4f90cc590453cdb0c2acd0
+            GIT_TAG        5c205738c191bcb0abc65c4febfa9bd25ff35234
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/"
         )
         FetchContent_MakeAvailable(Stb)
