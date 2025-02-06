@@ -92,7 +92,7 @@ set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocat
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v2.0.1
+    GIT_TAG        1509c7819695b51ad6f2b49b9f849ec7e2f821fe
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
     FIND_PACKAGE_ARGS NAMES d3d12-memory-allocator
 )
@@ -108,7 +108,7 @@ endif()
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 FetchContent_Declare(
     DirectX12-Agility
-    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.614.0"
+    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.615.0"
     SOURCE_DIR     "${GFX_AGILITY_PATH}"
     FIND_PACKAGE_ARGS NAMES DirectX12-Agility
 )
@@ -134,7 +134,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2405/dxc_2024_05_24.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
@@ -182,7 +182,7 @@ if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.90.4
+        GIT_TAG        v1.91.8
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
@@ -208,7 +208,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             Stb
             GIT_REPOSITORY https://github.com/nothings/stb.git
-            GIT_TAG        ae721c50eaf761660b4f90cc590453cdb0c2acd0
+            GIT_TAG        5c205738c191bcb0abc65c4febfa9bd25ff35234
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/"
         )
         FetchContent_MakeAvailable(Stb)
@@ -222,7 +222,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             cgltf
             GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-            GIT_TAG        v1.13
+            GIT_TAG        v1.14
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/"
         )
         FetchContent_MakeAvailable(cgltf)
@@ -234,9 +234,9 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.0
+        GIT_TAG        1.0.1
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
-        FIND_PACKAGE_ARGS 1.0.0 NAMES glm
+        FIND_PACKAGE_ARGS NAMES glm
     )
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
         set(GLM_ENABLE_SIMD_AVX2 ON CACHE BOOL "")
@@ -268,7 +268,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-        GIT_TAG        v1.0.8
+        GIT_TAG        v1.0.10
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/"
         FIND_PACKAGE_ARGS NAMES tinyexr
     )
@@ -293,7 +293,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-            GIT_TAG        v4.3.1
+            GIT_TAG        v4.3.2
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
             FIND_PACKAGE_ARGS NAMES Ktx
         )
@@ -308,7 +308,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             vulkan-headers
             GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-            GIT_TAG        v1.3.278
+            GIT_TAG        v1.4.307
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/"
             FIND_PACKAGE_ARGS NAMES VulkanHeaders
         )
