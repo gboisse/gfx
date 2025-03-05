@@ -102,6 +102,7 @@ class GfxBuffer { GFX_INTERNAL_NAMED_HANDLE(GfxBuffer); uint64_t size; uint32_t 
 GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data = nullptr, GfxCpuAccess cpu_access = kGfxCpuAccess_None);
 GfxBuffer gfxCreateBufferRange(GfxContext context, GfxBuffer buffer, uint64_t byte_offset, uint64_t size = 0);  // fast path for (sub-)allocating during a frame
 GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer);
+GfxResult gfxSwapBuffer(GfxContext context, GfxBuffer &buf1, GfxBuffer &buf2);
 
 void *gfxBufferGetData(GfxContext context, GfxBuffer buffer);
 
@@ -153,6 +154,7 @@ GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t 
 GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
+GfxResult gfxSwapTexture(GfxContext context, GfxTexture &tex1, GfxTexture &tex2);
 
 //!
 //! Helper functions.
