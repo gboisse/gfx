@@ -2729,6 +2729,7 @@ private:
         return kGfxResult_NoError;
     }
 
+#ifdef GFX_ENABLE_SCENE_KTX
     static inline KTX_error_code IterateKtxImage(int32_t, int32_t, int32_t, int32_t, int32_t,
         ktx_uint64_t faceLodSize, void *pixels, void *userdata)
     {
@@ -2847,6 +2848,7 @@ private:
         ktxTexture_Destroy((ktxTexture*)ktx_texture);
         return kGfxResult_NoError;
     }
+#endif
 
     GfxResult importExr(GfxScene const& scene, char const* asset_file)
     {
