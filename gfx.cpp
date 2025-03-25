@@ -1932,6 +1932,18 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult swapBuffer(GfxBuffer& buf1, GfxBuffer& buf2)
+    {
+        std::swap(buf1.handle, buf2.handle);
+        std::swap(buf1.size, buf2.size);
+        std::swap(buf1.stride, buf2.stride);
+        std::swap(buf1.cpu_access, buf2.cpu_access);
+        Buffer &gfx_buf1 = buffers_[buf1], &gfx_buf2 = buffers_[buf2];
+        gfx_buf1.Object::flags_ &= ~Object::kFlag_Named;
+        gfx_buf2.Object::flags_ &= ~Object::kFlag_Named;
+        return kGfxResult_NoError;
+    }
+
     void *getBufferData(GfxBuffer const &buffer)
     {
         if(!buffer_handles_.has_handle(buffer.handle))
@@ -2150,6 +2162,22 @@ public:
         collect(textures_[texture]);    // release resources
         textures_.erase(texture);   // destroy texture object
         texture_handles_.free_handle(texture.handle);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult swapTexture(GfxTexture &tex1, GfxTexture &tex2)
+    {
+        std::swap(tex1.handle, tex2.handle);
+        std::swap(tex1.width, tex2.width);
+        std::swap(tex1.height, tex2.height);
+        std::swap(tex1.depth, tex2.depth);
+        std::swap(tex1.format, tex2.format);
+        std::swap(tex1.mip_levels, tex2.mip_levels);
+        std::swap(tex1.type, tex2.type);
+        std::swap(tex1.clear_value, tex2.clear_value);
+        Texture &gfx_tex1 = textures_[tex1], &gfx_tex2 = textures_[tex2];
+        gfx_tex1.Object::flags_ &= ~Object::kFlag_Named;
+        gfx_tex2.Object::flags_ &= ~Object::kFlag_Named;
         return kGfxResult_NoError;
     }
 
@@ -9746,6 +9774,13 @@ GfxResult gfxDestroyBuffer(GfxContext context, GfxBuffer buffer)
     return gfx->destroyBuffer(buffer);
 }
 
+GfxResult gfxSwapBuffer(GfxContext context, GfxBuffer &buf1, GfxBuffer &buf2)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->swapBuffer(buf1, buf2);
+}
+
 void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9798,6 +9833,13 @@ GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyTexture(texture);
+}
+
+GfxResult gfxSwapTexture(GfxContext context, GfxTexture &tex1, GfxTexture &tex2)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->swapTexture(tex1, tex2);
 }
 
 GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
