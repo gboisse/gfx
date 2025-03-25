@@ -9015,6 +9015,7 @@ private:
         shader_args.push_back(L"-Wno-uninitialized");
         shader_args.push_back(L"-Wno-conditional-uninitialized");
         shader_args.push_back(L"-Wno-sometimes-uninitialized");
+        shader_args.push_back(L"-disable-payload-qualifiers");
         shader_args.push_back(L"-fdiagnostics-format=msvc");
         if(experimental_shaders_)
         {
