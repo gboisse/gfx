@@ -23,6 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 
 #include "gfx.h"
+#include "gfx_internal_types.h"
 
 #include <map>                  // std::map
 #include <deque>                // std::deque
@@ -9800,6 +9801,14 @@ GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
     return gfx->destroyTexture(texture);
 }
 
+uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height, uint32_t depth)
+{
+    uint32_t mip_count = 0;
+    uint32_t mip_size  = GFX_MAX(width, GFX_MAX(height, depth));
+    while(mip_size >= 1) { mip_size >>= 1; ++mip_count; }
+    return mip_count;
+}
+
 GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
 {
     GfxSamplerState const sampler_state = {};
@@ -10029,6 +10038,11 @@ GfxResult gfxDrawStateSetPrimitiveTopologyType(GfxDrawState draw_state, D3D12_PR
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
 {
     return GfxInternal::SetDrawStateBlendMode(draw_state, src_blend, dst_blend, blend_op, src_blend_alpha, dst_blend_alpha, blend_op_alpha);
+}
+
+GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state)
+{
+    return gfxDrawStateSetBlendMode(draw_state, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 }
 
 GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)

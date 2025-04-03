@@ -23,6 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 
 #include "gfx_imgui.h"
+#include "gfx_internal_types.h"
 
 #ifdef GFX_IMGUI_SOURCE
 #ifdef _MSC_VER
