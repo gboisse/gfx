@@ -10,7 +10,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 add_library(gfx STATIC)
 
-target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h gfx.cpp gfx_window.cpp)
+target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_internal_types.h gfx_window.h gfx_core.cpp gfx_internal_types.cpp gfx.cpp gfx_window.cpp)
 if(GFX_ENABLE_GUI)
     target_sources(gfx PRIVATE gfx_imgui.h gfx_imgui.cpp)
 endif()
@@ -281,7 +281,7 @@ if(GFX_ENABLE_SCENE)
         #tinyexr cmake is currently broken when not using miniz
         target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
         # Workaround compilation failures with current version
-        if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")        
+        if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
             target_compile_options(tinyexr PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-sign-conversion -Wno-nonportable-system-include-path -Wno-tautological-type-limit-compare -Wno-old-style-cast>)
         endif()
         target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr")
