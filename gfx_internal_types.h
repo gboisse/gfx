@@ -313,22 +313,22 @@ class GfxFreelist
     GFX_NON_COPYABLE(GfxFreelist);
 
 public:
-    inline GfxFreelist();
-    inline explicit GfxFreelist(char const *name);
-    inline ~GfxFreelist();
+    GfxFreelist();
+    explicit GfxFreelist(char const *name);
+    ~GfxFreelist();
 
-    inline bool empty() const;
+    bool empty() const;
 
-    inline uint32_t allocate_slot();
-    inline uint32_t allocate_slots(uint32_t slot_count);
-    inline void     free_slot(uint32_t slot);
-    inline uint32_t size() const;
-    inline void     clear();
+    uint32_t allocate_slot();
+    uint32_t allocate_slots(uint32_t slot_count);
+    void     free_slot(uint32_t slot);
+    uint32_t size() const;
+    void     clear();
 
-    inline uint32_t calculate_free_slot_count() const;
+    uint32_t calculate_free_slot_count() const;
 
 protected:
-    inline void grow(uint32_t slot_count = 1);
+    void grow(uint32_t slot_count = 1);
 
     char     *name_;
     uint32_t *slots_;
@@ -346,22 +346,22 @@ class GfxHandles
     GFX_NON_COPYABLE(GfxHandles);
 
 public:
-    inline GfxHandles();
-    inline explicit GfxHandles(char const *name);
-    inline ~GfxHandles();
+    GfxHandles();
+    explicit GfxHandles(char const *name);
+    ~GfxHandles();
 
-    inline bool empty() const;
+    bool empty() const;
 
-    inline uint64_t allocate_handle();
-    inline bool     acquire_handle(uint64_t handle);
-    inline uint64_t get_handle(uint32_t index) const;
-    inline bool     has_handle(uint64_t handle) const;
-    inline bool     free_handle(uint64_t handle);
+    uint64_t allocate_handle();
+    bool     acquire_handle(uint64_t handle);
+    uint64_t get_handle(uint32_t index) const;
+    bool     has_handle(uint64_t handle) const;
+    bool     free_handle(uint64_t handle);
 
-    inline uint32_t calculate_free_handle_count() const;
+    uint32_t calculate_free_handle_count() const;
 
 protected:
-    inline void grow(uint32_t handle_count = 1);
+    void grow(uint32_t handle_count = 1);
 
     char     *name_;
     uint64_t *handles_;
