@@ -64,7 +64,8 @@ SOFTWARE.
 #    pragma warning(disable : 4211) // nonstandard extension used: redefined extern to static
 #endif
 #include <D3D12MemAlloc.h>      // D3D12 memory allocator
-#include <WinPixEventRuntime/pix3.h>
+#include <pix3.h>
+#include <AmdPix3.h>
 #ifdef __clang__
 #    pragma clang diagnostic pop
 #elif defined(__GNUC__)
