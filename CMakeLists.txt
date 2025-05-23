@@ -92,9 +92,9 @@ set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocat
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        1509c7819695b51ad6f2b49b9f849ec7e2f821fe
+    GIT_TAG        v3.0.1
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
-    FIND_PACKAGE_ARGS NAMES d3d12-memory-allocator
+    FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
 )
 FetchContent_MakeAvailable(D3D12MemoryAllocator)
 if(NOT D3D12MemoryAllocator_FOUND)
@@ -102,7 +102,7 @@ if(NOT D3D12MemoryAllocator_FOUND)
     target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
     set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
 else()
-    target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator)
+    target_link_libraries(gfx PRIVATE GPUOpen::D3D12MemoryAllocator)
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
@@ -161,30 +161,37 @@ endif()
 set(GFX_PIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime")
 set(GFX_PIX_AMD_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/AmdDxExt")
 FetchContent_Declare(
-    WinPixEventRuntime
+    winpixevent
     URL            "https://www.nuget.org/api/v2/package/WinPixEventRuntime/1.0.240308001"
     SOURCE_DIR     "${GFX_PIX_PATH}"
+    FIND_PACKAGE_ARGS NAMES winpixevent
 )
-FetchContent_MakeAvailable(WinPixEventRuntime)
-file(READ "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" PIXE_FILE_CONTENTS)
-string(REPLACE "#define PIX_CONTEXT_EMIT_CPU_EVENTS" "# define PIX_CONTEXT_EMIT_CPU_EVENTS\n# include \"AmdPix3.h\"\n# define PIX_AMD_EXT\n" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-string(REPLACE " PIXBeginEventOnContextCpu(destination" " RgpPIXBeginEventOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-string(REPLACE " PIXSetMarkerOnContextCpu(destination" " RgpPIXSetMarkerOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-string(REPLACE "destination = PIXEndEventOnContextCpu(" "RgpPIXEndEventOnContextCpu(destination, " PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-file(WRITE "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" "${PIXE_FILE_CONTENTS}")
-add_library(WinPixEventRuntime SHARED IMPORTED)
-set_target_properties(WinPixEventRuntime PROPERTIES
-    IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
-    IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
-    INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include;${GFX_PIX_AMD_PATH}"
-)
-target_link_libraries(gfx PRIVATE WinPixEventRuntime)
+FetchContent_MakeAvailable(winpixevent)
+if(NOT winpixevent_FOUND)
+    file(READ "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" PIXE_FILE_CONTENTS)
+    string(REPLACE "#define PIX_CONTEXT_EMIT_CPU_EVENTS" "# define PIX_CONTEXT_EMIT_CPU_EVENTS\n# include \"AmdPix3.h\"\n# define PIX_AMD_EXT\n" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    string(REPLACE " PIXBeginEventOnContextCpu(destination" " RgpPIXBeginEventOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    string(REPLACE " PIXSetMarkerOnContextCpu(destination" " RgpPIXSetMarkerOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    string(REPLACE "destination = PIXEndEventOnContextCpu(" "RgpPIXEndEventOnContextCpu(destination, " PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    file(WRITE "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" "${PIXE_FILE_CONTENTS}")
+    add_library(WinPixEventRuntime SHARED IMPORTED)
+    set_target_properties(WinPixEventRuntime PROPERTIES
+        IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
+        IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include;${GFX_PIX_AMD_PATH}"
+    )
+    target_include_directories(gfx PRIVATE "${GFX_PIX_PATH}")
+    target_link_libraries(gfx PRIVATE WinPixEventRuntime)
+else()
+    target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/AmdDxExt")
+    target_link_libraries(gfx PRIVATE Microsoft::WinPixEventRuntime)
+endif()
 
 if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.91.8
+        GIT_TAG        v1.91.9
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
