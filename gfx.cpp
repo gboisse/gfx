@@ -454,7 +454,7 @@ class GfxInternal
     struct RaytracingPrimitive
     {
         uint32_t index_ = 0;
-        float transform_[16] = {};
+        float transform_[12] = {};
         uint32_t instance_id_ = 0;
         uint8_t instance_mask_ = 0xFFu;
         uint32_t instance_contribution_to_hit_group_index_ = 0;
@@ -2277,10 +2277,8 @@ public:
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
             Buffer const &gfx_buffer = buffers_[buffer];
             for(uint32_t row = 0; row < 3; ++row)
-                for(uint32_t col = 0; col < 3; ++col)
-                    instance_desc.Transform[row][col] = gfx_raytracing_primitive.transform_[4 * row + col];
-            for(uint32_t j = 0; j < 3; ++j)
-                instance_desc.Transform[j][3] = gfx_raytracing_primitive.transform_[4 * j + 3];
+                for(uint32_t col = 0; col < 4; ++col)
+                    instance_desc.Transform[row][col] = gfx_raytracing_primitive.transform_[4 * col + row];
             instance_desc.InstanceID = gfx_raytracing_primitive.instance_id_;
             instance_desc.InstanceMask = gfx_raytracing_primitive.instance_mask_;
             instance_desc.InstanceContributionToHitGroupIndex = gfx_raytracing_primitive.instance_contribution_to_hit_group_index_;
@@ -2552,17 +2550,17 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive);
     }
 
-    GfxResult setRaytracingPrimitiveTransform(GfxRaytracingPrimitive const &raytracing_primitive, float const *row_major_4x4_transform)
+    GfxResult setRaytracingPrimitiveTransform(GfxRaytracingPrimitive const &raytracing_primitive, float const *col_major_3x4_transform)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set transform on an invalid raytracing primitive object");
-        if(row_major_4x4_transform == nullptr)
+        if(col_major_3x4_transform == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot pass `nullptr' as the transform of a raytracing primitive object");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
-        memcpy(gfx_raytracing_primitive.transform_, row_major_4x4_transform, sizeof(gfx_raytracing_primitive.transform_));
+        memcpy(gfx_raytracing_primitive.transform_, col_major_3x4_transform, sizeof(gfx_raytracing_primitive.transform_));
         return kGfxResult_NoError;
     }
 
@@ -9931,11 +9929,11 @@ GfxResult gfxRaytracingPrimitiveBuildProcedural(GfxContext context, GfxRaytracin
     return gfx->buildRaytracingPrimitiveProcedural(raytracing_primitive, aabb_buffer, aabb_stride, build_flags);
 }
 
-GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform)
+GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *col_major_3x4_transform)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->setRaytracingPrimitiveTransform(raytracing_primitive, row_major_4x4_transform);
+    return gfx->setRaytracingPrimitiveTransform(raytracing_primitive, col_major_3x4_transform);
 }
 
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id)
