@@ -205,7 +205,11 @@ uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAcceleration
 
 enum GfxBuildRaytracingPrimitiveFlag
 {
-    kGfxBuildRaytracingPrimitiveFlag_Opaque = 1 << 0
+    kGfxBuildRaytracingPrimitiveFlag_Opaque = 1 << 0,
+    kGfxBuildRaytracingPrimitiveFlag_Updateable = 1 << 1,
+    kGfxBuildRaytracingPrimitiveFlag_FastTrace = 1 << 2,
+    kGfxBuildRaytracingPrimitiveFlag_FastBuild = 1 << 3,
+    kGfxBuildRaytracingPrimitiveFlag_MinMemory = 1 << 4,
 };
 typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 
