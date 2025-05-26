@@ -1,0 +1,11 @@
+build
+.DS_Store
+imgui.ini
+.vscode
+.vs
+out/
+cache/
+.cache/
+shader_cache/
+shader_pdb/
+compile_commands.json

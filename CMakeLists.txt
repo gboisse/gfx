@@ -178,9 +178,8 @@ if(NOT winpixevent_FOUND)
     set_target_properties(WinPixEventRuntime PROPERTIES
         IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
         IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
-        INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include;${GFX_PIX_AMD_PATH}"
+        INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include/WinPixEventRuntime;${GFX_PIX_AMD_PATH}"
     )
-    target_include_directories(gfx PRIVATE "${GFX_PIX_PATH}/include/WinPixEventRuntime")
     target_link_libraries(gfx PRIVATE WinPixEventRuntime)
 else()
     target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/AmdDxExt")
@@ -253,9 +252,8 @@ if(GFX_ENABLE_SCENE)
     set(GLM_ENABLE_CXX_17 ON CACHE BOOL "")
     set(GLM_QUIET ON CACHE BOOL "")
     FetchContent_MakeAvailable(glm)
-    target_include_directories(gfx PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm)
-    target_compile_definitions(gfx PUBLIC GLM_FORCE_XYZW_ONLY)
-    target_link_libraries(gfx PUBLIC glm)
+    target_compile_definitions(gfx PRIVATE GLM_FORCE_XYZW_ONLY)
+    target_link_libraries(gfx PUBLIC glm::glm)
     if(NOT glm_FOUND)
         set_target_properties(glm PROPERTIES FOLDER "${GFX_TP_FOLDER}")
     endif()
@@ -303,7 +301,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-            GIT_TAG        v4.3.2
+            GIT_TAG        v4.4.0
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
             FIND_PACKAGE_ARGS NAMES Ktx
         )
