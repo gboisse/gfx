@@ -302,7 +302,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-            GIT_TAG        v4.3.2
+            GIT_TAG        v4.4.0
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
             FIND_PACKAGE_ARGS NAMES Ktx
         )
