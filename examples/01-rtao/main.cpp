@@ -21,7 +21,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#include "gfx_internal_types.h"
+
 #include "gfx_window.h"
 #include "gfx_scene.h"
 #include "gfx_imgui.h"
@@ -60,9 +60,9 @@ int32_t main()
     gfxImGuiInitialize(gfx);
 
     // Upload the scene to GPU memory
-    GfxArray<GfxBuffer> index_buffers;
-    GfxArray<GfxBuffer> vertex_buffers;
-    GfxArray<GfxTexture> albedo_buffers;
+    std::vector<GfxBuffer> index_buffers;
+    std::vector<GfxBuffer> vertex_buffers;
+    std::vector<GfxTexture> albedo_buffers;
 
     gfxSceneImport(scene, "data/sponza.obj");   // import our scene
 
@@ -89,8 +89,14 @@ int32_t main()
         GfxBuffer index_buffer  = gfxCreateBuffer<uint32_t>(gfx, index_count, mesh_ref->indices.data());
         GfxBuffer vertex_buffer = gfxCreateBuffer<Vertex>(gfx, vertex_count, vertices.data());
 
-        index_buffers.insert(mesh_ref, index_buffer);
-        vertex_buffers.insert(mesh_ref, vertex_buffer);
+        uint32_t const mesh_id = (uint32_t)mesh_ref;
+        if(mesh_id >= index_buffers.size())
+        {
+            index_buffers.resize(mesh_id + 1);
+            vertex_buffers.resize(mesh_id + 1);
+        }
+        index_buffers[mesh_id] = index_buffer;
+        vertex_buffers[mesh_id] = vertex_buffer;
     }
 
     for(uint32_t i = 0; i < material_count; ++i)
@@ -112,7 +118,12 @@ int32_t main()
             gfxDestroyBuffer(gfx, upload_buffer);
         }
 
-        albedo_buffers.insert(material_ref, albedo_buffer);
+        uint32_t const material_id = (uint32_t)material_ref;
+        if(material_id >= albedo_buffers.size())
+        {
+            albedo_buffers.resize(material_id + 1);
+        }
+        albedo_buffers[material_id] = albedo_buffer;
     }
 
     GfxAccelerationStructure rt_scene = gfxCreateAccelerationStructure(gfx);
@@ -124,7 +135,8 @@ int32_t main()
 
         GfxConstRef<GfxInstance> instance_ref = gfxSceneGetInstanceHandle(scene, i);
 
-        gfxRaytracingPrimitiveBuild(gfx, rt_meshes[i], index_buffers[instance_ref->mesh], vertex_buffers[instance_ref->mesh]);
+        uint32_t const mesh_id = (uint32_t)instance_ref->mesh;
+        gfxRaytracingPrimitiveBuild(gfx, rt_meshes[i], index_buffers[mesh_id], vertex_buffers[mesh_id]);
     }
 
     gfxAccelerationStructureUpdate(gfx, rt_scene);
@@ -231,12 +243,12 @@ int32_t main()
             GfxInstance const &instance = gfxSceneGetInstances(scene)[i];
 
             if(instance.material)
-                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[instance.material]);
+                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[(uint32_t)instance.material]);
             else
                 gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", GfxTexture());    // will return black
 
-            gfxCommandBindIndexBuffer(gfx, index_buffers[instance.mesh]);
-            gfxCommandBindVertexBuffer(gfx, vertex_buffers[instance.mesh]);
+            gfxCommandBindIndexBuffer(gfx, index_buffers[(uint32_t)instance.mesh]);
+            gfxCommandBindVertexBuffer(gfx, vertex_buffers[(uint32_t)instance.mesh]);
 
             gfxCommandDrawIndexed(gfx, (uint32_t)instance.mesh->indices.size());
         }
