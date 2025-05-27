@@ -35,7 +35,6 @@ SOFTWARE.
 #include <stb_image.h>
 #include <tinyexr.h>
 #define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #ifdef GFX_ENABLE_SCENE_KTX
