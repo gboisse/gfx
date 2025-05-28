@@ -454,7 +454,7 @@ class GfxInternal
     struct RaytracingPrimitive
     {
         uint32_t index_ = 0;
-        float transform_[12] = {};
+        float transform_[3][4] = {};
         uint32_t instance_id_ = 0;
         uint8_t instance_mask_ = 0xFFu;
         uint32_t instance_contribution_to_hit_group_index_ = 0;
@@ -2277,9 +2277,7 @@ public:
                 continue;   // no valid BVH memory, probably wasn't built
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
             Buffer const &gfx_buffer = buffers_[buffer];
-            for(uint32_t row = 0; row < 3; ++row)
-                for(uint32_t col = 0; col < 4; ++col)
-                    instance_desc.Transform[row][col] = gfx_raytracing_primitive.transform_[4 * col + row];
+            memcpy(instance_desc.Transform, gfx_raytracing_primitive.transform_, sizeof(instance_desc.Transform));
             instance_desc.InstanceID = gfx_raytracing_primitive.instance_id_;
             instance_desc.InstanceMask = gfx_raytracing_primitive.instance_mask_;
             instance_desc.InstanceContributionToHitGroupIndex = gfx_raytracing_primitive.instance_contribution_to_hit_group_index_;
@@ -2366,7 +2364,7 @@ public:
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
         gfx_raytracing_primitive.index_ = (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
         for(uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
-            gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
+            ((float*)gfx_raytracing_primitive.transform_)[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
         gfx_acceleration_structure.raytracing_primitives_.push_back(raytracing_primitive);
         gfx_raytracing_primitive.data_.triangles_.acceleration_structure_ = acceleration_structure;
         gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
@@ -2407,7 +2405,7 @@ public:
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_.insert(cloned_raytracing_primitive);
         gfx_raytracing_primitive.index_ = (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
         for(uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
-            gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
+            ((float*)gfx_raytracing_primitive.transform_)[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
         gfx_acceleration_structure.raytracing_primitives_.push_back(cloned_raytracing_primitive);
         gfx_raytracing_primitive.instance_id_ = cloned_raytracing_primitive.getIndex();
         gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Instance;
@@ -2437,7 +2435,7 @@ public:
         AccelerationStructure &gfx_acceleration_structure = acceleration_structures_[acceleration_structure];
         gfx_raytracing_primitive.index_ = (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size();
         for(uint32_t i = 0; i < ARRAYSIZE(gfx_raytracing_primitive.transform_); ++i)
-            gfx_raytracing_primitive.transform_[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
+            ((float*)gfx_raytracing_primitive.transform_)[i] = ((i & 3) == (i >> 2) ? 1.0f : 0.0f);
         gfx_acceleration_structure.raytracing_primitives_.push_back(raytracing_primitive);
         gfx_raytracing_primitive.data_.procedural_.acceleration_structure_ = acceleration_structure;
         gfx_raytracing_primitive.instance_id_ = raytracing_primitive.getIndex();
@@ -2561,7 +2559,9 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot pass `nullptr' as the transform of a raytracing primitive object");
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[raytracing_primitive];
         GFX_TRY(updateRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive));
-        memcpy(gfx_raytracing_primitive.transform_, col_major_3x4_transform, sizeof(gfx_raytracing_primitive.transform_));
+        for(uint32_t row = 0; row < 3; ++row)
+            for(uint32_t col = 0; col < 4; ++col)
+                gfx_raytracing_primitive.transform_[row][col] = col_major_3x4_transform[4 * col + row];
         return kGfxResult_NoError;
     }
 
