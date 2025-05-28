@@ -2263,7 +2263,7 @@ public:
         if(gpu_addr == 0)
             return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate for updating acceleration structure object with %u raytracing primitives", (uint32_t)gfx_acceleration_structure.raytracing_primitives_.size());
         active_raytracing_primitives_.reserve(GFX_MAX(active_raytracing_primitives_.capacity(), gfx_acceleration_structure.raytracing_primitives_.size()));
-        active_raytracing_primitives_.clear();  // compact away discarded raytracing primitives
+        active_raytracing_primitives_.resize(0);  // compact away discarded raytracing primitives
         for(size_t i = 0; i < gfx_acceleration_structure.raytracing_primitives_.size(); ++i)
         {
             GfxRaytracingPrimitive const &raytracing_primitive = gfx_acceleration_structure.raytracing_primitives_[i];
@@ -9439,7 +9439,7 @@ private:
         if(resource_barriers_.empty()) return;  // no pending barriers
         command_list_->ResourceBarrier((uint32_t)resource_barriers_.size(),
                                        resource_barriers_.data());
-        resource_barriers_.clear();
+        resource_barriers_.resize(0);
     }
 
     GfxResult acquireSwapChainBuffers()
