@@ -1875,7 +1875,7 @@ public:
         *gfx_buffer.reference_count_ = 1;   // retain
         gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
         GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
-        *gfx_buffer.resource_state_ = resource_state;
+        *gfx_buffer.resource_state_ = (resource_state != D3D12_RESOURCE_STATE_COMMON ? resource_state : D3D12_RESOURCE_STATE_COPY_DEST);
         if(data != nullptr && cpu_access != kGfxCpuAccess_Write)
         {
             GfxBuffer const upload_buffer = createBuffer(size, data, kGfxCpuAccess_Write);
@@ -6810,6 +6810,7 @@ private:
                             }
                         }
                     }
+                    transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
                     command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset, upload_buffer.resource_,
                         src_offset, upload_buffer_offset - src_offset);
                     sbt_record.commited_id_ = sbt_record.id_;
