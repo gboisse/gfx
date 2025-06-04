@@ -1838,8 +1838,8 @@ public:
         switch(cpu_access)
         {
         case kGfxCpuAccess_Read:
-            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             allocation_desc.HeapType = D3D12_HEAP_TYPE_READBACK;
+            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             break;
         case kGfxCpuAccess_Write:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
@@ -6812,11 +6812,14 @@ private:
                             }
                         }
                     }
+                    transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+                    submitPipelineBarriers();
                     command_list_->CopyBufferRegion(sbt_buffer.resource_, dst_offset, upload_buffer.resource_,
                         src_offset, upload_buffer_offset - src_offset);
                     sbt_record.commited_id_ = sbt_record.id_;
                 }
                 destroyBuffer(upload_gfx_buffer);
+                transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             }
             state_object_properties->Release();
         }
