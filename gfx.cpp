@@ -1838,8 +1838,8 @@ public:
         switch(cpu_access)
         {
         case kGfxCpuAccess_Read:
-            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             allocation_desc.HeapType = D3D12_HEAP_TYPE_READBACK;
+            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             break;
         case kGfxCpuAccess_Write:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
@@ -6761,6 +6761,20 @@ private:
             sbt->kernel_ = bound_kernel_; // update bound kernel
             for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
             {
+                Buffer &sbt_buffer = buffers_[sbt->sbt_buffers_[i]];
+                bool    transition = false;
+                for(auto &shader_record : sbt->shader_records_[i])
+                {
+                    Sbt::ShaderRecord &sbt_record = shader_record.second;
+                    if(sbt_record.id_ == sbt_record.commited_id_ && !invalidate_sbt_descriptors && !invalidate_sbt_parameters) continue;
+                    transition = true;
+                }
+                if(transition)
+                    transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+            }
+            submitPipelineBarriers();
+            for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+            {
                 auto last_record_it = sbt->shader_records_[i].rbegin();
                 if(last_record_it == sbt->shader_records_[i].rend()) continue;
                 uint32_t record_count = last_record_it->first + 1;
@@ -6817,6 +6831,7 @@ private:
                     sbt_record.commited_id_ = sbt_record.id_;
                 }
                 destroyBuffer(upload_gfx_buffer);
+                transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             }
             state_object_properties->Release();
         }
