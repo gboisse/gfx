@@ -2009,6 +2009,8 @@ public:
         }
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
         gfx_texture.flags_ = flags;
         return texture;
     }
@@ -2060,6 +2062,8 @@ public:
         texture.depth = slice_count;
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
         return texture;
     }
 
@@ -2110,6 +2114,8 @@ public:
         texture.depth = depth;
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
         return texture;
     }
 
@@ -2153,6 +2159,8 @@ public:
         texture.depth = 6;
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
         return texture;
     }
 
@@ -5011,6 +5019,7 @@ public:
             gfx_buffer.transitioned_     = (bool *)gfxMalloc(sizeof(bool));
             GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
             *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
             *gfx_buffer.transitioned_   = false;
             transitioned |= transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_DEST, true);
             if(transitioned) submitPipelineBarriers();
@@ -6963,6 +6972,9 @@ private:
             texture.Object::flags_ &= ~Object::kFlag_Named;
             texture.allocation_ = allocation;
             texture.resource_ = resource;
+            texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.transitioned_ = false;
             transition |= transitionResource(texture, D3D12_RESOURCE_STATE_COPY_DEST, true);
             if(transition) submitPipelineBarriers();
             command_list_->CopyResource(resource, previous_resource);
@@ -9615,7 +9627,7 @@ private:
             resource_desc.Height = window_height;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to auto-resize texture object(s) to %ux%u", window_width, window_height);
                 break;  // out of memory
@@ -9624,6 +9636,9 @@ private:
             texture.resource_ = resource;
             texture.allocation_ = allocation;
             texture.Object::flags_ &= ~Object::kFlag_Named;
+            texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.transitioned_ = false;
             for(uint32_t j = 0; j < ARRAYSIZE(texture.dsv_descriptor_slots_); ++j)
             {
                 texture.dsv_descriptor_slots_[j].resize(resource_desc.DepthOrArraySize);
@@ -9636,7 +9651,6 @@ private:
                 for(size_t k = 0; k < texture.rtv_descriptor_slots_[j].size(); ++k)
                     texture.rtv_descriptor_slots_[j][k] = 0xFFFFFFFFu;
             }
-            texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
