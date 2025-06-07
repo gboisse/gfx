@@ -406,10 +406,9 @@ class GfxInternal
         ID3D12Resource *resource_ = nullptr;
         uint32_t *reference_count_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
-        D3D12_RESOURCE_STATES resource_state_ = (D3D12_RESOURCE_STATES)UINT_MAX;
+        D3D12_RESOURCE_STATES *resource_state_ = nullptr;
         D3D12_RESOURCE_STATES initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
-        uint32_t parent_ = UINT_MAX;
-        bool transitioned_ = false;
+        bool *transitioned_ = nullptr;
     };
     GfxArray<Buffer> buffers_;
     GfxHandles buffer_handles_;
@@ -1886,7 +1885,11 @@ public:
         gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
         *gfx_buffer.reference_count_ = 1;   // retain
-        gfx_buffer.resource_state_ = resource_state;
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
+        gfx_buffer.transitioned_ = (bool *)gfxMalloc(sizeof(bool));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
+        *gfx_buffer.resource_state_ = resource_state;
+        *gfx_buffer.transitioned_ = false;
         gfx_buffer.initial_resource_state_ = resource_state;
         if(data != nullptr && cpu_access != kGfxCpuAccess_Write)
         {
@@ -1925,8 +1928,6 @@ public:
         GFX_ASSERT(gfx_buffer_range.resource_ != nullptr && gfx_buffer_range.reference_count_ != nullptr);
         gfx_buffer_range.data_offset_ += byte_offset;
         ++*gfx_buffer_range.reference_count_;   // retain
-        gfx_buffer_range.parent_ = buffer;
-        gfx_buffer_range.transitioned_ = true; // force transitions
         buffer_range.cpu_access = buffer.cpu_access;
         strcpy(buffer_range.name, buffer.name);
         buffer_range.stride = buffer.stride;
@@ -4566,8 +4567,8 @@ public:
         for(uint32_t i = 0; i < buffers_.size(); ++i)
         {
             auto *buffer = buffers_.at(i);
-            if(buffer != nullptr && buffer->initial_resource_state_ == D3D12_RESOURCE_STATE_COMMON && !buffer->transitioned_ && (buffer->resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == buffer->resource_state_)
-                buffer->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            if(buffer != nullptr && buffer->initial_resource_state_ == D3D12_RESOURCE_STATE_COMMON && !*buffer->transitioned_ && (*buffer->resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == *buffer->resource_state_)
+                *buffer->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         }
         for(uint32_t i = 0; i < textures_.size(); ++i)
         {
@@ -4582,7 +4583,7 @@ public:
                 auto *buffer = buffers_.at(i);
                 if(buffer != nullptr)
                 {
-                    dbgCommandList->AssertResourceState(buffer->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, buffer->resource_state_);
+                    dbgCommandList->AssertResourceState(buffer->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *buffer->resource_state_);
                 }
             }
             for(uint32_t i = 0; i < textures_.size(); ++i)
@@ -4807,8 +4808,12 @@ public:
         gfx_buffer.flags_ = Object::kFlag_Named;
         gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         *gfx_buffer.reference_count_ = 1;   // retain
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
+        gfx_buffer.transitioned_ = (bool *)gfxMalloc(sizeof(bool));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
+        *gfx_buffer.resource_state_ = resource_state;
+        *gfx_buffer.transitioned_ = false;
         gfx_buffer.initial_resource_state_ = resource_state;
-        gfx_buffer.resource_state_ = resource_state;
         gfx_buffer.resource_ = resource;
         resource->AddRef(); // retain
         return buffer;
@@ -4895,8 +4900,12 @@ public:
         gfx_buffer.data_offset_ = byte_offset;
         gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         *gfx_buffer.reference_count_ = 1;   // retain
+        gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
+        gfx_buffer.transitioned_ = (bool *)gfxMalloc(sizeof(bool));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
+        *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        *gfx_buffer.transitioned_ = false;
         gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
-        gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
         gfx_buffer.resource_ = resource;
         resource->AddRef(); // retain
         return acceleration_structure;
@@ -4934,7 +4943,7 @@ public:
         if(!buffer_handles_.has_handle(buffer.handle))
             return D3D12_RESOURCE_STATE_COMMON; // invalid buffer object
         Buffer const &gfx_buffer = buffers_[buffer];
-        return gfx_buffer.resource_state_;
+        return *gfx_buffer.resource_state_;
     }
 
     D3D12_RESOURCE_STATES getTextureResourceState(GfxTexture const &texture)
@@ -5016,7 +5025,11 @@ public:
             gfx_buffer.flags_ &= ~Object::kFlag_Named;
             gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
             *gfx_buffer.reference_count_ = 1;   // retain
-            gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+            gfx_buffer.resource_state_   = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
+            gfx_buffer.transitioned_     = (bool *)gfxMalloc(sizeof(bool));
+            GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
+            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            *gfx_buffer.transitioned_   = false;
         }
         WCHAR wname[ARRAYSIZE(buffer.name)] = {};
         WindowsSecurityAttributes security_attributes;
@@ -5623,19 +5636,21 @@ private:
             if(--*buffer.reference_count_ > 0)
                 return; // still in use
         }
-        if(buffer.isInterop() && command_list_ != nullptr && buffer.resource_ != nullptr && buffer.resource_state_ != UINT_MAX && buffer.resource_state_ != buffer.initial_resource_state_)
+        if(buffer.isInterop() && command_list_ != nullptr && buffer.resource_ != nullptr && buffer.resource_state_ != nullptr && *buffer.resource_state_ != buffer.initial_resource_state_)
         {
             D3D12_RESOURCE_BARRIER resource_barrier = {};
             resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
             resource_barrier.Transition.pResource = buffer.resource_;
-            resource_barrier.Transition.StateBefore = buffer.resource_state_;
+            resource_barrier.Transition.StateBefore = *buffer.resource_state_;
             resource_barrier.Transition.StateAfter = buffer.initial_resource_state_;
             resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             command_list_->ResourceBarrier(1, &resource_barrier);
         }
         collect(buffer.resource_);
         collect(buffer.allocation_);
+        gfxFree(buffer.resource_state_);
         gfxFree(buffer.reference_count_);
+        gfxFree(buffer.transitioned_);
     }
 
     void collect(Texture const &texture)
@@ -8636,7 +8651,7 @@ private:
                 SetObjectName(buffer, acceleration_structure.name);
                 if(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle))
                     transitionResource(buffers_[raytracing_scratch_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, true);
-                GFX_ASSERT(buffer.resource_state_ == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+                GFX_ASSERT(*buffer.resource_state_ == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
                 if(!invalidate_descriptor) break;   // already up to date
                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                 srv_desc.ViewDimension = D3D12_SRV_DIMENSION_RAYTRACING_ACCELERATION_STRUCTURE;
@@ -8703,7 +8718,7 @@ private:
                         }
                         Buffer &gfx_buffer = buffers_[buffer];
                         SetObjectName(gfx_buffer, buffer.name);
-                        GFX_ASSERT(gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
+                        GFX_ASSERT(*gfx_buffer.resource_state_ == D3D12_RESOURCE_STATE_GENERIC_READ);
                         GFX_ASSERT(gfx_buffer.data_offset_ == GFX_ALIGN(gfx_buffer.data_offset_, 256));
                         cbv_desc.BufferLocation = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
                         cbv_desc.SizeInBytes = GFX_ALIGN((uint32_t)buffer.size, 256);
@@ -9400,9 +9415,9 @@ private:
     bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, bool implicit_allowed = false)
     {
         GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return false;
-        if((buffer.resource_state_ & resource_state) == resource_state)
+        if((*buffer.resource_state_ & resource_state) == resource_state)
         {
-            if(buffer.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+            if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
                 bool already_has_uav_barrier = false;
                 for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
@@ -9423,65 +9438,48 @@ private:
             }
             return false;
         }
-        bool transition_required = true;
-        if(implicit_allowed && !buffer.transitioned_)
+        if(implicit_allowed && !*buffer.transitioned_)
         {
-            if(buffer.resource_state_ == D3D12_RESOURCE_STATE_COMMON)
+            if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_COMMON)
             {
-                buffer.resource_state_ = resource_state;
-                transition_required    = false;
+                *buffer.resource_state_ = resource_state;
+                return false;
             }
-            else if(((buffer.resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == buffer.resource_state_) && ((resource_state & D3D12_RESOURCE_STATE_GENERIC_READ) == resource_state))
+            else if(((*buffer.resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == *buffer.resource_state_) && ((resource_state & D3D12_RESOURCE_STATE_GENERIC_READ) == resource_state))
             {
-                buffer.resource_state_ |= resource_state;
-                transition_required = false;
+                *buffer.resource_state_ |= resource_state;
+                return false;
             }
         }
-        bool transitioned = false;
-        if(transition_required)
+        for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
+            if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == buffer.resource_) ||
+                ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == buffer.resource_))
+            {
+                submitPipelineBarriers();
+                break;  // break barrier batches to avoid debug layer warnings
+            }
+        if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_INDEX_BUFFER &&  // unbind if active index buffer to prevent debug layer errors
+            buffer_handles_.has_handle(bound_index_buffer_.handle) && buffers_[bound_index_buffer_].resource_ == buffer.resource_)
         {
-            for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
-                if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == buffer.resource_) ||
-                   ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == buffer.resource_))
-                {
-                    submitPipelineBarriers();
-                    break;  // break barrier batches to avoid debug layer warnings
-                }
-            if(buffer.resource_state_ == D3D12_RESOURCE_STATE_INDEX_BUFFER &&  // unbind if active index buffer to prevent debug layer errors
-               buffer_handles_.has_handle(bound_index_buffer_.handle) && buffers_[bound_index_buffer_].resource_ == buffer.resource_)
-            {
-                command_list_->IASetIndexBuffer(nullptr);
-                force_install_index_buffer_ = true;
-            }
-            if(buffer.resource_state_ == D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER &&    // unbind if active vertex buffer to prevent debug layer errors
-               buffer_handles_.has_handle(bound_vertex_buffer_.handle) && buffers_[bound_vertex_buffer_].resource_ == buffer.resource_)
-            {
-                command_list_->IASetVertexBuffers(0, 1, nullptr);
-                force_install_vertex_buffer_ = true;
-            }
-            D3D12_RESOURCE_BARRIER resource_barrier = {};
-            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            resource_barrier.Transition.pResource   = buffer.resource_;
-            resource_barrier.Transition.StateBefore = buffer.resource_state_;
-            resource_barrier.Transition.StateAfter  = resource_state;
-            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            resource_barriers_.push_back(resource_barrier);
-            buffer.resource_state_ = resource_state;
-            buffer.transitioned_ = true;
-            transitioned = true;
-            transition_required = false;
+            command_list_->IASetIndexBuffer(nullptr);
+            force_install_index_buffer_ = true;
         }
-        if(!transition_required)
+        if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER &&    // unbind if active vertex buffer to prevent debug layer errors
+            buffer_handles_.has_handle(bound_vertex_buffer_.handle) && buffers_[bound_vertex_buffer_].resource_ == buffer.resource_)
         {
-            auto parent = buffer.parent_;
-            while(parent != UINT_MAX)
-            {
-                auto &parent_buffer           = buffers_[parent];
-                parent_buffer.resource_state_ = buffer.resource_state_;
-                parent                        = parent_buffer.parent_;
-            }
+            command_list_->IASetVertexBuffers(0, 1, nullptr);
+            force_install_vertex_buffer_ = true;
         }
-        return transitioned;
+        D3D12_RESOURCE_BARRIER resource_barrier = {};
+        resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        resource_barrier.Transition.pResource   = buffer.resource_;
+        resource_barrier.Transition.StateBefore = *buffer.resource_state_;
+        resource_barrier.Transition.StateAfter  = resource_state;
+        resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+        resource_barriers_.push_back(resource_barrier);
+        *buffer.resource_state_ = resource_state;
+        *buffer.transitioned_ = true;
+        return true;
     }
 
     bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, bool implicit_allowed = false)
