@@ -104,7 +104,7 @@ class GfxInternal
     ID3D12GraphicsCommandList6 *mesh_command_list_ = nullptr;
     ID3D12CommandAllocator **command_allocators_ = nullptr;
     std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
-    ID3D12DebugCommandList *dbgCommandList = nullptr;
+    ID3D12DebugCommandList *dbg_command_list_ = nullptr;
 
     HANDLE fence_event_ = {};
     uint32_t fence_index_ = 0;
@@ -1253,7 +1253,7 @@ public:
         if(mesh_command_list_ == nullptr) { if(mesh_device_ != nullptr) mesh_device_->Release(); mesh_device_ = nullptr; }
         SetDebugName(command_list_, "gfx_CommandList");
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
-            command_list_->QueryInterface(IID_PPV_ARGS(&dbgCommandList));
+            command_list_->QueryInterface(IID_PPV_ARGS(&dbg_command_list_));
 
         fence_event_ = CreateEvent(nullptr, false, false, nullptr);
         if(!fence_event_)
@@ -1598,10 +1598,10 @@ public:
                     command_allocators_[i]->Release();
         gfxFree(command_allocators_);
         command_allocators_ = nullptr;
-        if(dbgCommandList != nullptr)
+        if(dbg_command_list_ != nullptr)
         {
-            dbgCommandList->Release();
-            dbgCommandList = nullptr;
+            dbg_command_list_->Release();
+            dbg_command_list_ = nullptr;
         }
 
         if(fence_event_)
@@ -4576,14 +4576,14 @@ public:
             if(texture != nullptr && !texture->transitioned_ && (texture->resource_state_ & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) == texture->resource_state_)
                 texture->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         }
-        if(dbgCommandList != nullptr)
+        if(dbg_command_list_ != nullptr)
         {
             for(uint32_t i = 0; i < buffers_.size(); ++i)
             {
                 auto *buffer = buffers_.at(i);
                 if(buffer != nullptr)
                 {
-                    dbgCommandList->AssertResourceState(buffer->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *buffer->resource_state_);
+                    dbg_command_list_->AssertResourceState(buffer->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *buffer->resource_state_);
                 }
             }
             for(uint32_t i = 0; i < textures_.size(); ++i)
@@ -4591,7 +4591,7 @@ public:
                 auto *texture = textures_.at(i);
                 if(texture != nullptr)
                 {
-                    dbgCommandList->AssertResourceState(texture->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, texture->resource_state_);
+                    dbg_command_list_->AssertResourceState(texture->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, texture->resource_state_);
                 }
             }
         }
