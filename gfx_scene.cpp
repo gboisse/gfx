@@ -23,6 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 
 #include "gfx_scene.h"
+#include "gfx_internal_types.h"
 
 #include <map>
 #include <set>

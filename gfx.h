@@ -28,6 +28,7 @@ SOFTWARE.
 #include <dxgi1_4.h>
 #include "gfx_core.h"
 
+
 //!
 //! Context creation/destruction.
 //!
@@ -158,13 +159,7 @@ GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 //! Helper functions.
 //!
 
-inline uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height = 0, uint32_t depth = 0)
-{
-    uint32_t mip_count = 0;
-    uint32_t mip_size = GFX_MAX(width, GFX_MAX(height, depth));
-    while(mip_size >= 1) { mip_size >>= 1; ++mip_count; }
-    return mip_count;
-}
+uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height = 0, uint32_t depth = 0);
 
 //!
 //! Sampler states.
@@ -259,10 +254,7 @@ GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blen
 //! Blend mode helpers.
 //!
 
-inline GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state)
-{
-    return gfxDrawStateSetBlendMode(draw_state, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
-}
+GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state);
 
 //!
 //! Program creation/destruction.

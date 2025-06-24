@@ -26,6 +26,8 @@ SOFTWARE.
 
 #include "gfx.h"
 #include <glm/glm.hpp>
+#include <string>   // std::string
+#include <vector>   // std::vector
 
 template<typename TYPE> class GfxRef;
 template<typename TYPE> class GfxConstRef;

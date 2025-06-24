@@ -23,6 +23,7 @@ SOFTWARE.
 ****************************************************************************/
 
 #include "gfx.h"
+#include "gfx_internal_types.h"
 
 #include <map>                  // std::map
 #include <deque>                // std::deque
@@ -63,7 +64,8 @@ SOFTWARE.
 #    pragma warning(disable : 4211) // nonstandard extension used: redefined extern to static
 #endif
 #include <D3D12MemAlloc.h>      // D3D12 memory allocator
-#include <WinPixEventRuntime/pix3.h>
+#include <pix3.h>
+#include <AmdPix3.h>
 #ifdef __clang__
 #    pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -1836,8 +1838,8 @@ public:
         switch(cpu_access)
         {
         case kGfxCpuAccess_Read:
-            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             allocation_desc.HeapType = D3D12_HEAP_TYPE_READBACK;
+            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             break;
         case kGfxCpuAccess_Write:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
@@ -6759,6 +6761,20 @@ private:
             sbt->kernel_ = bound_kernel_; // update bound kernel
             for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
             {
+                Buffer &sbt_buffer = buffers_[sbt->sbt_buffers_[i]];
+                bool    transition = false;
+                for(auto &shader_record : sbt->shader_records_[i])
+                {
+                    Sbt::ShaderRecord &sbt_record = shader_record.second;
+                    if(sbt_record.id_ == sbt_record.commited_id_ && !invalidate_sbt_descriptors && !invalidate_sbt_parameters) continue;
+                    transition = true;
+                }
+                if(transition)
+                    transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
+            }
+            submitPipelineBarriers();
+            for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+            {
                 auto last_record_it = sbt->shader_records_[i].rbegin();
                 if(last_record_it == sbt->shader_records_[i].rend()) continue;
                 uint32_t record_count = last_record_it->first + 1;
@@ -6816,6 +6832,7 @@ private:
                     sbt_record.commited_id_ = sbt_record.id_;
                 }
                 destroyBuffer(upload_gfx_buffer);
+                transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             }
             state_object_properties->Release();
         }
@@ -9802,6 +9819,14 @@ GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
     return gfx->destroyTexture(texture);
 }
 
+uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height, uint32_t depth)
+{
+    uint32_t mip_count = 0;
+    uint32_t mip_size  = GFX_MAX(width, GFX_MAX(height, depth));
+    while(mip_size >= 1) { mip_size >>= 1; ++mip_count; }
+    return mip_count;
+}
+
 GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D3D12_TEXTURE_ADDRESS_MODE address_u, D3D12_TEXTURE_ADDRESS_MODE address_v, D3D12_TEXTURE_ADDRESS_MODE address_w, float mip_lod_bias, float min_lod, float max_lod)
 {
     GfxSamplerState const sampler_state = {};
@@ -10031,6 +10056,11 @@ GfxResult gfxDrawStateSetPrimitiveTopologyType(GfxDrawState draw_state, D3D12_PR
 GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
 {
     return GfxInternal::SetDrawStateBlendMode(draw_state, src_blend, dst_blend, blend_op, src_blend_alpha, dst_blend_alpha, blend_op_alpha);
+}
+
+GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state)
+{
+    return gfxDrawStateSetBlendMode(draw_state, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
 }
 
 GfxProgram gfxCreateProgram(GfxContext context, char const *file_name, char const *file_path, char const *shader_model, char const **include_paths, uint32_t include_path_count)
