@@ -1074,6 +1074,8 @@ public:
         GFX_TRY(createBackBuffers());
         back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            command_list_->DiscardResource(back_buffers_[i], nullptr);
 
         return kGfxResult_NoError;
     }
@@ -3301,8 +3303,6 @@ public:
     {
         if(isInterop())
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using an interop context");
-        if(swap_chain_ == nullptr)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using a headless context");
         float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
         D3D12_RECT
         rect        = {};
@@ -9476,7 +9476,7 @@ private:
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-            float const clear_value[4] = {};
+            float const clear_value[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
             GFX_TRY(createResource(allocation_desc, resource_desc, resource_state, clear_value,
                 &back_buffer_allocations_[i], IID_PPV_ARGS(&back_buffers_[i])));
