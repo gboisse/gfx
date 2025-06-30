@@ -103,8 +103,8 @@ class GfxInternal
     ID3D12GraphicsCommandList4 *dxr_command_list_ = nullptr;
     ID3D12GraphicsCommandList6 *mesh_command_list_ = nullptr;
     ID3D12CommandAllocator **command_allocators_ = nullptr;
-    std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
     ID3D12DebugCommandList *dbg_command_list_ = nullptr;
+    std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
     uint32_t fence_index_ = 0;
@@ -403,12 +403,12 @@ class GfxInternal
 
         void *data_ = nullptr;
         uint64_t data_offset_ = 0;
+        bool *transitioned_ = nullptr;
         ID3D12Resource *resource_ = nullptr;
         uint32_t *reference_count_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
         D3D12_RESOURCE_STATES *resource_state_ = nullptr;
         D3D12_RESOURCE_STATES initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
-        bool *transitioned_ = nullptr;
     };
     GfxArray<Buffer> buffers_;
     GfxHandles buffer_handles_;
@@ -423,6 +423,7 @@ class GfxInternal
         inline bool isInterop() const { return (allocation_ == nullptr ? true : false); }
 
         uint32_t flags_ = 0;
+        bool transitioned_ = false;
         float clear_value_[4] = {};
         ID3D12Resource *resource_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
@@ -430,7 +431,6 @@ class GfxInternal
         std::vector<uint32_t> rtv_descriptor_slots_[D3D12_REQ_MIP_LEVELS];
         D3D12_RESOURCE_STATES resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_STATES initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
-        bool transitioned_ = false;
     };
     GfxArray<Texture> textures_;
     GfxHandles texture_handles_;
