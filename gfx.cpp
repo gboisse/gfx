@@ -9410,7 +9410,7 @@ private:
         kTransitionType_Count
     };
 
-    bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, TransitionType implicit_allowed = kTransitionType_Explicit)
+    bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
         GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return false;
         if((*buffer.resource_state_ & resource_state) == resource_state)
@@ -9436,7 +9436,7 @@ private:
             }
             return false;
         }
-        if(implicit_allowed == kTransitionType_Implicit && !*buffer.transitioned_)
+        if(transition_type == kTransitionType_Implicit && !*buffer.transitioned_)
         {
             if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_COMMON)
             {
@@ -9480,7 +9480,7 @@ private:
         return true;
     }
 
-    bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, TransitionType implicit_allowed = kTransitionType_Explicit)
+    bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
         if((texture.resource_state_ & resource_state) == resource_state)
         {
@@ -9505,7 +9505,7 @@ private:
             }
             return false;
         }
-        if(implicit_allowed == kTransitionType_Implicit && !texture.transitioned_)
+        if(transition_type == kTransitionType_Implicit && !texture.transitioned_)
         {
             if(texture.resource_state_ == D3D12_RESOURCE_STATE_COMMON && (((resource_state & (D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_COPY_SOURCE)) == resource_state)))
             {
