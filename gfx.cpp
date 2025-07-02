@@ -995,6 +995,7 @@ public:
             if(current_output != output) current_output->Release();
             output_i++;
         }
+        back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
         if(output != nullptr)
         {
             IDXGIOutput6 *output6 = nullptr;
