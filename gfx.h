@@ -28,6 +28,7 @@ SOFTWARE.
 #include <dxgi1_4.h>
 #include "gfx_core.h"
 
+
 //!
 //! Context creation/destruction.
 //!
@@ -43,17 +44,19 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 enum GfxCreateContextFlag
 {
     kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
-    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 1,
-    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 2,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 3,
-    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 4,   // Create HDR swapchain format (requires HDR capcpable device+display to have an effect)
-    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 5    // Prefer a linear gamma swap chain format (Uses half precision float scRGB instead of 10b Rec2100 for HDR)
+    kGfxCreateContextFlag_EnableShaderCache         = 1 << 1,
+    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 2,
+    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 3,
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 4,
+    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 5,   // Create HDR swapchain format (requires HDR capcpable device+display to have an effect)
+    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 6,   // Prefer a linear gamma swap chain format (Uses half precision float scRGB instead of 10b Rec2100 for HDR)
 };
 typedef uint32_t GfxCreateContextFlags;
 
 GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags = 0, IDXGIAdapter *adapter = nullptr);
 GfxContext gfxCreateContext(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter = nullptr);
 GfxResult gfxDestroyContext(GfxContext context);
+bool      gfxContextIsValid(GfxContext context);
 
 uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);
@@ -158,13 +161,7 @@ GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 //! Helper functions.
 //!
 
-inline uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height = 0, uint32_t depth = 0)
-{
-    uint32_t mip_count = 0;
-    uint32_t mip_size = GFX_MAX(width, GFX_MAX(height, depth));
-    while(mip_size >= 1) { mip_size >>= 1; ++mip_count; }
-    return mip_count;
-}
+uint32_t gfxCalculateMipCount(uint32_t width, uint32_t height = 0, uint32_t depth = 0);
 
 //!
 //! Sampler states.
@@ -259,10 +256,7 @@ GfxResult gfxDrawStateSetBlendMode(GfxDrawState draw_state, D3D12_BLEND src_blen
 //! Blend mode helpers.
 //!
 
-inline GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state)
-{
-    return gfxDrawStateSetBlendMode(draw_state, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_ZERO, D3D12_BLEND_OP_ADD);
-}
+GfxResult gfxDrawStateEnableAlphaBlending(GfxDrawState draw_state);
 
 //!
 //! Program creation/destruction.
@@ -497,6 +491,9 @@ D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer bu
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
 
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
+
+GfxResult gfxExecute(GfxContext context);
+GfxResult gfxResetCommandList(GfxContext context);
 
 //!
 //! Template helpers.

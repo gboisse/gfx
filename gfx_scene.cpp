@@ -23,46 +23,47 @@ SOFTWARE.
 ****************************************************************************/
 
 #include "gfx_scene.h"
+#include "gfx_internal_types.h"
 
 #include <map>
 #include <set>
 #include <functional>
 #include <ios>
 #include <fstream>
-#define CGLTF_IMPLEMENTATION
-#ifdef _MSC_VER
-#   pragma warning(push)
-#   pragma warning(disable:4789)   // buffer will be overrun
-#endif
-#include <cgltf.h>              // glTF loader
-#ifdef _MSC_VER
-#   pragma warning(pop)
-#endif
 #include <tiny_obj_loader.h>   // obj loader
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 #include <tinyexr.h>
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#ifdef __clang__
-#   pragma clang diagnostic push
-#   pragma clang diagnostic ignored "-Wmissing-field-initializers"
-#elif defined(__GNUC__)
-#   pragma GCC diagnostic push
-#   pragma GCC diagnostic ignored "-Wmissing-field-initializers"
-#endif
-#include <stb_image_write.h>
-#ifdef __clang__
-#   pragma clang diagnostic pop
-#elif defined(__GNUC__)
-#   pragma GCC diagnostic pop
-#endif
-#ifdef GFX_ENABLE_SCENE_KTX
-#include <ktx.h>
-#include <vulkan/vulkan.h>
-#endif
 #define GLM_ENABLE_EXPERIMENTAL
 #include <glm/gtx/quaternion.hpp>
 #include <glm/gtc/type_ptr.hpp>
+#ifdef GFX_ENABLE_SCENE_KTX
+#    include <ktx.h>
+#    include <vulkan/vulkan.h>
+#endif
+#ifdef __clang__
+#    pragma clang diagnostic push
+#    pragma clang diagnostic ignored "-Wlanguage-extension-token"
+#    pragma clang diagnostic ignored "-Wmissing-field-initializers"
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic push
+#    pragma GCC diagnostic ignored "-Wlanguage-extension-token"
+#    pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#elif defined(_MSC_VER)
+#   pragma warning(push)
+#   pragma warning(disable:4789)   // buffer will be overrun
+#endif
+#define CGLTF_IMPLEMENTATION
+#include <cgltf.h>              // glTF loader
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb_image_write.h>
+#ifdef __clang__
+#    pragma clang diagnostic pop
+#elif defined(__GNUC__)
+#    pragma GCC diagnostic pop
+#elif defined(_MSC_VER)
+#    pragma warning(pop)
+#endif
 
 class GfxSceneInternal
 {
@@ -1417,7 +1418,7 @@ private:
                             {
                                 pos += tag.length();
                                 std::string clipped = json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
-                                const auto index = stoi(clipped);
+                                auto const index = stoull(clipped);
                                 if(index < gltf_model->textures_count)
                                 {
                                     cgltf_texture const *split_text = &gltf_model->textures[index];
@@ -1927,7 +1928,19 @@ private:
             std::vector<GfxConstRef<GfxAnimation>> const &parent_animations, uint64_t parent_handle) -> uint64_t
         {
             glm::mat4 local_transform(1.0); // default to identity
-            cgltf_node_transform_local(gltf_node, (float*)&local_transform);
+            if(gltf_node->has_matrix)
+            {
+                memcpy(&local_transform, gltf_node->matrix, sizeof(float) * 16);
+            }
+            else
+            {
+                local_transform = glm::translate(local_transform, glm::vec3(
+                    gltf_node->translation[0], gltf_node->translation[1], gltf_node->translation[2]));
+                local_transform *= glm::mat4_cast(glm::normalize(glm::quat(gltf_node->rotation[3], gltf_node->rotation[0],
+                    gltf_node->rotation[1], gltf_node->rotation[2])));
+                local_transform = glm::scale(local_transform,
+                    glm::vec3(gltf_node->scale[0], gltf_node->scale[1], gltf_node->scale[2]));
+            }
             std::vector<GfxRef<GfxInstance>> instances;
             glm::mat4 const transform = parent_transform * local_transform;
             GfxRef<GfxSkin> skin;
@@ -2340,8 +2353,11 @@ private:
                 }
                 numDimensions = 3;
                 break;
+            default:
+                std::fclose(file);
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation,
+                    "Unable to load image `%s' : Invalid dds header", asset_file);
             }
-
         }
 
         if(format == DXGI_FORMAT_UNKNOWN || format > DXGI_FORMAT_B4G4R4A4_UNORM)
@@ -2505,27 +2521,15 @@ private:
                 {
                     format = DXGI_FORMAT_BC1_UNORM;
                 }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '3'))
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '3') || header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '4'))
                 {
                     format = DXGI_FORMAT_BC2_UNORM;
                 }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '5'))
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '5') || header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '6'))
                 {
                     format = DXGI_FORMAT_BC3_UNORM;
                 }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '4'))
-                {
-                    format = DXGI_FORMAT_BC2_UNORM;
-                }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('D', 'X', 'T', '5'))
-                {
-                    format = DXGI_FORMAT_BC3_UNORM;
-                }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('A', 'T', 'I', '1'))
-                {
-                    format = DXGI_FORMAT_BC4_UNORM;
-                }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '4', 'U'))
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('A', 'T', 'I', '1') || header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '4', 'U'))
                 {
                     format = DXGI_FORMAT_BC4_UNORM;
                 }
@@ -2533,11 +2537,7 @@ private:
                 {
                     format = DXGI_FORMAT_BC4_SNORM;
                 }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('A', 'T', 'I', '2'))
-                {
-                    format = DXGI_FORMAT_BC5_UNORM;
-                }
-                else if(header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '5', 'U'))
+                else if(header.pixelFormat.fourCC == MAKE_FOURCC('A', 'T', 'I', '2') || header.pixelFormat.fourCC == MAKE_FOURCC('B', 'C', '5', 'U'))
                 {
                     format = DXGI_FORMAT_BC5_UNORM;
                 }
@@ -2714,6 +2714,7 @@ private:
         return kGfxResult_NoError;
     }
 
+#ifdef GFX_ENABLE_SCENE_KTX
     static inline KTX_error_code IterateKtxImage(int32_t, int32_t, int32_t, int32_t, int32_t,
         ktx_uint64_t faceLodSize, void *pixels, void *userdata)
     {
@@ -2832,6 +2833,7 @@ private:
         ktxTexture_Destroy((ktxTexture*)ktx_texture);
         return kGfxResult_NoError;
     }
+#endif
 
     GfxResult importExr(GfxScene const& scene, char const* asset_file)
     {

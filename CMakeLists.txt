@@ -10,7 +10,7 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 add_library(gfx STATIC)
 
-target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_window.h gfx.cpp gfx_window.cpp)
+target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_internal_types.h gfx_window.h gfx_core.cpp gfx_internal_types.cpp gfx.cpp gfx_window.cpp)
 if(GFX_ENABLE_GUI)
     target_sources(gfx PRIVATE gfx_imgui.h gfx_imgui.cpp)
 endif()
@@ -18,23 +18,30 @@ if(GFX_ENABLE_SCENE)
     target_sources(gfx PRIVATE gfx_scene.h gfx_scene.cpp)
 endif()
 
-target_compile_options(gfx PRIVATE /bigobj)
-
 target_compile_features(gfx PUBLIC cxx_std_20)
 target_compile_definitions(gfx PRIVATE USE_PIX)
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -pedantic -Werror>)
+    target_compile_options(gfx PRIVATE -Wa,-mbig-obj)
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX /experimental:external /external:anglebrackets /external:W0 /analyze:external->)
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd4324>) # structure was padded due to alignment specifier
     target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/wd6387>) # param could be 0
     target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(gfx PRIVATE /bigobj)
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-    if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+    if("${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
         target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/W4 /WX>)
-        target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
+        target_compile_options(gfx PRIVATE /bigobj)
     else()
         target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wall -Wextra -pedantic -Werror>)
+        target_compile_options(gfx PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-language-extension-token>) # anonymous types declared in an anonymous union
+        target_compile_options(gfx PRIVATE -Wa,-mbig-obj)
+    endif()
+    include(CheckCXXSymbolExists)
+    check_cxx_symbol_exists(_MSVC_STL_VERSION version MSVCSTL)
+    if(MSVCSTL)
+        target_compile_definitions(gfx PRIVATE _HAS_EXCEPTIONS=0 _CRT_SECURE_NO_WARNINGS)
     endif()
 endif()
 
@@ -44,7 +51,7 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
     elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
         target_compile_options(gfx PRIVATE /arch:AVX2)
     elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-        if("${CMAKE_CXX_SIMULATE_ID}" STREQUAL "MSVC")
+        if("${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
             target_compile_options(gfx PRIVATE /arch:AVX2)
         else()
             target_compile_options(gfx PRIVATE -march=x86-64-v3)
@@ -85,9 +92,9 @@ set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocat
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v2.0.1
+    GIT_TAG        v3.0.1
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
-    FIND_PACKAGE_ARGS NAMES d3d12-memory-allocator
+    FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
 )
 FetchContent_MakeAvailable(D3D12MemoryAllocator)
 if(NOT D3D12MemoryAllocator_FOUND)
@@ -95,13 +102,16 @@ if(NOT D3D12MemoryAllocator_FOUND)
     target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
     set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
 else()
-    target_link_libraries(gfx PRIVATE unofficial::D3D12MemoryAllocator)
+    target_link_libraries(gfx PRIVATE GPUOpen::D3D12MemoryAllocator)
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
+set(GFX_AGILITY_VERSION 616)
+set(GFX_AGILITY_MICRO_VERSION 0)
+target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
-    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.614.0"
+    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}"
     SOURCE_DIR     "${GFX_AGILITY_PATH}"
     FIND_PACKAGE_ARGS NAMES DirectX12-Agility
 )
@@ -127,7 +137,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.7.2212.1/dxc_2023_03_01.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
@@ -152,30 +162,36 @@ endif()
 set(GFX_PIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime")
 set(GFX_PIX_AMD_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/AmdDxExt")
 FetchContent_Declare(
-    WinPixEventRuntime
+    winpixevent
     URL            "https://www.nuget.org/api/v2/package/WinPixEventRuntime/1.0.240308001"
     SOURCE_DIR     "${GFX_PIX_PATH}"
+    FIND_PACKAGE_ARGS NAMES winpixevent
 )
-FetchContent_MakeAvailable(WinPixEventRuntime)
-file(READ "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" PIXE_FILE_CONTENTS)
-string(REPLACE "#define PIX_CONTEXT_EMIT_CPU_EVENTS" "# define PIX_CONTEXT_EMIT_CPU_EVENTS\n# include \"AmdPix3.h\"\n# define PIX_AMD_EXT\n" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-string(REPLACE " PIXBeginEventOnContextCpu(destination" " RgpPIXBeginEventOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-string(REPLACE " PIXSetMarkerOnContextCpu(destination" " RgpPIXSetMarkerOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-string(REPLACE "destination = PIXEndEventOnContextCpu(" "RgpPIXEndEventOnContextCpu(destination, " PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
-file(WRITE "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" "${PIXE_FILE_CONTENTS}")
-add_library(WinPixEventRuntime SHARED IMPORTED)
-set_target_properties(WinPixEventRuntime PROPERTIES
-    IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
-    IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
-    INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include;${GFX_PIX_AMD_PATH}"
-)
-target_link_libraries(gfx PRIVATE WinPixEventRuntime)
+FetchContent_MakeAvailable(winpixevent)
+if(NOT winpixevent_FOUND)
+    file(READ "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" PIXE_FILE_CONTENTS)
+    string(REPLACE "#define PIX_CONTEXT_EMIT_CPU_EVENTS" "# define PIX_CONTEXT_EMIT_CPU_EVENTS\n# include \"AmdPix3.h\"\n# define PIX_AMD_EXT\n" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    string(REPLACE " PIXBeginEventOnContextCpu(destination" " RgpPIXBeginEventOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    string(REPLACE " PIXSetMarkerOnContextCpu(destination" " RgpPIXSetMarkerOnContextCpu(destination" PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    string(REPLACE "destination = PIXEndEventOnContextCpu(" "RgpPIXEndEventOnContextCpu(destination, " PIXE_FILE_CONTENTS "${PIXE_FILE_CONTENTS}")
+    file(WRITE "${GFX_PIX_PATH}/include/WinPixEventRuntime/PIXEvents.h" "${PIXE_FILE_CONTENTS}")
+    add_library(WinPixEventRuntime SHARED IMPORTED)
+    set_target_properties(WinPixEventRuntime PROPERTIES
+        IMPORTED_LOCATION "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.dll"
+        IMPORTED_IMPLIB "${GFX_PIX_PATH}/bin/x64/WinPixEventRuntime.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${GFX_PIX_PATH}/include/WinPixEventRuntime;${GFX_PIX_AMD_PATH}"
+    )
+    target_link_libraries(gfx PRIVATE WinPixEventRuntime)
+else()
+    target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/AmdDxExt")
+    target_link_libraries(gfx PRIVATE Microsoft::WinPixEventRuntime)
+endif()
 
 if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.90.4
+        GIT_TAG        v1.91.9
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
@@ -201,7 +217,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             Stb
             GIT_REPOSITORY https://github.com/nothings/stb.git
-            GIT_TAG        ae721c50eaf761660b4f90cc590453cdb0c2acd0
+            GIT_TAG        5c205738c191bcb0abc65c4febfa9bd25ff35234
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb/"
         )
         FetchContent_MakeAvailable(Stb)
@@ -215,7 +231,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             cgltf
             GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-            GIT_TAG        v1.13
+            GIT_TAG        v1.14
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/"
         )
         FetchContent_MakeAvailable(cgltf)
@@ -227,9 +243,9 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.0
+        GIT_TAG        1.0.1
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
-        FIND_PACKAGE_ARGS 1.0.0 NAMES glm
+        FIND_PACKAGE_ARGS NAMES glm
     )
     if(CMAKE_SYSTEM_PROCESSOR MATCHES "(x86)|(X86)|(amd64)|(AMD64)")
         set(GLM_ENABLE_SIMD_AVX2 ON CACHE BOOL "")
@@ -261,7 +277,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-        GIT_TAG        v1.0.8
+        GIT_TAG        v1.0.10
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/"
         FIND_PACKAGE_ARGS NAMES tinyexr
     )
@@ -271,6 +287,10 @@ if(GFX_ENABLE_SCENE)
     if(NOT tinyexr_FOUND)
         #tinyexr cmake is currently broken when not using miniz
         target_compile_definitions(tinyexr PRIVATE TINYEXR_USE_MINIZ=0 TINYEXR_USE_STB_ZLIB=1)
+        # Workaround compilation failures with current version
+        if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" AND NOT "${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}" STREQUAL "MSVC")
+            target_compile_options(tinyexr PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wno-sign-conversion -Wno-nonportable-system-include-path -Wno-tautological-type-limit-compare -Wno-old-style-cast>)
+        endif()
         target_include_directories(gfx PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr")
         target_link_libraries(gfx PRIVATE tinyexr)
         set_target_properties(tinyexr PROPERTIES FOLDER "${GFX_TP_FOLDER}")
@@ -282,7 +302,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-            GIT_TAG        v4.3.1
+            GIT_TAG        v4.4.0
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
             FIND_PACKAGE_ARGS NAMES Ktx
         )
@@ -297,7 +317,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             vulkan-headers
             GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-            GIT_TAG        v1.3.278
+            GIT_TAG        v1.4.307
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/"
             FIND_PACKAGE_ARGS NAMES VulkanHeaders
         )

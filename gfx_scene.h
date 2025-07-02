@@ -26,6 +26,8 @@ SOFTWARE.
 
 #include "gfx.h"
 #include <glm/glm.hpp>
+#include <string>   // std::string
+#include <vector>   // std::vector
 
 template<typename TYPE> class GfxRef;
 template<typename TYPE> class GfxConstRef;
@@ -493,12 +495,12 @@ template<> inline GfxRef<GfxInstance> gfxSceneGetObjectHandle<GfxInstance>(GfxSc
 template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetInstanceMetadata(scene, object_handle); }
 template<> inline bool gfxSceneSetObjectMetadata<GfxInstance>(GfxScene scene, uint64_t object_handle, GfxMetadata const &metadata) { return gfxSceneSetInstanceMetadata(scene, object_handle, metadata); }
 
-template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene scene) { static_assert(std::is_void_v<TYPE>, "Cannot get object count for unsupported object type"); }
-template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene scene) { static_assert(std::is_void_v<TYPE>, "Cannot get object list for unsupported object type"); }
-template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene scene, uint64_t object_handle) { static_assert(std::is_void_v<TYPE>, "Cannot get scene object for unsupported object type"); }
-template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene scene, uint32_t object_index) { static_assert(std::is_void_v<TYPE>, "Cannot get object handle for unsupported object type"); }
-template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene scene, uint64_t object_handle) { static_assert(std::is_void_v<TYPE>, "Cannot get object metadata for unsupported object type"); }
-template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene scene, uint64_t object_handle, GfxMetadata const &metadata) { static_assert(std::is_void_v<TYPE>, "Cannot set object metadata for unsupported object type"); }
+template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene) { static_assert(std::is_void_v<TYPE>, "Cannot get object count for unsupported object type"); }
+template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene) { static_assert(std::is_void_v<TYPE>, "Cannot get object list for unsupported object type"); }
+template<typename TYPE> TYPE *gfxSceneGetObject(GfxScene, uint64_t) { static_assert(std::is_void_v<TYPE>, "Cannot get scene object for unsupported object type"); }
+template<typename TYPE> GfxRef<TYPE> gfxSceneGetObjectHandle(GfxScene, uint32_t) { static_assert(std::is_void_v<TYPE>, "Cannot get object handle for unsupported object type"); }
+template<typename TYPE> GfxMetadata const &gfxSceneGetObjectMetadata(GfxScene, uint64_t) { static_assert(std::is_void_v<TYPE>, "Cannot get object metadata for unsupported object type"); }
+template<typename TYPE> bool gfxSceneSetObjectMetadata(GfxScene, uint64_t, GfxMetadata const &) { static_assert(std::is_void_v<TYPE>, "Cannot set object metadata for unsupported object type"); }
 
 #endif //! GFX_INCLUDE_GFX_SCENE_H
 
