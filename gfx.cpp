@@ -6013,7 +6013,7 @@ private:
                     {
                     case D3D_SRV_DIMENSION_BUFFER:
                         kernel_parameter.type_ = Kernel::Parameter::kType_RWBuffer;
-                        kernel_parameter.raw_access_ = resource_desc.Type == D3D_SIT_UAV_RWBYTEADDRESS;
+                        kernel_parameter.raw_access_ = (resource_desc.Type == D3D_SIT_UAV_RWBYTEADDRESS);
                         break;
                     case D3D_SRV_DIMENSION_TEXTURE2D:
                         kernel_parameter.type_ = Kernel::Parameter::kType_RWTexture2D;
@@ -8107,7 +8107,7 @@ private:
                             GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                         uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-                        if (parameter.raw_access_)
+                        if(parameter.raw_access_)
                         {
                             // https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_buffer_uav_flags
                             uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / 4;
