@@ -121,7 +121,7 @@ public:
             "#ifdef OUTPUT_SRGB\r\n"
             "    col.xyz = select(col.xyz < 0.003041282560128f, 12.92f * col.xyz, 1.055010718947587f * pow(col.xyz, 1.0f / 2.4f) - 0.055010718947587f);\r\n"
             "#elif defined(OUTPUT_HDR10)\r\n"
-            "   color *= ReferenceWhiteAdjust * (1.0f / 10000.0f);\r\n"
+            "    col.xyz *= ReferenceWhiteAdjust * (1.0f / 10000.0f);\r\n"
             "    const float3x3 mat = float3x3(0.6274178028f, 0.3292815089f, 0.04330066592f, 0.06909923255f, 0.919541657f, 0.01135913096f, 0.01639600657f, 0.08803547174f, 0.89556849f);\r\n"
             "    col.xyz = mul(mat, col.xyz);\r\n"
             "    float3 powM1 = pow(col.xyz, 0.1593017578125f);\r\n"
