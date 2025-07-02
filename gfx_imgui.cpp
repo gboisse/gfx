@@ -244,7 +244,7 @@ public:
         ImDrawData const *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
         DXGI_COLOR_SPACE_TYPE colour_space = gfxGetBackBufferColorSpace(gfx_);
-        if (colour_space != colour_space_)
+        if(colour_space != colour_space_)
         {
             initializeKernels();
         }
