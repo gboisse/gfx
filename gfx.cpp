@@ -3527,9 +3527,9 @@ public:
                     if(!texture_upload_buffer_)
                         return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate memory to upload texture data");
                     texture_upload_buffer_.setName("gfx_TextureUploadBuffer");
-                    texture_upload_buffer = &buffers_[texture_upload_buffer_];
-                    SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
                 }
+                texture_upload_buffer = &buffers_[texture_upload_buffer_];
+                SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
                 if(transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit))
                     submitPipelineBarriers();   // transition our resources if needed
                 for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
