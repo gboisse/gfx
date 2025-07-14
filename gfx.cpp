@@ -9231,8 +9231,7 @@ private:
                     {
                         char buffer[64] = {};
                         std::size_t ret = wcstombs(buffer, shader_args[i], sizeof(buffer));
-                        if (ret > 0) // make sure we have a null terminator since Hash function expects it
-                            buffer[ret - 1] = '\0';
+                        buffer[GFX_MIN(ret, std::size(buffer) - 1)] = '\0'; // make sure we have a null terminator since Hash function expects it
                         HashCombine(shader_key, Hash(buffer));
                     }
                     for(String const &define : kernel.defines_)
