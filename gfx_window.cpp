@@ -193,6 +193,12 @@ public:
         callback_data_ = nullptr;
     }
 
+    inline float getDPIScale() const
+    {
+        UINT dpi = GetDpiForWindow(window_);
+        return (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
+    }
+
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
 
 private:
@@ -378,4 +384,11 @@ bool gfxWindowUnregisterDropCallback(GfxWindow window)
     if(!gfx_window) return false; // invalid window handle
     gfx_window->unregisterDropCallback();
     return true;
+}
+
+float gfxWindowGetDPIScale(GfxWindow window)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return 1.0f; // invalid window handle
+    return gfx_window->getDPIScale();
 }
