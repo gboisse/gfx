@@ -61,6 +61,11 @@ class GfxImGuiInternal
     GfxKernel imgui_kernel_ = {};
     DXGI_COLOR_SPACE_TYPE colour_space_;
     float reference_white_adjust_ = 1.0f;
+    char **font_filenames_ = nullptr;
+    uint32_t font_count_ = 0;
+    ImFontConfig *font_configs_ = nullptr;
+    float dpi_scale_ = 1.0f;
+    bool dpi_scale_changed_  = false;
 
 public:
     GfxImGuiInternal() {}
@@ -149,6 +154,49 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult initializeScale()
+    {
+        gfxDestroyTexture(gfx_, font_buffer_);
+        gfxDestroySamplerState(gfx_, font_sampler_);
+
+        ImGui::StyleColorsDark();
+        ImGuiStyle &style = ImGui::GetStyle();
+        style.ScaleAllSizes(dpi_scale_);
+
+        ImGuiIO &io = ImGui::GetIO();
+        io.Fonts->Clear();
+        for(uint32_t i = 0; i < font_count_; ++i)
+        {
+            if(i == 0 && font_configs_ != nullptr && font_configs_[0].MergeMode)
+            {
+                ImFontConfig defaultConfig = {};
+                defaultConfig.SizePixels = 13.0f * dpi_scale_;
+                io.Fonts->AddFontDefault(&defaultConfig);
+            }
+            float const font_size = ((font_configs_ != nullptr && font_configs_[i].SizePixels > 0.0f)
+                                ? font_configs_[i].SizePixels
+                                : 16.0f) * dpi_scale_;
+            io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, font_configs_ != nullptr ? &font_configs_[i] : nullptr);
+        }
+        uint8_t *font_data;
+        int32_t font_width, font_height;
+        io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
+        GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
+        font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
+        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
+        if(!font_buffer || !font_buffer_ || !font_sampler_)
+        {
+            gfxDestroyBuffer(gfx_, font_buffer);
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
+        }
+        font_buffer_.setName("gfx_ImGuiFontBuffer");
+        io.Fonts->TexID = (ImTextureID)&font_buffer_;
+        gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
+        GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
+
+        return kGfxResult_NoError;
+    }
+
     GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
     {
         if(!gfx)
@@ -164,30 +212,30 @@ public:
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData = this; // set magic number
 
-        uint8_t *font_data;
-        int32_t font_width, font_height;
-        for(uint32_t i = 0; i < font_count; ++i)
+        if(font_count > 0)
         {
-            if(i == 0 && font_configs != nullptr && font_configs[0].MergeMode == true)
-                io.Fonts->AddFontDefault();
-            float const font_size = (font_configs != nullptr && font_configs[i].SizePixels > 0.0f)
-                                ? font_configs[i].SizePixels
-                                : 16.0f;
-            io.Fonts->AddFontFromFileTTF(font_filenames[i], font_size, font_configs != nullptr ? &font_configs[i] : nullptr);
+            font_filenames_ = (char **)gfxMalloc(font_count * sizeof(char *));
+            font_count_     = font_count;
+            for(uint32_t i = 0; i < font_count; ++i)
+            {
+                font_filenames_[i] = (char *)gfxMalloc(strlen(font_filenames[i]) + 1);
+                strcpy(font_filenames_[i], font_filenames[i]);
+            }
+            font_configs_ = (ImFontConfig *)gfxMalloc(font_count * sizeof(ImFontConfig));
+            for(uint32_t i = 0; i < font_count; ++i)
+            {
+                font_configs_[i] = font_configs[i];
+            }
         }
-        io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
-        GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
-        font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
-        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        if(!font_buffer || !font_buffer_ || !font_sampler_)
+
+        HWND window = gfxGetWindowHandle(gfx_);
+        dpi_scale_ = 1.0f;
+        if(window != nullptr)
         {
-            gfxDestroyBuffer(gfx_, font_buffer);
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
+            UINT  dpi       = GetDpiForWindow(window);
+            dpi_scale_ = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
         }
-        font_buffer_.setName("gfx_ImGuiFontBuffer");
-        io.Fonts->TexID = (ImTextureID)&font_buffer_;
-        gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
-        GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
+        GFX_TRY(initializeScale());
 
         GFX_TRY(initializeKernels());
 
@@ -211,6 +259,16 @@ public:
             if(ImGui::GetIO().BackendPlatformUserData != nullptr)
                 ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
+        }
+        if(font_count_ > 0)
+        {
+            for(uint32_t i = 0; i < font_count_; ++i)
+            {
+                gfxFree(font_filenames_[i]);
+            }
+            gfxFree(font_filenames_);
+            gfxFree(font_configs_);
+            font_count_ = 0;
         }
         if(gfx_)
         {
@@ -247,6 +305,12 @@ public:
         if(colour_space != colour_space_)
         {
             initializeKernels();
+        }
+
+        if(dpi_scale_changed_)
+        {
+            initializeScale();
+            dpi_scale_changed_ = false;
         }
 
         if(draw_data->TotalVtxCount > 0)
@@ -344,6 +408,12 @@ public:
         return kGfxResult_NoError;
     }
 
+    void setDPIScale(float scale)
+    {
+        dpi_scale_changed_ = true;
+        dpi_scale_         = scale;
+    }
+
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
@@ -373,6 +443,14 @@ GfxResult gfxImGuiRender()
     GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
     if(!gfx_imgui) return kGfxResult_NoError;   // nothing to render
     return gfx_imgui->render();
+}
+
+GfxResult gfxImGuiSetDPIScale(float scale)
+{
+    GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
+    if(!gfx_imgui) return kGfxResult_NoError;   // nothing to update
+    gfx_imgui->setDPIScale(scale);
+    return kGfxResult_NoError;
 }
 
 bool gfxImGuiIsInitialized()
