@@ -173,10 +173,32 @@ public:
                 defaultConfig.SizePixels = 13.0f * dpi_scale_;
                 io.Fonts->AddFontDefault(&defaultConfig);
             }
-            float const font_size = ((font_configs_ != nullptr && font_configs_[i].SizePixels > 0.0f)
-                                ? font_configs_[i].SizePixels
-                                : 16.0f) * dpi_scale_;
-            io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, font_configs_ != nullptr ? &font_configs_[i] : nullptr);
+            if(font_configs_ != nullptr)
+            {
+                float const pre_dpi_size = font_configs_[i].SizePixels;
+                ImVec2 const pre_dpi_glyph_offset = font_configs_[i].GlyphOffset;
+                float const pre_dpi_glyph_extra_advance_x = font_configs_[i].GlyphExtraAdvanceX;
+                float const pre_dpi_glyph_min_advance_x   = font_configs_[i].GlyphMinAdvanceX;
+                float const pre_dpi_glyph_max_advance_x   = font_configs_[i].GlyphMaxAdvanceX;
+                font_configs_[i].SizePixels *= dpi_scale_;
+                font_configs_[i].GlyphOffset.x *= dpi_scale_;
+                font_configs_[i].GlyphOffset.y *= dpi_scale_;
+                font_configs_[i].GlyphExtraAdvanceX *= dpi_scale_;
+                font_configs_[i].GlyphMinAdvanceX *= dpi_scale_;
+                font_configs_[i].GlyphMaxAdvanceX *= dpi_scale_;
+                float const font_size = (font_configs_[i].SizePixels > 0.0f) ? font_configs_[i].SizePixels : 16.0f * dpi_scale_;
+                io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, &font_configs_[i]);
+                font_configs_[i].SizePixels = pre_dpi_size;
+                font_configs_[i].GlyphOffset = pre_dpi_glyph_offset;
+                font_configs_[i].GlyphExtraAdvanceX = pre_dpi_glyph_extra_advance_x;
+                font_configs_[i].GlyphMinAdvanceX   = pre_dpi_glyph_min_advance_x;
+                font_configs_[i].GlyphMaxAdvanceX   = pre_dpi_glyph_max_advance_x;
+            }
+            else
+            {
+                float const font_size = 16.0f * dpi_scale_;
+                io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, nullptr);
+            }
         }
         uint8_t *font_data;
         int32_t font_width, font_height;
@@ -221,10 +243,13 @@ public:
                 font_filenames_[i] = (char *)gfxMalloc(strlen(font_filenames[i]) + 1);
                 strcpy(font_filenames_[i], font_filenames[i]);
             }
-            font_configs_ = (ImFontConfig *)gfxMalloc(font_count * sizeof(ImFontConfig));
-            for(uint32_t i = 0; i < font_count; ++i)
+            if(font_configs != nullptr)
             {
-                font_configs_[i] = font_configs[i];
+                font_configs_ = (ImFontConfig *)gfxMalloc(font_count * sizeof(ImFontConfig));
+                for(uint32_t i = 0; i < font_count; ++i)
+                {
+                    font_configs_[i] = font_configs[i];
+                }
             }
         }
 
@@ -232,7 +257,7 @@ public:
         dpi_scale_ = 1.0f;
         if(window != nullptr)
         {
-            UINT  dpi       = GetDpiForWindow(window);
+            UINT dpi = GetDpiForWindow(window);
             dpi_scale_ = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
         }
         GFX_TRY(initializeScale());
@@ -267,7 +292,9 @@ public:
                 gfxFree(font_filenames_[i]);
             }
             gfxFree(font_filenames_);
+            font_filenames_ = nullptr;
             gfxFree(font_configs_);
+            font_configs_ = nullptr;
             font_count_ = 0;
         }
         if(gfx_)
