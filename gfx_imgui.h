@@ -41,6 +41,7 @@ GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames = nullp
     ImFontConfig const *font_configs = nullptr, ImGuiConfigFlags flags = 0);
 GfxResult gfxImGuiTerminate();
 GfxResult gfxImGuiRender();
+GfxResult gfxImGuiSetDPIScale(float scale);
 
 bool gfxImGuiIsInitialized();
 

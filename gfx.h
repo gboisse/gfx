@@ -77,6 +77,7 @@ class GfxDisplayDesc { public: inline GfxDisplayDesc() {}
 };
 
 GfxDisplayDesc gfxGetDisplayDescription(GfxContext context);
+HWND           gfxGetWindowHandle(GfxContext context);
 
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
