@@ -6853,7 +6853,10 @@ private:
                     transition = true;
                 }
                 if(transition)
+                {
                     transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+                    transitioned = true;
+                }
             }
             if(transitioned)
                 submitPipelineBarriers();
