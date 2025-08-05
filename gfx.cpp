@@ -1837,6 +1837,11 @@ public:
         return desc;
     }
 
+    inline HWND getWindowHandle() const
+    {
+        return window_;
+    }
+
     inline bool isRaytracingSupported() const
     {
         return (dxr_device_ != nullptr ? true : false);
@@ -9857,6 +9862,13 @@ GfxDisplayDesc gfxGetDisplayDescription(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return GfxDisplayDesc{};  // invalid context
     return gfx->getDisplayDescription();
+}
+
+HWND gfxGetWindowHandle(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;    // invalid context
+    return gfx->getWindowHandle();
 }
 
 bool gfxIsRaytracingSupported(GfxContext context)
