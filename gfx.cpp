@@ -3912,7 +3912,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(!num_groups_x || !num_groups_y || !num_groups_z)
             return kGfxResult_NoError;  // nothing to dispatch
-        uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
+        uint32_t const max_num_groups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
         if(num_groups_x > max_num_groups || num_groups_y > max_num_groups || num_groups_z > max_num_groups)
         {
             GfxResult result;
@@ -4020,19 +4020,10 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!width || !height || !depth)
             return kGfxResult_NoError;  // nothing to dispatch
-        uint32_t const max_num_groups = 65535; // AMD doesn't allow to dispatch more than 65535 groups at once
-        if(width > max_num_groups || height > max_num_groups || depth > max_num_groups)
+        uint32_t const max_size = 2UL << 30;
+        if(width * height * depth > max_size)
         {
-            GfxResult result;
-            GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
-            uint32_t *args        = (uint32_t *)getBufferData(args_buffer);
-            GFX_ASSERT(args != nullptr);
-            args[0] = width;
-            args[1] = height;
-            args[2] = depth;
-            result  = encodeDispatchRaysIndirect(sbt, args_buffer); // use indirect dispatch to workaround group limit
-            destroyBuffer(args_buffer);
-            return result;
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch when total rays exceed 2^30");
         }
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
