@@ -75,9 +75,8 @@ public:
 
         RegisterClassEx(&window_class);
 
-        DWORD const window_style = WS_OVERLAPPEDWINDOW & ~((flags_ & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
-            WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0);
-        DWORD const window_style_ex = WS_EX_OVERLAPPEDWINDOW & ((flags_ & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
+        DWORD window_style_ex;
+        DWORD const window_style = getWindowStyle(window_style_ex, flags_);
 
         window_ = CreateWindowEx(window_style_ex,
                                  window_title,
@@ -94,31 +93,14 @@ public:
 
         if((flags_ & kGfxCreateWindowFlag_FullscreenWindow) != 0)
         {
-            WINDOWPLACEMENT g_wpPrev;
-            memset(&g_wpPrev, 0, sizeof(g_wpPrev));
-            g_wpPrev.length = sizeof(g_wpPrev);
-            DWORD           dwStyle  = GetWindowLong(window_, GWL_STYLE);
-
-            if((dwStyle & WS_OVERLAPPEDWINDOW) != 0)
+            MONITORINFO mi;
+            memset(&mi, 0, sizeof(mi));
+            mi.cbSize = sizeof(mi);
+            if(GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &mi))
             {
-                MONITORINFO mi;
-                memset(&mi, 0, sizeof(mi));
-                mi.cbSize = sizeof(mi);
-                if(GetWindowPlacement(window_, &g_wpPrev) &&
-                    GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
-                {
-                    SetWindowLong(window_, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-                                 mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-                                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-                }
-            }
-            else
-            {
-                SetWindowLong(window_, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
-                SetWindowPlacement(window_, &g_wpPrev);
-                SetWindowPos(window_, NULL, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                                mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                                SWP_NOOWNERZORDER);
             }
         }
         else
@@ -126,8 +108,10 @@ public:
             RECT window_rect = { 0, 0, (LONG)window_width_, (LONG)window_height_ };
             UINT dpi = GetDpiForWindow(window_);
             AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
-            SetWindowPos(window_, NULL, 0, 0, window_rect.right - window_rect.left,
-                window_rect.bottom - window_rect.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+            LONG width = window_rect.right - window_rect.left;
+            LONG height = window_rect.bottom - window_rect.top;
+            SetWindowPos(window_, NULL, width / 2, height / 2, width,
+                height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
         }
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
@@ -216,6 +200,16 @@ public:
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
 
 private:
+    static inline DWORD getWindowStyle(DWORD &window_style_ex, GfxCreateWindowFlags flags)
+    {
+        DWORD const window_style = ((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0) ? WS_POPUP :
+                                       (WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
+                                                                    WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0));
+        window_style_ex = (((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0) ? 0 : WS_EX_OVERLAPPEDWINDOW) |
+                                      ((flags & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
+        return window_style;
+    }
+
     inline void updateKeyBinding(uint32_t message, uint32_t key_code)
     {
         bool is_down;
