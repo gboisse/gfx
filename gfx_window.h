@@ -62,6 +62,7 @@ bool gfxWindowIsMaximized(GfxWindow window);
 bool gfxWindowRegisterDropCallback(GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data = nullptr);
 bool gfxWindowUnregisterDropCallback(GfxWindow window);
 float gfxWindowGetDPIScale(GfxWindow window);
+void gfxWindowToggleFullscreen(GfxWindow window);
 
 #endif //! GFX_INCLUDE_GFX_WINDOW_H
 
