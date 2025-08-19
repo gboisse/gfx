@@ -49,6 +49,8 @@ class GfxWindowInternal
     GfxCreateWindowFlags flags_;
     uint32_t window_width_;
     uint32_t window_height_;
+    uint32_t original_window_width_;
+    uint32_t original_window_height_;
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
@@ -59,6 +61,8 @@ public:
         flags_ = flags;
         window_width_ = window_width;
         window_height_ = window_height;
+        original_window_width_ = window_width_;
+        original_window_height_ = window_height_;
 
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -75,9 +79,8 @@ public:
 
         RegisterClassEx(&window_class);
 
-        DWORD const window_style = WS_OVERLAPPEDWINDOW & ~((flags_ & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
-            WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0);
-        DWORD const window_style_ex = WS_EX_OVERLAPPEDWINDOW & ((flags_ & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
+        DWORD window_style_ex;
+        DWORD const window_style = getWindowStyle(window_style_ex, flags_);
 
         window_ = CreateWindowEx(window_style_ex,
                                  window_title,
@@ -94,31 +97,14 @@ public:
 
         if((flags_ & kGfxCreateWindowFlag_FullscreenWindow) != 0)
         {
-            WINDOWPLACEMENT g_wpPrev;
-            memset(&g_wpPrev, 0, sizeof(g_wpPrev));
-            g_wpPrev.length = sizeof(g_wpPrev);
-            DWORD           dwStyle  = GetWindowLong(window_, GWL_STYLE);
-
-            if((dwStyle & WS_OVERLAPPEDWINDOW) != 0)
+            MONITORINFO mi;
+            memset(&mi, 0, sizeof(mi));
+            mi.cbSize = sizeof(mi);
+            if(GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &mi))
             {
-                MONITORINFO mi;
-                memset(&mi, 0, sizeof(mi));
-                mi.cbSize = sizeof(mi);
-                if(GetWindowPlacement(window_, &g_wpPrev) &&
-                    GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
-                {
-                    SetWindowLong(window_, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-                                 mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-                                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-                }
-            }
-            else
-            {
-                SetWindowLong(window_, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
-                SetWindowPlacement(window_, &g_wpPrev);
-                SetWindowPos(window_, NULL, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
+                SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                                mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                                SWP_NOOWNERZORDER);
             }
         }
         else
@@ -126,8 +112,10 @@ public:
             RECT window_rect = { 0, 0, (LONG)window_width_, (LONG)window_height_ };
             UINT dpi = GetDpiForWindow(window_);
             AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
-            SetWindowPos(window_, NULL, 0, 0, window_rect.right - window_rect.left,
-                window_rect.bottom - window_rect.top, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+            LONG width = window_rect.right - window_rect.left;
+            LONG height = window_rect.bottom - window_rect.top;
+            SetWindowPos(window_, NULL, width / 2, height / 2, width,
+                height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
         }
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
@@ -213,9 +201,54 @@ public:
         return (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
     }
 
+    inline void toggleFullscreen() const
+    {
+        DWORD dwStyle = GetWindowLong(window_, GWL_STYLE);
+        if((dwStyle & WS_SYSMENU) != 0)
+        {
+            MONITORINFO mi;
+            memset(&mi, 0, sizeof(mi));
+            mi.cbSize = sizeof(mi);
+            if(GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
+            {
+                DWORD       window_style_ex;
+                DWORD const window_style = getWindowStyle(window_style_ex, flags_ | kGfxCreateWindowFlag_FullscreenWindow);
+                SetWindowLong(window_, GWL_STYLE, window_style);
+                SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
+                SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                                mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                                SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+            }
+        }
+        else
+        {
+            DWORD       window_style_ex;
+            DWORD const window_style = getWindowStyle(window_style_ex, flags_ & ~kGfxCreateWindowFlag_FullscreenWindow);
+            SetWindowLong(window_, GWL_STYLE, window_style);
+            SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
+            RECT window_rect = { 0, 0, (LONG)original_window_width_, (LONG)original_window_height_ };
+            UINT dpi = GetDpiForWindow(window_);
+            AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
+            LONG width = window_rect.right - window_rect.left;
+            LONG height = window_rect.bottom - window_rect.top;
+            SetWindowPos(window_, NULL, width / 2, height / 2, width,
+                height, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+        }
+    }
+
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
 
 private:
+    static inline DWORD getWindowStyle(DWORD &window_style_ex, GfxCreateWindowFlags flags)
+    {
+        DWORD const window_style = ((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0) ? WS_POPUP :
+                                       (WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
+                                                                    WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0));
+        window_style_ex = (((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0) ? 0 : WS_EX_OVERLAPPEDWINDOW) |
+                                      ((flags & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
+        return window_style;
+    }
+
     inline void updateKeyBinding(uint32_t message, uint32_t key_code)
     {
         bool is_down;
@@ -430,4 +463,11 @@ float gfxWindowGetDPIScale(GfxWindow window)
     GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
     if(!gfx_window) return 1.0f; // invalid window handle
     return gfx_window->getDPIScale();
+}
+
+void gfxWindowToggleFullscreen(GfxWindow window)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return; // invalid window handle
+    gfx_window->toggleFullscreen();
 }
