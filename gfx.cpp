@@ -4976,6 +4976,50 @@ public:
         return gfx_texture.resource_state_;
     }
 
+    GfxResult setBufferResourceState(GfxBuffer const &buffer, D3D12_RESOURCE_STATES state)
+    {
+        if(!buffer_handles_.has_handle(buffer.handle))
+            return kGfxResult_InvalidParameter; // invalid buffer object
+        Buffer &gfx_buffer = buffers_[buffer];
+        if(transitionResource(gfx_buffer, state))
+            submitPipelineBarriers();
+        return kGfxResult_NoError;
+    }
+
+    GfxResult setTextureResourceState(GfxTexture const &texture, D3D12_RESOURCE_STATES state)
+    {
+        if(!texture_handles_.has_handle(texture.handle))
+            return kGfxResult_InvalidParameter; // invalid texture object
+        Texture &gfx_texture = textures_[texture];
+        if((state & D3D12_RESOURCE_STATE_UNORDERED_ACCESS) != 0)
+            ensureTextureHasUsageFlag(gfx_texture, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+        if((state & D3D12_RESOURCE_STATE_RENDER_TARGET) != 0)
+        {
+            uint32_t depth = texture.depth;
+            for(uint32_t i = 0; i < texture.mip_levels; ++i)
+            {
+                for(uint32_t j = 0; j < depth; ++j)
+                    ensureTextureHasRenderTargetView(texture, gfx_texture, i, j);
+                if(texture.is3D())
+                    depth = GFX_MAX(depth >> 1, 1u);
+            }
+        }
+        if((state & (D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_DEPTH_READ)) != 0)
+        {
+            uint32_t depth = texture.depth;
+            for(uint32_t i = 0; i < texture.mip_levels; ++i)
+            {
+                for(uint32_t j = 0; j < depth; ++j)
+                    ensureTextureHasDepthStencilView(texture, gfx_texture, i, j);
+                if(texture.is3D())
+                    depth = GFX_MAX(depth >> 1, 1u);
+            }
+        }
+        if(transitionResource(gfx_texture, state))
+            submitPipelineBarriers();
+        return kGfxResult_NoError;
+    }
+
     HANDLE createBufferSharedHandle(GfxBuffer const &buffer)
     {
         HANDLE handle = {};
@@ -10853,6 +10897,21 @@ D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture 
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return D3D12_RESOURCE_STATE_COMMON;    // invalid context
     return gfx->getTextureResourceState(texture);
+}
+
+
+GfxResult gfxBufferSetResourceState(GfxContext context, GfxBuffer buffer, D3D12_RESOURCE_STATES state)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;    // invalid context
+    return gfx->setBufferResourceState(buffer, state);
+}
+
+GfxResult gfxTextureSetResourceState(GfxContext context, GfxTexture texture, D3D12_RESOURCE_STATES state)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;    // invalid context
+    return gfx->setTextureResourceState(texture, state);
 }
 
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)

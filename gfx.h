@@ -491,6 +491,9 @@ ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext context, GfxAccel
 D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer buffer);
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
 
+GfxResult gfxBufferSetResourceState(GfxContext context, GfxBuffer buffer, D3D12_RESOURCE_STATES state);
+GfxResult gfxTextureSetResourceState(GfxContext context, GfxTexture texture, D3D12_RESOURCE_STATES state);
+
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
 
 GfxResult gfxExecute(GfxContext context);
