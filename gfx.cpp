@@ -1982,10 +1982,10 @@ public:
 
     GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
     {
-        return createTexture2D(window_width_, window_height_, format, 1, clear_value, Texture::kFlag_AutoResize);
+        return createTexture2D(window_width_, window_height_, format, 1, clear_value, D3D12_RESOURCE_FLAG_NONE, Texture::kFlag_AutoResize);
     }
 
-    GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, uint32_t flags = 0)
+    GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags, uint32_t flags = 0)
     {
         GfxTexture texture = {};
         if(isInterop() && (flags & Texture::kFlag_AutoResize) != 0)
@@ -2011,6 +2011,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2037,10 +2038,38 @@ public:
         gfx_texture.initial_resource_state_ = resource_state;
         gfx_texture.transitioned_ = false;
         gfx_texture.flags_ = flags;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
-    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2067,6 +2096,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2089,10 +2119,38 @@ public:
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.initial_resource_state_ = resource_state;
         gfx_texture.transitioned_ = false;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
-    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2119,6 +2177,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2141,10 +2200,38 @@ public:
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.initial_resource_state_ = resource_state;
         gfx_texture.transitioned_ = false;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
-    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2164,6 +2251,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2186,6 +2274,34 @@ public:
         gfx_texture.resource_state_ = resource_state;
         gfx_texture.initial_resource_state_ = resource_state;
         gfx_texture.transitioned_ = false;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
@@ -3389,7 +3505,8 @@ public:
             return kGfxResult_NoError;  // nothing to be copied
         bool transition = transitionResource(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
         transition |= transitionResource(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
-        submitPipelineBarriers();   // transition our resources if needed
+        if(transition)
+            submitPipelineBarriers();   // transition our resources if needed
         if(dst.mip_levels == src.mip_levels)
             command_list_->CopyResource(dst_texture.resource_, src_texture.resource_);
         else
@@ -3434,7 +3551,7 @@ public:
             rect.right  = (LONG)resource_desc.Width;
             rect.bottom = (LONG)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-            submitPipelineBarriers();   // transition our resources if needed
+            submitPipelineBarriers();
             command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, gfx_texture.clear_value_[0], (UINT8)gfx_texture.clear_value_[1], 1, &rect);
         }
         else
@@ -3447,7 +3564,7 @@ public:
             rect.right  = (LONG)resource_desc.Width;
             rect.bottom = (LONG)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            submitPipelineBarriers();   // transition our resources if needed
+            submitPipelineBarriers();
             command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]), gfx_texture.clear_value_, 1, &rect);
         }
         return kGfxResult_NoError;
@@ -9965,36 +10082,36 @@ GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float cons
     return gfx->createTexture2D(format, clear_value);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(width, height, format, mip_levels, clear_value);
+    return gfx->createTexture2D(width, height, format, mip_levels, clear_value, flags);
 }
 
-GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels, clear_value);
+    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels, clear_value, flags);
 }
 
-GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture3D(width, height, depth, format, mip_levels, clear_value);
+    return gfx->createTexture3D(width, height, depth, format, mip_levels, clear_value, flags);
 }
 
-GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTextureCube(size, format, mip_levels, clear_value);
+    return gfx->createTextureCube(size, format, mip_levels, clear_value, flags);
 }
 
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
