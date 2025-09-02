@@ -85,8 +85,10 @@ endif()
 set(WINDOWS_KIT_LIBRARY_DIR ${CMAKE_WINDOWS_KITS_10_DIR}/Lib/${WINDOWS_KIT_VERSION}/um/x64)
 set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} ${WINDOWS_KIT_LIBRARY_DIR})
 find_library(D3D12_LIB NAMES d3d12 REQUIRED)
-find_library(DXGI_LIB NAMES dxgi REQUIRED)
-target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
+find_library(DXGI_LIB NAMES dxgi)
+if(DXGI_LIB)
+  target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
+endif()
 
 set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
 FetchContent_Declare(
@@ -106,12 +108,12 @@ else()
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 616)
-set(GFX_AGILITY_MICRO_VERSION 0)
+set(GFX_AGILITY_VERSION 717)
+set(GFX_AGILITY_MICRO_VERSION 1)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
-    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}"
+    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}-preview"
     SOURCE_DIR     "${GFX_AGILITY_PATH}"
     FIND_PACKAGE_ARGS NAMES DirectX12-Agility
 )
@@ -137,7 +139,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
