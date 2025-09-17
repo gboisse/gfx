@@ -9129,7 +9129,7 @@ private:
         if(experimental_shaders_)
         {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
-            shader_args.push_back(L"-select-validator internal");
+            //shader_args.push_back(L"-select-validator internal");
         }
 
         std::vector<std::wstring> exports;
