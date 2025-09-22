@@ -6052,6 +6052,7 @@ private:
                     {
                     case D3D_SRV_DIMENSION_BUFFER:
                         kernel_parameter.type_ = Kernel::Parameter::kType_Buffer;
+                        kernel_parameter.raw_access_ = true;
                         break;
                     case D3D_SRV_DIMENSION_TEXTURE2D:
                         kernel_parameter.type_ = Kernel::Parameter::kType_Texture2D;
@@ -8118,9 +8119,21 @@ private:
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                         srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
                         srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                        srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
-                        srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
-                        srv_desc.Buffer.StructureByteStride = buffer.stride;
+                        if(parameter.raw_access_)
+                        {
+                            // https://learn.microsoft.com/en-us/windows/win32/direct3d11/overviews-direct3d-11-resources-intro#raw-views-of-buffers
+                            srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / 4;
+                            srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / 4);
+                            srv_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+                            srv_desc.Buffer.StructureByteStride = 0;
+                            srv_desc.Buffer.Flags = D3D12_BUFFER_SRV_FLAG_RAW;
+                        }
+                        else
+                        {
+                          srv_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
+                          srv_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
+                          srv_desc.Buffer.StructureByteStride = buffer.stride;
+                        }
                         device_->CreateShaderResourceView(gfx_buffer.resource_, &srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                     }
             }
