@@ -106,8 +106,8 @@ else()
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 616)
-set(GFX_AGILITY_MICRO_VERSION 0)
+set(GFX_AGILITY_VERSION 618)
+set(GFX_AGILITY_MICRO_VERSION 1)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
