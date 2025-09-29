@@ -22,9 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
 
-#include "gfx.h"
-#include "gfx_internal_types.h"
-
 #include <map>                  // std::map
 #include <deque>                // std::deque
 #include <memory>               // std::unique_ptr
@@ -73,6 +70,9 @@ SOFTWARE.
 #elif defined(_MSC_VER)
 #    pragma warning(pop)
 #endif
+
+#include "gfx.h"
+#include "gfx_internal_types.h"
 
 extern "C"
 {
