@@ -106,8 +106,8 @@ else()
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 616)
-set(GFX_AGILITY_MICRO_VERSION 0)
+set(GFX_AGILITY_VERSION 618)
+set(GFX_AGILITY_MICRO_VERSION 1)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
@@ -137,7 +137,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2407/dxc_2024_07_31.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
@@ -277,7 +277,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-        GIT_TAG        v1.0.10
+        GIT_TAG        v1.0.12
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/"
         FIND_PACKAGE_ARGS NAMES tinyexr
     )
