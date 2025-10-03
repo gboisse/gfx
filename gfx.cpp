@@ -9372,8 +9372,8 @@ private:
         }
 
         uint64_t shader_key = 0;
-        std::string shader_key_bytecode;
-        std::string shader_key_reflection;
+        std::wstring shader_key_bytecode;
+        std::wstring shader_key_reflection;
         if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
         {
             IDxcResult *dxc_preprocess = nullptr;
@@ -9416,27 +9416,45 @@ private:
                 }
                 if(cache_shaders_)
                 {
-                    std::string shader_key_file = "./shader_cache/";
+                    std::wstring shader_key_file = L"./shader_cache/";
                     static bool created_shader_cache_directory;
                     if(!created_shader_cache_directory)
                     {
-                        int32_t const result = _mkdir(shader_key_file.c_str());
+                        int32_t const result = _wmkdir(shader_key_file.c_str());
                         if(result < 0 && errno != EEXIST)
                             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
                         created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
                     }
-                    shader_key_file += std::to_string(shader_key);
-                    shader_key_bytecode = shader_key_file + ".bytecode";
-                    shader_key_reflection = shader_key_file + ".reflection";
-                    std::vector<WCHAR> wshader_key_bytecode(shader_key_bytecode.size() + 1);
-                    std::vector<WCHAR> wshader_key_reflection(shader_key_reflection.size() + 1);
-                    memset(wshader_key_bytecode.data(), 0, wshader_key_bytecode.size() * sizeof(WCHAR));
-                    memset(wshader_key_reflection.data(), 0, wshader_key_reflection.size() * sizeof(WCHAR));
-                    mbstowcs(wshader_key_bytecode.data(), shader_key_bytecode.data(), shader_key_bytecode.size());
-                    mbstowcs(wshader_key_reflection.data(), shader_key_reflection.data(), shader_key_reflection.size());
+                    std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
+                    std::wstring file_prefix;
+                    if(is_directory(file_path))
+                        file_prefix = relative(file_path).generic_wstring();
+                    else
+                    {
+                        file_prefix.resize(mbstowcs(nullptr, program.file_path_.c_str(), 0));
+                        mbstowcs(file_prefix.data(), program.file_path_.c_str(), program.file_path_.size());
+                    }
+                    file_prefix += L'_';
+                    if(program.file_name_)
+                    {
+                        uint64_t size = file_prefix.size();
+                        file_prefix.resize(size + mbstowcs(nullptr, program.file_name_.c_str(), 0));
+                        mbstowcs(file_prefix.data() + size, program.file_name_.c_str(), program.file_name_.size());
+                        file_prefix += L'_';
+                    }
+                    uint64_t size = file_prefix.size();
+                    file_prefix.resize(file_prefix.size() + mbstowcs(nullptr, kernel.entry_point_.c_str(), 0));
+                    mbstowcs(file_prefix.data() + size, kernel.entry_point_.c_str(), kernel.entry_point_.size());
+                    file_prefix += '_';
+                    std::transform(file_prefix.begin(), file_prefix.end(), file_prefix.begin(),
+                        [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
+                    shader_key_file += file_prefix;
+                    shader_key_file += std::to_wstring(shader_key);
+                    shader_key_bytecode = shader_key_file + L".bytecode";
+                    shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
-                    dxc_utils_->LoadFile(wshader_key_bytecode.data(), nullptr, &bytecode_blob);
-                    dxc_utils_->LoadFile(wshader_key_reflection.data(), nullptr, &reflection_blob);
+                    dxc_utils_->LoadFile(shader_key_bytecode.data(), nullptr, &bytecode_blob);
+                    dxc_utils_->LoadFile(shader_key_reflection.data(), nullptr, &reflection_blob);
                     if(bytecode_blob != nullptr && reflection_blob != nullptr)
                     {
                         DxcBuffer reflection_data = {};
@@ -9539,13 +9557,13 @@ private:
                 shader.shader_reflection_ = reflection;
                 if(cache_shaders_)
                 {
-                    FILE *fd = fopen(shader_key_bytecode.c_str(), "wb");
+                    FILE *fd = _wfopen(shader_key_bytecode.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
                         fclose(fd); // write out bytecode for shader caching
                     }
-                    fd = fopen(shader_key_reflection.c_str(), "wb");
+                    fd = _wfopen(shader_key_reflection.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
