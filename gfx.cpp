@@ -9437,14 +9437,17 @@ private:
                     file_prefix += L'_';
                     if(program.file_name_)
                     {
-                        uint64_t size = file_prefix.size();
+                        size_t size = file_prefix.size();
                         file_prefix.resize(size + mbstowcs(nullptr, program.file_name_.c_str(), 0));
                         mbstowcs(file_prefix.data() + size, program.file_name_.c_str(), program.file_name_.size());
                         file_prefix += L'_';
                     }
-                    uint64_t size = file_prefix.size();
+                    size_t size = file_prefix.size();
                     file_prefix.resize(file_prefix.size() + mbstowcs(nullptr, kernel.entry_point_.c_str(), 0));
                     mbstowcs(file_prefix.data() + size, kernel.entry_point_.c_str(), kernel.entry_point_.size());
+                    size = file_prefix.size();
+                    file_prefix.resize(file_prefix.size() + mbstowcs(nullptr, shader_extensions_[shader_type], 0));
+                    mbstowcs(file_prefix.data() + size, shader_extensions_[shader_type], strlen(shader_extensions_[shader_type]));
                     file_prefix += '_';
                     std::transform(file_prefix.begin(), file_prefix.end(), file_prefix.begin(),
                         [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
