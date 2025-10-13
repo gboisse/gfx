@@ -118,7 +118,7 @@ class GfxInternal
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
 
-    IDXGISwapChain3 *swap_chain_ = nullptr;
+    IDXGISwapChain4 *swap_chain_ = nullptr;
     D3D12MA::Allocator *mem_allocator_ = nullptr;
     ID3D12CommandSignature *dispatch_signature_ = nullptr;
     ID3D12CommandSignature *multi_draw_signature_ = nullptr;
@@ -4926,6 +4926,17 @@ public:
         resetState();
 
         return kGfxResult_NoError;
+    }
+
+    IDXGISwapChain4* getSwapChain()
+    {
+        return swap_chain_;
+    }
+
+    void setSwapChain(IDXGISwapChain4 *swapchain)
+    {
+        // TODO recreate images
+        swap_chain_ = swapchain;
     }
 
     GfxBuffer createBuffer(ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
@@ -10955,6 +10966,23 @@ GfxResult gfxResetCommandListState(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->resetCommandListState();
+}
+
+IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getSwapChain();
+}
+
+void gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx)
+    {
+        return;
+    }
+    return gfx->setSwapChain(swapchain);
 }
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)

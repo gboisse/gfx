@@ -25,7 +25,7 @@ SOFTWARE.
 #define GFX_INCLUDE_GFX_H
 
 #include <d3d12.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include "gfx_core.h"
 
 
@@ -479,6 +479,10 @@ ID3D12CommandQueue *gfxGetCommandQueue(GfxContext context);
 ID3D12GraphicsCommandList *gfxGetCommandList(GfxContext context);
 GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *command_list);
 GfxResult gfxResetCommandListState(GfxContext context); // call this function before returning to gfx after externally modifying the state on the command list
+
+IDXGISwapChain4* gfxGetSwapChain(GfxContext context);
+void             gfxSetSwapChain(IDXGISwapChain4 *swapchain);
+
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
