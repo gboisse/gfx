@@ -9324,6 +9324,7 @@ private:
             shader_args.push_back(DXC_ARG_DEBUG);
             shader_args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
+            shader_args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);
         }
 
         std::vector<std::wstring> user_defines;
