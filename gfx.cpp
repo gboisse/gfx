@@ -9326,6 +9326,8 @@ private:
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
             shader_args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);
         }
+        else
+            shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
 
         std::vector<std::wstring> user_defines;
         if(!kernel.defines_.empty())
