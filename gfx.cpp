@@ -9283,6 +9283,7 @@ private:
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
         shader_args.push_back(L"-fdiagnostics-format=msvc");
+        shader_args.push_back(DXC_ARG_RESOURCES_MAY_ALIAS);
         if(experimental_shaders_)
         {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
