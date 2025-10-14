@@ -58,13 +58,6 @@ GfxContext gfxCreateContext(uint32_t width, uint32_t height, GfxCreateContextFla
 GfxResult gfxDestroyContext(GfxContext context);
 bool      gfxContextIsValid(GfxContext context);
 
-uint32_t gfxGetBackBufferWidth(GfxContext context);
-uint32_t gfxGetBackBufferHeight(GfxContext context);
-uint32_t gfxGetBackBufferIndex(GfxContext context);
-uint32_t gfxGetBackBufferCount(GfxContext context);
-DXGI_FORMAT gfxGetBackBufferFormat(GfxContext context);
-DXGI_COLOR_SPACE_TYPE gfxGetBackBufferColorSpace(GfxContext context);
-
 class GfxDisplayDesc { public: inline GfxDisplayDesc() {}
     float red_primary[2] = {0.0f, 0.0f};
     float green_primary[2] = {0.0f, 0.0f};
@@ -372,6 +365,17 @@ GfxResult gfxSbtGetGpuVirtualAddressRangeAndStride(GfxContext context,
     D3D12_GPU_VIRTUAL_ADDRESS_RANGE_AND_STRIDE *callable_shader_table);
 
 //!
+//! Backbuffer
+//! 
+GfxTexture            gfxGetBackBuffer(GfxContext context);
+uint32_t              gfxGetBackBufferWidth(GfxContext context);
+uint32_t              gfxGetBackBufferHeight(GfxContext context);
+uint32_t              gfxGetBackBufferIndex(GfxContext context);
+uint32_t              gfxGetBackBufferCount(GfxContext context);
+DXGI_FORMAT           gfxGetBackBufferFormat(GfxContext context);
+DXGI_COLOR_SPACE_TYPE gfxGetBackBufferColorSpace(GfxContext context);
+
+//!
 //! Command encoding.
 //!
 
@@ -481,7 +485,7 @@ GfxResult gfxSetCommandList(GfxContext context, ID3D12GraphicsCommandList *comma
 GfxResult gfxResetCommandListState(GfxContext context); // call this function before returning to gfx after externally modifying the state on the command list
 
 IDXGISwapChain4* gfxGetSwapChain(GfxContext context);
-void             gfxSetSwapChain(IDXGISwapChain4 *swapchain);
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain);
 
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
