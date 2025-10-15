@@ -126,7 +126,7 @@ class GfxInternal
     ID3D12CommandSignature *dispatch_rays_signature_ = nullptr;
     ID3D12CommandSignature *draw_mesh_signature_ = nullptr;
     std::vector<D3D12_RESOURCE_BARRIER> resource_barriers_;
-    GfxTexture *back_buffer_textures_ = nullptr;
+    ID3D12Resource **back_buffers_ = nullptr;
     D3D12MA::Allocation **back_buffer_allocations_ = nullptr;
     DXGI_FORMAT back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
     DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
@@ -417,8 +417,7 @@ class GfxInternal
     {
         enum Flag
         {
-            kFlag_AutoResize = 1 << 0,
-            kFlag_SkipStateValidation = 1 << 1, // TODO bit of a hack atm. 
+            kFlag_AutoResize = 1 << 0
         };
 
         inline bool isInterop() const { return (allocation_ == nullptr ? true : false); }
@@ -1052,14 +1051,14 @@ public:
         fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
         swap_chain_->SetColorSpace1(color_space_);
 
-        back_buffer_textures_ = (GfxTexture *)gfxMalloc(max_frames_in_flight_ * sizeof(GfxTexture));
+        back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         GFX_TRY(acquireSwapChainBuffers());
         back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
 
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        resource_barrier.Transition.pResource = getTextureResource(back_buffer_textures_[fence_index_]);
+        resource_barrier.Transition.pResource = back_buffers_[fence_index_];
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -1091,13 +1090,13 @@ public:
 
         GFX_TRY(initializeCommon(context));
 
-        back_buffer_textures_ = (GfxTexture *)gfxMalloc(max_frames_in_flight_ * sizeof(GfxTexture));
+        back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
         back_buffer_allocations_ = (D3D12MA::Allocation **)gfxMalloc(max_frames_in_flight_ * sizeof(D3D12MA::Allocation *));
         GFX_TRY(createBackBuffers());
         back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            command_list_->DiscardResource(getTextureResource(back_buffer_textures_[fence_index_]), nullptr);
+            command_list_->DiscardResource(back_buffers_[fence_index_], nullptr);
 
         return kGfxResult_NoError;
     }
@@ -1666,17 +1665,14 @@ public:
                     back_buffer_allocations_[i]->Release();
         gfxFree(back_buffer_allocations_);
         back_buffer_allocations_ = nullptr;
-        if(back_buffer_textures_ != nullptr)
+        if(back_buffers_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-                if(back_buffer_textures_[i] != GfxTexture{})
-                {
-                    destroyTexture(back_buffer_textures_[i]);
-                    back_buffer_textures_[i] = {};
-                }
+                if(back_buffers_[i] != nullptr)
+                    back_buffers_[i]->Release();
         gfxFree(back_buffer_rtvs_);
         back_buffer_rtvs_ = nullptr;
-        gfxFree(back_buffer_textures_);
-        back_buffer_textures_ = nullptr;
+        gfxFree(back_buffers_);
+        back_buffers_ = nullptr;
 
         if(mem_allocator_ != nullptr)
         {
@@ -1722,9 +1718,9 @@ public:
         return device_ != nullptr && mem_allocator_ != nullptr && device_->GetDeviceRemovedReason() == S_OK;
     }
 
-    inline GfxTexture getBackBuffer()
+    inline ID3D12Resource *getBackBuffer()
     {
-        return back_buffer_textures_[fence_index_];
+        return back_buffers_[fence_index_];
     }
 
     inline uint32_t getBackBufferWidth() const
@@ -4737,7 +4733,7 @@ public:
             for(uint32_t i = 0; i < textures_.size(); ++i)
             {
                 auto *texture = textures_.at(i);
-                if(texture != nullptr && (texture->flags_ & Texture::kFlag_SkipStateValidation) == 0)
+                if(texture != nullptr)
                 {
                     dbg_command_list_->AssertResourceState(texture->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, texture->resource_state_);
                 }
@@ -4776,14 +4772,10 @@ public:
                 D3D12_RESOURCE_BARRIER resource_barrier = {};
                 resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
                 resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                resource_barrier.Transition.pResource = getTextureResource(back_buffer_textures_[fence_index_]);
+                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
                 resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
                 resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
                 command_list_->ResourceBarrier(1, &resource_barrier);
-                Texture &gfx_texture = textures_[back_buffer_textures_[fence_index_]];
-                gfx_texture.resource_state_ = D3D12_RESOURCE_STATE_PRESENT;
-                //transitionResource(gfx_texture, D3D12_RESOURCE_STATE_PRESENT, kTransitionType_Implicit);
-                //submitPipelineBarriers();
                 command_list_->Close(); // close command list for submit
                 ID3D12CommandList *const command_lists[] = { command_list_ };
                 command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
@@ -4811,13 +4803,10 @@ public:
                 }
                 command_allocators_[fence_index_]->Reset();
                 command_list_->Reset(command_allocators_[fence_index_], nullptr);
-                resource_barrier.Transition.pResource = getTextureResource(back_buffer_textures_[fence_index_]);
+                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
                 resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
                 resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
                 command_list_->ResourceBarrier(1, &resource_barrier);
-                gfx_texture.resource_state_ = D3D12_RESOURCE_STATE_RENDER_TARGET;
-                //transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET, kTransitionType_Implicit);
-                //submitPipelineBarriers();
             }
             else
             {
@@ -4959,13 +4948,12 @@ public:
         {
             for (uint32_t i = 0; i < max_frames_in_flight_; ++i)
             {
-                destroyTexture(back_buffer_textures_[i]);
-                back_buffer_textures_[i] = {};
+                back_buffers_[i]->Release();
+                back_buffers_[i] = nullptr;
                 freeRTVDescriptor(back_buffer_rtvs_[i]);
             }
             [[maybe_unused]] auto count = swap_chain_->Release();
-            [[maybe_unused]] auto count2 = swap_chain_->Release();
-            GFX_ASSERT(count2 == 0);
+            GFX_ASSERT(count == 0);
             swap_chain_ = nullptr;
         }
         sync();
@@ -4980,7 +4968,7 @@ public:
             swap_chain_->SetColorSpace1(color_space_);
 
             // these should be allocated at the beginning.
-            GFX_ASSERT(back_buffer_textures_ && back_buffer_rtvs_);
+            GFX_ASSERT(back_buffers_ && back_buffer_rtvs_);
 
             // recreate swap chain buffers and RTVs
             GFX_TRY(acquireSwapChainBuffers());
@@ -4988,7 +4976,7 @@ public:
 
             D3D12_RESOURCE_BARRIER resource_barrier = {};
             resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            resource_barrier.Transition.pResource   = getTextureResource(back_buffer_textures_[fence_index_]);
+            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
             resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
             resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
             resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -9813,14 +9801,10 @@ private:
         {
             char buffer[25];
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
-            ID3D12Resource *texture = nullptr;
-            if(!SUCCEEDED(swap_chain_->GetBuffer(i, IID_PPV_ARGS(&texture))))
+            if(!SUCCEEDED(swap_chain_->GetBuffer(i, IID_PPV_ARGS(&back_buffers_[i]))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to acquire back buffer");
-            SetDebugName(texture, buffer);
 
-            back_buffer_textures_[i] = createTexture(texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            Texture &gfx_texture     = textures_[back_buffer_textures_[i]];
-            gfx_texture.flags_ |= Texture::Flag::kFlag_SkipStateValidation;
+            SetDebugName(back_buffers_[i], buffer);
         }
 
         return kGfxResult_NoError;
@@ -9848,13 +9832,10 @@ private:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
             float const clear_value[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
-            ID3D12Resource *texture = nullptr;
             GFX_TRY(createResource(allocation_desc, resource_desc, resource_state, clear_value,
-                &back_buffer_allocations_[i], IID_PPV_ARGS(&texture)));
+                &back_buffer_allocations_[i], IID_PPV_ARGS(&back_buffers_[i])));
 
-            SetDebugName(texture, buffer);
-
-            back_buffer_textures_[i] = createTexture(texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
+            SetDebugName(back_buffers_[i], buffer);
         }
 
         return kGfxResult_NoError;
@@ -9867,8 +9848,8 @@ private:
             back_buffer_rtvs_[i] = allocateRTVDescriptor();
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
-            GFX_ASSERT(back_buffer_textures_[i] != GfxTexture{});
-            device_->CreateRenderTargetView(getTextureResource(back_buffer_textures_[i]), nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
+            GFX_ASSERT(back_buffers_[i] != nullptr);
+            device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
         return kGfxResult_NoError;
@@ -9932,8 +9913,8 @@ private:
         }
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
-            destroyTexture(back_buffer_textures_[i]);
-            back_buffer_textures_[i] = {};
+            collect(back_buffers_[i]);
+            back_buffers_[i] = nullptr;
             freeRTVDescriptor(back_buffer_rtvs_[i]);
         }
         sync(); // make sure the GPU is done with the previous swap chain before resizing
@@ -10045,7 +10026,7 @@ bool gfxContextIsValid(GfxContext context)
     return gfx->isValid();
 }
 
-GfxTexture gfxGetBackBuffer(GfxContext context)
+ID3D12Resource *gfxGetBackBuffer(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if (!gfx)
