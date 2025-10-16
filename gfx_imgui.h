@@ -40,7 +40,7 @@ SOFTWARE.
 GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames = nullptr, uint32_t font_count = 0,
     ImFontConfig const *font_configs = nullptr, ImGuiConfigFlags flags = 0);
 GfxResult gfxImGuiTerminate();
-GfxResult gfxImGuiRender();
+GfxResult gfxImGuiRender(GfxTexture optionalDrawToTexture = {});
 GfxResult gfxImGuiSetDPIScale(float scale);
 
 bool gfxImGuiIsInitialized();

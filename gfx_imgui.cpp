@@ -49,6 +49,8 @@ class GfxImGuiInternal
     GFX_NON_COPYABLE(GfxImGuiInternal);
 
     static uint32_t constexpr kConstant_Magic = 0x1E2D3C4Bu;
+    static uint32_t constexpr kKernelRenderToBackBuffer = 0;
+    static uint32_t constexpr kKernelRenderToTexture = 1;
 
     uint32_t const magic_ = kConstant_Magic;
 
@@ -58,7 +60,7 @@ class GfxImGuiInternal
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
-    GfxKernel imgui_kernel_ = {};
+    GfxKernel imgui_kernels_[2] = {};
     DXGI_COLOR_SPACE_TYPE colour_space_;
     float reference_white_adjust_ = 1.0f;
     char **font_filenames_ = nullptr;
@@ -73,7 +75,8 @@ public:
 
     GfxResult initializeKernels()
     {
-        gfxDestroyKernel(gfx_, imgui_kernel_);
+        for (auto& kernel : imgui_kernels_)
+            gfxDestroyKernel(gfx_, kernel);
         gfxDestroyProgram(gfx_, imgui_program_);
         GfxDrawState imgui_draw_state;
         GfxProgramDesc imgui_program_desc = {};
@@ -145,8 +148,12 @@ public:
             defines.push_back("OUTPUT_HDR10");
         else if(colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
             defines.push_back("OUTPUT_SRGB");
-        imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
-        if(!imgui_program_ || !imgui_kernel_)
+        imgui_kernels_[kKernelRenderToBackBuffer] = gfxCreateGraphicsKernel(
+            gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
+        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM));
+        imgui_kernels_[kKernelRenderToTexture] = gfxCreateGraphicsKernel(
+            gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
+        if(!imgui_program_ || !imgui_kernels_[kKernelRenderToBackBuffer] || !imgui_kernels_[kKernelRenderToTexture])
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
         GfxDisplayDesc display_desc = gfxGetDisplayDescription(gfx_);
         reference_white_adjust_     = display_desc.reference_sdr_white_level;
@@ -314,14 +321,15 @@ public:
                     vertex_buffers_[i].~GfxBuffer();
                 }
             GFX_TRY(gfxDestroyProgram(gfx_, imgui_program_));
-            GFX_TRY(gfxDestroyKernel(gfx_, imgui_kernel_));
+            for (auto& kernel : imgui_kernels_)
+                GFX_TRY(gfxDestroyKernel(gfx_, kernel));
             gfxFree(vertex_buffers_);
             gfxFree(index_buffers_);
         }
         return kGfxResult_NoError;
     }
 
-    GfxResult render()
+    GfxResult render(GfxTexture optionalDrawToTexture)
     {
         char buffer[256];
         ImGuiIO &io = ImGui::GetIO();
@@ -393,7 +401,15 @@ public:
             gfxProgramSetParameter(gfx_, imgui_program_, "ProjectionMatrix", projection_matrix);
             gfxProgramSetParameter(gfx_, imgui_program_, "ReferenceWhiteAdjust", reference_white_adjust_);
 
-            gfxCommandBindKernel(gfx_, imgui_kernel_);
+            if (optionalDrawToTexture)
+            {
+                gfxCommandBindKernel(gfx_, imgui_kernels_[kKernelRenderToTexture]);
+                gfxCommandBindColorTarget(gfx_, 0, optionalDrawToTexture);
+            }
+            else
+            {
+                gfxCommandBindKernel(gfx_, imgui_kernels_[kKernelRenderToBackBuffer]);
+            }
             gfxCommandBindIndexBuffer(gfx_, index_buffer);
             gfxCommandBindVertexBuffer(gfx_, vertex_buffer);
             gfxCommandSetViewport(gfx_);    // draw to back buffer
@@ -465,11 +481,11 @@ GfxResult gfxImGuiTerminate()
     return kGfxResult_NoError;
 }
 
-GfxResult gfxImGuiRender()
+GfxResult gfxImGuiRender(GfxTexture optionalDrawToTexture)
 {
     GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
     if(!gfx_imgui) return kGfxResult_NoError;   // nothing to render
-    return gfx_imgui->render();
+    return gfx_imgui->render(optionalDrawToTexture);
 }
 
 GfxResult gfxImGuiSetDPIScale(float scale)
