@@ -150,7 +150,9 @@ public:
             defines.push_back("OUTPUT_SRGB");
         imgui_kernels_[kKernelRenderToBackBuffer] = gfxCreateGraphicsKernel(
             gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
-        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM));
+        // Blend state for render to texture requires more precision on alpha than 2 bits. So we can't use DXGI_FORMAT_R10G10B10A2_UNORM.
+        GFX_TRY(gfxDrawStateSetBlendMode(imgui_draw_state, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_ONE, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD));
+        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM)); // see gfx_imgui.cpp
         imgui_kernels_[kKernelRenderToTexture] = gfxCreateGraphicsKernel(
             gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
         if(!imgui_program_ || !imgui_kernels_[kKernelRenderToBackBuffer] || !imgui_kernels_[kKernelRenderToTexture])
@@ -404,6 +406,8 @@ public:
             if (optionalDrawToTexture)
             {
                 gfxCommandBindKernel(gfx_, imgui_kernels_[kKernelRenderToTexture]);
+                gfxCommandClearTexture(gfx_, optionalDrawToTexture);
+                gfxTextureSetResourceState(gfx_, optionalDrawToTexture, D3D12_RESOURCE_STATE_RENDER_TARGET);
                 gfxCommandBindColorTarget(gfx_, 0, optionalDrawToTexture);
             }
             else
