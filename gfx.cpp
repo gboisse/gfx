@@ -4952,8 +4952,7 @@ public:
                 back_buffers_[i] = nullptr;
                 freeRTVDescriptor(back_buffer_rtvs_[i]);
             }
-            [[maybe_unused]] auto count = swap_chain_->Release();
-            GFX_ASSERT(count == 0);
+            swap_chain_->Release();
             swap_chain_ = nullptr;
         }
         sync();
@@ -4962,7 +4961,13 @@ public:
         if (swapchain)
         {
             swap_chain_ = swapchain;
-            swap_chain_->AddRef();
+            // no add ref here needed it seems
+
+            IDXGIFactory4 *factory = nullptr;
+            if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            factory->Release();
 
             fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
             swap_chain_->SetColorSpace1(color_space_);
