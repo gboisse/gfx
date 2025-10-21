@@ -4948,21 +4948,13 @@ public:
         // clear old resources associated with the old swapchain
         if (swap_chain_)
         {
-            {
-                uint32_t count = swap_chain_->AddRef();
-                count = swap_chain_->Release();
-                GFX_PRINTLN("swap_chain_->Release() %p %u", (void*)swap_chain_, count);
-            }
             for (uint32_t i = 0; i < max_frames_in_flight_; ++i)
             {
                 back_buffers_[i]->Release();
                 back_buffers_[i] = nullptr;
                 freeRTVDescriptor(back_buffer_rtvs_[i]);
             }
-            uint32_t count = swap_chain_->AddRef();
-            count = swap_chain_->Release();
-            count = swap_chain_->Release();
-            GFX_PRINTLN("swap_chain_->Release() %p %u", (void*)swap_chain_, count);
+            swap_chain_->Release();
             swap_chain_ = nullptr;
         }
         sync();
@@ -4971,13 +4963,13 @@ public:
         if (swapchain)
         {
             swap_chain_ = swapchain;
-            // no add ref here needed it seems
 
-            //IDXGIFactory4 *factory = nullptr;
-            //if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
-            //    GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
-            //factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
-            //factory->Release();
+            // Redo window association and preferences setup
+            IDXGIFactory4 *factory = nullptr;
+            if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            factory->Release();
 
             fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
             swap_chain_->SetColorSpace1(color_space_);
