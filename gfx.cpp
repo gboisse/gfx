@@ -10036,8 +10036,7 @@ bool gfxContextIsValid(GfxContext context)
 ID3D12Resource *gfxGetBackBuffer(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx)
-        return {};
+    if (!gfx) return nullptr;
     return gfx->getBackBuffer();
 }
 
