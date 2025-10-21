@@ -4989,13 +4989,13 @@ public:
             GFX_TRY(acquireSwapChainBuffers());
             GFX_TRY(createBackBufferRTVs());
 
-            //D3D12_RESOURCE_BARRIER resource_barrier = {};
-            //resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            //resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
-            //resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-            //resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            //resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            //command_list_->ResourceBarrier(1, &resource_barrier);
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
+            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
         }
 
         return kGfxResult_NoError;
