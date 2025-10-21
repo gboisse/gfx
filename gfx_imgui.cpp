@@ -406,7 +406,6 @@ public:
             if (optionalDrawToTexture)
             {
                 gfxCommandBindKernel(gfx_, imgui_kernels_[kKernelRenderToTexture]);
-                gfxCommandClearTexture(gfx_, optionalDrawToTexture);
                 gfxTextureSetResourceState(gfx_, optionalDrawToTexture, D3D12_RESOURCE_STATE_RENDER_TARGET);
                 gfxCommandBindColorTarget(gfx_, 0, optionalDrawToTexture);
             }
