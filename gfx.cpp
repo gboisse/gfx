@@ -1096,7 +1096,7 @@ public:
         back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            command_list_->DiscardResource(back_buffers_[fence_index_], nullptr);
+            command_list_->DiscardResource(back_buffers_[i], nullptr);
 
         return kGfxResult_NoError;
     }
@@ -1654,11 +1654,6 @@ public:
             dxc_include_handler_ = nullptr;
         }
 
-        if(swap_chain_ != nullptr)
-        {
-            swap_chain_->Release();
-            swap_chain_ = nullptr;
-        }
         if(back_buffer_allocations_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffer_allocations_[i] != nullptr)
@@ -1673,6 +1668,13 @@ public:
         back_buffer_rtvs_ = nullptr;
         gfxFree(back_buffers_);
         back_buffers_ = nullptr;
+
+        if(swap_chain_ != nullptr) // Done after removal of attachments as they hold 1 ref
+        {
+            [[maybe_unused]] uint32_t count = swap_chain_->Release();
+            GFX_ASSERT(count == 0);
+            swap_chain_ = nullptr;
+        }
 
         if(mem_allocator_ != nullptr)
         {
@@ -4946,13 +4948,21 @@ public:
         // clear old resources associated with the old swapchain
         if (swap_chain_)
         {
+            {
+                uint32_t count = swap_chain_->AddRef();
+                count = swap_chain_->Release();
+                GFX_PRINTLN("swap_chain_->Release() %p %u", (void*)swap_chain_, count);
+            }
             for (uint32_t i = 0; i < max_frames_in_flight_; ++i)
             {
                 back_buffers_[i]->Release();
                 back_buffers_[i] = nullptr;
                 freeRTVDescriptor(back_buffer_rtvs_[i]);
             }
-            swap_chain_->Release();
+            uint32_t count = swap_chain_->AddRef();
+            count = swap_chain_->Release();
+            count = swap_chain_->Release();
+            GFX_PRINTLN("swap_chain_->Release() %p %u", (void*)swap_chain_, count);
             swap_chain_ = nullptr;
         }
         sync();
@@ -4963,11 +4973,11 @@ public:
             swap_chain_ = swapchain;
             // no add ref here needed it seems
 
-            IDXGIFactory4 *factory = nullptr;
-            if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
-                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
-            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
-            factory->Release();
+            //IDXGIFactory4 *factory = nullptr;
+            //if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+            //    GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            //factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            //factory->Release();
 
             fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
             swap_chain_->SetColorSpace1(color_space_);
@@ -4979,13 +4989,13 @@ public:
             GFX_TRY(acquireSwapChainBuffers());
             GFX_TRY(createBackBufferRTVs());
 
-            D3D12_RESOURCE_BARRIER resource_barrier = {};
-            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
-            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            command_list_->ResourceBarrier(1, &resource_barrier);
+            //D3D12_RESOURCE_BARRIER resource_barrier = {};
+            //resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            //resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
+            //resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            //resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            //resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            //command_list_->ResourceBarrier(1, &resource_barrier);
         }
 
         return kGfxResult_NoError;
@@ -11039,10 +11049,7 @@ IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
 GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx)
-    {
-        return kGfxResult_InvalidParameter;
-    }
+    if (!gfx) return kGfxResult_InvalidParameter;
     return gfx->setSwapChain(swapchain);
 }
 
