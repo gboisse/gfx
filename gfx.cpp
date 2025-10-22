@@ -9437,8 +9437,12 @@ private:
         }
 
         uint64_t shader_key = 0;
-        std::string shader_key_bytecode;
-        std::string shader_key_reflection;
+        std::wstring shader_key_dir;
+        std::wstring shader_key_bytecode;
+        std::wstring shader_key_reflection;
+        std::wstring const shader_cache_dir = L"./shader_cache/";
+        std::wstring const shader_pdb_dir = L"./shader_pdb/";
+        constexpr uint32_t max_cached_files = 5;
         if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
         {
             IDxcResult *dxc_preprocess = nullptr;
@@ -9479,29 +9483,51 @@ private:
                     if(dxc_source) dxc_source->Release();
                     return; // done
                 }
+                static bool created_shader_cache_directory;
+                if(!created_shader_cache_directory)
+                {
+                    int32_t const result = _wmkdir(shader_cache_dir.c_str());
+                    if(result < 0 && errno != EEXIST)
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
+                    created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
+                }
+                std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
+                if(is_directory(file_path))
+                    shader_key_dir = relative(file_path).generic_wstring();
+                else
+                {
+                    shader_key_dir.resize(mbstowcs(nullptr, program.file_path_.c_str(), 0));
+                    mbstowcs(shader_key_dir.data(), program.file_path_.c_str(), program.file_path_.size());
+                }
+                shader_key_dir += L'_';
+                if(program.file_name_)
+                {
+                    size_t size = shader_key_dir.size();
+                    shader_key_dir.resize(size + mbstowcs(nullptr, program.file_name_.c_str(), 0));
+                    mbstowcs(shader_key_dir.data() + size, program.file_name_.c_str(), program.file_name_.size());
+                    shader_key_dir += L'_';
+                }
+                size_t size = shader_key_dir.size();
+                shader_key_dir.resize(shader_key_dir.size() + mbstowcs(nullptr, kernel.entry_point_.c_str(), 0));
+                mbstowcs(shader_key_dir.data() + size, kernel.entry_point_.c_str(), kernel.entry_point_.size());
+                size = shader_key_dir.size();
+                shader_key_dir.resize(shader_key_dir.size() + mbstowcs(nullptr, shader_extensions_[shader_type], 0));
+                mbstowcs(shader_key_dir.data() + size, shader_extensions_[shader_type], strlen(shader_extensions_[shader_type]));
+                std::transform(shader_key_dir.begin(), shader_key_dir.end(), shader_key_dir.begin(),
+                    [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
+                shader_key_dir += '/';
+                std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
+                int32_t const result = _wmkdir(shader_key_file.c_str());
+                if(result < 0 && errno != EEXIST)
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                shader_key_file += std::format(L"{:x}", shader_key);
                 if(cache_shaders_)
                 {
-                    std::string shader_key_file = "./shader_cache/";
-                    static bool created_shader_cache_directory;
-                    if(!created_shader_cache_directory)
-                    {
-                        int32_t const result = _mkdir(shader_key_file.c_str());
-                        if(result < 0 && errno != EEXIST)
-                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
-                        created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
-                    }
-                    shader_key_file += std::to_string(shader_key);
-                    shader_key_bytecode = shader_key_file + ".bytecode";
-                    shader_key_reflection = shader_key_file + ".reflection";
-                    std::vector<WCHAR> wshader_key_bytecode(shader_key_bytecode.size() + 1);
-                    std::vector<WCHAR> wshader_key_reflection(shader_key_reflection.size() + 1);
-                    memset(wshader_key_bytecode.data(), 0, wshader_key_bytecode.size() * sizeof(WCHAR));
-                    memset(wshader_key_reflection.data(), 0, wshader_key_reflection.size() * sizeof(WCHAR));
-                    mbstowcs(wshader_key_bytecode.data(), shader_key_bytecode.data(), shader_key_bytecode.size());
-                    mbstowcs(wshader_key_reflection.data(), shader_key_reflection.data(), shader_key_reflection.size());
+                    shader_key_bytecode = shader_key_file + L".bytecode";
+                    shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
-                    dxc_utils_->LoadFile(wshader_key_bytecode.data(), nullptr, &bytecode_blob);
-                    dxc_utils_->LoadFile(wshader_key_reflection.data(), nullptr, &reflection_blob);
+                    dxc_utils_->LoadFile(shader_key_bytecode.data(), nullptr, &bytecode_blob);
+                    dxc_utils_->LoadFile(shader_key_reflection.data(), nullptr, &reflection_blob);
                     if(bytecode_blob != nullptr && reflection_blob != nullptr)
                     {
                         DxcBuffer reflection_data = {};
@@ -9568,24 +9594,37 @@ private:
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
             static bool created_shader_pdb_directory;
-            std::string_view const shader_pdb_directory = "./shader_pdb";
-            std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
-            std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
-            wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
-            shader_file.resize(shader_pdb_directory.size() + pdb_name.size() + 1);
-            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory.data(), pdb_name.data());
             if(!created_shader_pdb_directory)
             {
-                int32_t const result = _mkdir(shader_pdb_directory.data());
+                int32_t const result = _wmkdir(shader_pdb_dir.c_str());
                 if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory.data());
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_dir.data());
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
-            FILE *fd = fopen(shader_file.data(), "wb");
+            std::wstring wpdb_name = shader_pdb_dir + shader_key_dir;
+            int32_t const result = _wmkdir(wpdb_name.c_str());
+            if(result < 0 && errno != EEXIST)
+                GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", wpdb_name.data());
+            wpdb_name += std::wstring(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
+            FILE *fd = _wfopen(wpdb_name.data(), L"wb");
             if(fd != nullptr)
             {
                 fwrite(dxc_pdb->GetBufferPointer(), dxc_pdb->GetBufferSize(), 1, fd);
                 fclose(fd); // write out PDB for shader debugging
+            }
+            // Delete older pdb files
+            std::filesystem::directory_iterator const end;
+            std::vector<std::filesystem::path>        pdb_files;
+            for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_pdb_dir + shader_key_dir)}; iter != end; ++iter)
+                if(is_regular_file(*iter))
+                    if(iter->path().extension() == ".pdb")
+                        pdb_files.emplace_back(*iter);
+            if(pdb_files.size() > max_cached_files)
+            {
+                std::sort(pdb_files.begin(), pdb_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
+                    return last_write_time(a) > last_write_time(b); });
+                for(size_t i = max_cached_files; i < pdb_files.size(); ++i)
+                    std::filesystem::remove(pdb_files[i]);
             }
         }
 
@@ -9604,17 +9643,44 @@ private:
                 shader.shader_reflection_ = reflection;
                 if(cache_shaders_)
                 {
-                    FILE *fd = fopen(shader_key_bytecode.c_str(), "wb");
+                    FILE *fd = _wfopen(shader_key_bytecode.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
                         fclose(fd); // write out bytecode for shader caching
                     }
-                    fd = fopen(shader_key_reflection.c_str(), "wb");
+                    fd = _wfopen(shader_key_reflection.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
                         fclose(fd); // write out reflection for shader caching
+                    }
+                    // Delete older cached files
+                    std::filesystem::directory_iterator const end;
+                    std::vector<std::filesystem::path>        bytecode_files;
+                    std::vector<std::filesystem::path>        reflection_files;
+                    for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_cache_dir + shader_key_dir)}; iter != end; ++iter)
+                        if(is_regular_file(*iter))
+                        {
+                            if(iter->path().extension() == ".bytecode")
+                                bytecode_files.emplace_back(*iter);
+                            else if(iter->path().extension() == ".reflection")
+                                reflection_files.emplace_back(*iter);
+                        }
+                    if(bytecode_files.size() > max_cached_files)
+                    {
+                        std::sort(bytecode_files.begin(), bytecode_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
+                            return last_write_time(a) > last_write_time(b); });
+                        for(size_t i = max_cached_files; i < bytecode_files.size(); ++i)
+                            std::filesystem::remove(bytecode_files[i]);
+                    }
+                    if (reflection_files.size() > max_cached_files)
+                    {
+                        std::sort(reflection_files.begin(), reflection_files.end(),
+                            [](std::filesystem::path const &a, std::filesystem::path const &b) {
+                                return last_write_time(a) > last_write_time(b); });
+                        for(size_t i = max_cached_files; i < reflection_files.size(); ++i)
+                            std::filesystem::remove(reflection_files[i]);
                     }
                 }
             }
