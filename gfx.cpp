@@ -9283,6 +9283,7 @@ private:
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
         shader_args.push_back(L"-fdiagnostics-format=msvc");
+        shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
         shader_args.push_back(DXC_ARG_RESOURCES_MAY_ALIAS);
         if(experimental_shaders_)
         {
@@ -9327,8 +9328,6 @@ private:
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
             shader_args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);
         }
-        else
-            shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
 
         std::vector<std::wstring> user_defines;
         if(!kernel.defines_.empty())
