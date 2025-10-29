@@ -244,7 +244,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.1
+        GIT_TAG        1.0.2
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
         FIND_PACKAGE_ARGS NAMES glm
     )
