@@ -4942,9 +4942,11 @@ public:
 
     GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
     {
+        if (!window_)
+            GFX_SET_ERROR(
+                kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
         finish();
         sync();
-
         // clear old resources associated with the old swapchain
         if (swap_chain_)
         {
@@ -4958,12 +4960,10 @@ public:
             swap_chain_ = nullptr;
         }
         sync();
-
         // bind the new swap chain
         if (swapchain)
         {
             swap_chain_ = swapchain;
-
             // Redo window association and preferences setup
             IDXGIFactory4 *factory = nullptr;
             if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
@@ -4989,7 +4989,6 @@ public:
             resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
             command_list_->ResourceBarrier(1, &resource_barrier);
         }
-
         return kGfxResult_NoError;
     }
 
