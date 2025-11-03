@@ -504,6 +504,9 @@ GfxResult gfxResetCommandList(GfxContext context);
 
 ID3D12Resource *gfxGetBackBuffer(GfxContext context);
 
+ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel);
+ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel);
+
 //!
 //! Template helpers.
 //!

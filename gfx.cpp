@@ -1725,6 +1725,22 @@ public:
         return back_buffers_[fence_index_];
     }
 
+    ID3D12RootSignature *getRootSignature(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.root_signature_;
+    }
+
+    ID3D12PipelineState *getPipelineState(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.pipeline_state_;
+    }
+
     inline uint32_t getBackBufferWidth() const
     {
         return window_width_;
@@ -10103,6 +10119,20 @@ ID3D12Resource *gfxGetBackBuffer(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if (!gfx) return nullptr;
     return gfx->getBackBuffer();
+}
+
+ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return nullptr;
+    return gfx->getRootSignature(kernel);
+}
+
+ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return nullptr;
+    return gfx->getPipelineState(kernel);
 }
 
 uint32_t gfxGetBackBufferWidth(GfxContext context)
