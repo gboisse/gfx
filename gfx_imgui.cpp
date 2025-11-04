@@ -61,7 +61,7 @@ class GfxImGuiInternal
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernels_[2] = {};
-    DXGI_COLOR_SPACE_TYPE colour_space_;
+    DXGI_COLOR_SPACE_TYPE backbuffer_colour_space_;
     float reference_white_adjust_ = 1.0f;
     char **font_filenames_ = nullptr;
     uint32_t font_count_ = 0;
@@ -176,7 +176,6 @@ public:
 
         if (!imgui_program_ || !imgui_kernels_[kKernelRenderToBackBuffer]
             || !imgui_kernels_[kKernelRenderToTexture])
-        {
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
         GfxDisplayDesc display_desc = gfxGetDisplayDescription(gfx_);
         reference_white_adjust_     = display_desc.reference_sdr_white_level;
