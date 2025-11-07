@@ -10140,12 +10140,12 @@ void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
     return gfx->getBufferData(buffer);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(format, clear_value);
+    return gfx->createTexture2D(format, clear_value, flags);
 }
 
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
