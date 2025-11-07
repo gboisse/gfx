@@ -59,7 +59,7 @@ class GfxImGuiInternal
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernel_ = {};
-    DXGI_COLOR_SPACE_TYPE colour_space_;
+    DXGI_COLOR_SPACE_TYPE colour_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     float reference_white_adjust_ = 1.0f;
     char **font_filenames_ = nullptr;
     uint32_t font_count_ = 0;
@@ -211,9 +211,10 @@ public:
             gfxDestroyBuffer(gfx_, font_buffer);
             return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
         }
+        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
         font_buffer_.setName("gfx_ImGuiFontBuffer");
         io.Fonts->TexID = (ImTextureID)&font_buffer_;
-        gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
+        GFX_TRY(gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer));
         GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
 
         return kGfxResult_NoError;
@@ -260,9 +261,8 @@ public:
             UINT dpi = GetDpiForWindow(window);
             dpi_scale_ = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
         }
-        GFX_TRY(initializeScale());
-
         GFX_TRY(initializeKernels());
+        GFX_TRY(initializeScale());
 
         index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         vertex_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -271,7 +271,6 @@ public:
             new(&index_buffers_[i]) GfxBuffer();
             new(&vertex_buffers_[i]) GfxBuffer();
         }
-        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
         ImGui::NewFrame();  // can now start submitting ImGui commands
 
         return kGfxResult_NoError;
@@ -331,12 +330,12 @@ public:
         DXGI_COLOR_SPACE_TYPE colour_space = gfxGetBackBufferColorSpace(gfx_);
         if(colour_space != colour_space_)
         {
-            initializeKernels();
+            GFX_TRY(initializeKernels());
         }
 
         if(dpi_scale_changed_)
         {
-            initializeScale();
+            GFX_TRY(initializeScale());
             dpi_scale_changed_ = false;
         }
 
