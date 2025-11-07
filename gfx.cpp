@@ -1980,9 +1980,9 @@ public:
         return gfx_buffer.data_;
     }
 
-    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
+    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
     {
-        return createTexture2D(window_width_, window_height_, format, 1, clear_value, D3D12_RESOURCE_FLAG_NONE, Texture::kFlag_AutoResize);
+        return createTexture2D(window_width_, window_height_, format, 1, clear_value, flags, Texture::kFlag_AutoResize);
     }
 
     GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags, uint32_t flags = 0)
