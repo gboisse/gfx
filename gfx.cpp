@@ -9671,7 +9671,7 @@ private:
     bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
         GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return false;
-        if((*buffer.resource_state_ & resource_state) == resource_state)
+        if((*buffer.resource_state_ & resource_state) == resource_state && (resource_state != 0 || *buffer.resource_state_ == resource_state))
         {
             if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
@@ -9740,7 +9740,7 @@ private:
 
     bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
-        if((texture.resource_state_ & resource_state) == resource_state)
+        if((texture.resource_state_ & resource_state) == resource_state && (resource_state != 0 || texture.resource_state_ == resource_state))
         {
             if(texture.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
