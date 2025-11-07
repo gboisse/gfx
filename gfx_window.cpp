@@ -277,7 +277,7 @@ private:
         GfxWindowInternal *gfx_window = (GfxWindowInternal *)GetWindowLongPtrA(window, GWLP_USERDATA);
         if(gfx_window != nullptr)
         {
-#    ifdef GFX_ENABLE_GUI
+#   ifdef GFX_ENABLE_GUI
             if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData == nullptr && gfxImGuiIsInitialized())
                 ImGui_ImplWin32_Init(gfx_window->window_);
 #   endif
