@@ -978,7 +978,6 @@ public:
         window_height_ = window_rect.bottom - window_rect.top;
 
         IDXGIOutput *output = nullptr;
-        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         UINT output_i  = 0;
         LONG best_area = -1;
         IDXGIOutput *current_output;
@@ -1000,6 +999,7 @@ public:
             output_i++;
         }
         back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
+        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         if(output != nullptr)
         {
             IDXGIOutput6 *output6 = nullptr;
@@ -1355,7 +1355,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate dummy descriptors");
         {
             D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-            rtv_desc.Format        = back_buffer_format_;
+            rtv_desc.Format        = getBackBufferFormat();
             rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             device_->CreateRenderTargetView(nullptr, &rtv_desc, rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_));
         }
@@ -1740,7 +1740,7 @@ public:
 
     inline DXGI_FORMAT getBackBufferFormat() const
     {
-        return back_buffer_format_;
+        return back_buffer_format_ == DXGI_FORMAT_R8G8B8A8_UNORM ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : back_buffer_format_;
     }
 
     inline DXGI_COLOR_SPACE_TYPE getBackBufferColorSpace() const
@@ -6508,7 +6508,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = back_buffer_format_;
+                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = getBackBufferFormat();
                 pso_desc.RTVFormats.RTVFormats.NumRenderTargets = 1;
             }
         }
@@ -6636,7 +6636,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats[0]    = back_buffer_format_;
+                pso_desc.RTVFormats[0]    = getBackBufferFormat();
                 pso_desc.NumRenderTargets = 1;
             }
         }
@@ -9832,7 +9832,7 @@ private:
             resource_desc.Height           = window_height_;
             resource_desc.DepthOrArraySize = 1;
             resource_desc.MipLevels        = 1;
-            resource_desc.Format           = back_buffer_format_;
+            resource_desc.Format           = getBackBufferFormat();
             resource_desc.SampleDesc.Count = 1;
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -9856,7 +9856,10 @@ private:
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
             GFX_ASSERT(back_buffers_[i] != nullptr);
-            device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
+            D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+            rtv_desc.Format        = getBackBufferFormat();
+            rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device_->CreateRenderTargetView(back_buffers_[i], &rtv_desc, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
         return kGfxResult_NoError;
