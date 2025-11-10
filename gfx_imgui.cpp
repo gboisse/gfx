@@ -57,7 +57,6 @@ class GfxImGuiInternal
     GfxSamplerState font_sampler_ = {};
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
-    GfxTexture render_texture_ = {};
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernel_ = {};
     GfxProgram composite_program_ = {};
@@ -134,13 +133,10 @@ public:
             "    col.a = 1.0 - col.a;\r\n"
             "    return col;\r\n"
             "}\r\n";
-        render_texture_ = gfxCreateTexture2D(gfx_, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, nullptr, D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);
-        if(!render_texture_)
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui render texture");
         imgui_program_ = gfxCreateProgram(gfx_, imgui_program_desc, "gfx_ImGuiProgram");
         GFX_TRY(gfxDrawStateSetBlendMode(imgui_draw_state, D3D12_BLEND_ONE, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD)); // enable alpha blending
         GFX_TRY(gfxDrawStateSetCullMode(imgui_draw_state, D3D12_CULL_MODE_NONE));
-        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, render_texture_.getFormat()));
+        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB));
         imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state);
         if(!imgui_program_ || !imgui_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
@@ -171,32 +167,31 @@ public:
             "    float2 inputPixel = texcoord * InputResolution;\r\n"
             "    float4 imgui = InputBuffer.Load(int3(inputPixel, 0));\r\n"
             "    float3 output = OutputBuffer.Load(int3(inputPixel, 0)).xyz;\r\n"
-            "#ifdef OUTPUT_SRGB\r\n"
+            "#ifdef OUTPUT_HDR\r\n"
+            "    imgui.rgb *= ReferenceWhiteAdjust;\r\n"
+            "#endif\r\n"
             "    output = lerp(imgui.rgb, output, imgui.a);\r\n"
+            "#ifdef OUTPUT_SRGB\r\n"
             "    // convert to srgb\r\n"
             "    output = select(output < 0.003041282560128f, 12.92f * output, 1.055010718947587f * pow(output, 1.0f / 2.4f) - 0.055010718947587f);\r\n"
-            "#else\r\n"
-            "#   ifdef OUTPUT_HDR10\r\n"
-            "    imgui.rgb *= ReferenceWhiteAdjust;\r\n"
-            "    output = lerp(imgui.rgb, output, imgui.a);\r\n"
+            "#elif defined(OUTPUT_HDR10)\r\n"
             "    // convert to HDR10\r\n"
             "    const float3x3 mat = float3x3(0.6274178028f, 0.3292815089f, 0.04330066592f, 0.06909923255f, 0.919541657f, 0.01135913096f, 0.01639600657f, 0.08803547174f, 0.89556849f);\r\n"
             "    output = mul(mat, output);\r\n"
             "    float3 powM1 = pow(output * (80.0f / 10000.0f), 0.1593017578125f);\r\n"
             "    output = pow((0.8359375f + 18.8515625f * powM1) / (1.0f + 18.6875f * powM1), 78.84375f);\r\n"
-            "#   else\r\n"
-            "    imgui.rgb *= ReferenceWhiteAdjust;\r\n"
-            "    output = lerp(imgui.rgb, output, imgui.a);\r\n"
-            "#   endif\r\n"
             "#endif\r\n"
             "    return float4(output, 1.0f);\r\n"
             "}\r\n";
         colour_space_ = gfxGetBackBufferColorSpace(gfx_);
+        DXGI_FORMAT const display_format = gfxGetBackBufferFormat(gfx_);
         std::vector<char const *> defines;
         if(colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
             defines.push_back("OUTPUT_HDR10");
-        else if(colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
+        else if(colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709 && display_format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
             defines.push_back("OUTPUT_SRGB");
+        if(display_format == DXGI_FORMAT_R16G16B16A16_FLOAT || (display_format == DXGI_FORMAT_R10G10B10A2_UNORM && colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020))
+            defines.push_back("OUTPUT_HDR");
         composite_program_ = gfxCreateProgram(gfx_, composite_program_desc, "gfx_ImGuiCompositeProgram");
         GfxDrawState composite_draw_state;
         GFX_TRY(gfxDrawStateSetCullMode(composite_draw_state, D3D12_CULL_MODE_NONE));
@@ -207,7 +202,6 @@ public:
         GfxDisplayDesc display_desc = gfxGetDisplayDescription(gfx_);
         reference_white_adjust_     = display_desc.reference_sdr_white_level;
         GFX_TRY(gfxProgramSetParameter(gfx_, composite_program_, "ReferenceWhiteAdjust", reference_white_adjust_ * (1.0f / 80.0f)));
-        GFX_TRY(gfxProgramSetParameter(gfx_, composite_program_, "InputBuffer", render_texture_));
 
         return kGfxResult_NoError;
     }
@@ -357,7 +351,6 @@ public:
         if(gfx_)
         {
             GFX_TRY(gfxDestroyTexture(gfx_, font_buffer_));
-            GFX_TRY(gfxDestroyTexture(gfx_, render_texture_));
             GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_));
             if(index_buffers_ != nullptr)
                 for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
@@ -381,9 +374,10 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult render()
+    GfxResult render(GfxTexture output_texture)
     {
-        char buffer[256];
+        if (!output_texture && gfxGetBackBufferFormat(gfx_) != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "ImGui can only composite to sRGB render targets");
         ImGuiIO &io = ImGui::GetIO();
         ImGui::Render();    // implicit ImGui::EndFrame()
         ImDrawData const *draw_data = ImGui::GetDrawData();
@@ -402,7 +396,9 @@ public:
 
         if(draw_data->TotalVtxCount > 0)
         {
-            gfxCommandClearTexture(gfx_, render_texture_);
+            if (!!output_texture)
+                gfxCommandClearTexture(gfx_, output_texture);
+            char buffer[256];
             GfxBuffer &index_buffer = index_buffers_[buffer_index];
             uint64_t const index_buffer_size = draw_data->TotalIdxCount * sizeof(ImDrawIdx);
             if(index_buffer_size > index_buffer.getSize())
@@ -452,13 +448,13 @@ public:
                 { (R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f }
             };
             gfxProgramSetParameter(gfx_, imgui_program_, "ProjectionMatrix", projection_matrix);
-            gfxProgramSetParameter(gfx_, imgui_program_, "ReferenceWhiteAdjust", reference_white_adjust_);
 
             gfxCommandBindKernel(gfx_, imgui_kernel_);
             gfxCommandBindIndexBuffer(gfx_, index_buffer);
             gfxCommandBindVertexBuffer(gfx_, vertex_buffer);
-            gfxCommandBindColorTarget(gfx_, 0, render_texture_);
-            gfxCommandSetViewport(gfx_);    // draw to render texture
+            if (!!output_texture)
+                gfxCommandBindColorTarget(gfx_, 0, output_texture);
+            gfxCommandSetViewport(gfx_); // draw to render texture
 
             int32_t vtx_offset = 0;
             int32_t idx_offset = 0;
@@ -497,8 +493,9 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult composite(GfxTexture color_texture)
+    GfxResult composite(GfxTexture color_texture, GfxTexture imgui_texture)
     {
+        gfxProgramSetParameter(gfx_, composite_program_, "InputBuffer", imgui_texture);
         gfxProgramSetParameter(gfx_, composite_program_, "OutputBuffer", color_texture);
         float const dimensions[2] = {
             (float)gfxGetBackBufferWidth(gfx_), (float)gfxGetBackBufferHeight(gfx_)};
@@ -538,18 +535,18 @@ GfxResult gfxImGuiTerminate()
     return kGfxResult_NoError;
 }
 
-GfxResult gfxImGuiRender()
+GfxResult gfxImGuiRender(GfxTexture output_texture)
 {
     GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
     if(!gfx_imgui) return kGfxResult_NoError;   // nothing to render
-    return gfx_imgui->render();
+    return gfx_imgui->render(output_texture);
 }
 
-GfxResult gfxImGuiComposite(GfxTexture color_texture)
+GfxResult gfxImGuiComposite(GfxTexture color_texture, GfxTexture imgui_texture)
 {
     GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
     if(!gfx_imgui) return kGfxResult_NoError;   // nothing to do
-    return gfx_imgui->composite(color_texture);
+    return gfx_imgui->composite(color_texture, imgui_texture);
 }
 
 GfxResult gfxImGuiSetDPIScale(float scale)
