@@ -43,7 +43,7 @@ Params main(in Vertex vertex)
     float4x4 previous_transform = g_PreviousTransformBuffer[g_InstanceId];
     float4   position           = mul(transform, vertex.position);
     float4   previous_position  = mul(previous_transform, vertex.position);
-    float3   normal             = TransformDirection(transform, vertex.normal.xyz);
+    float3   normal             = TransformNormal(transform, vertex.normal.xyz);
 
     Params params;
     params.position = mul(g_ViewProjection, position);
