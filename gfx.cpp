@@ -6730,7 +6730,7 @@ private:
             for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_formats_); ++i)
                 if(!bound_color_targets_[i].texture_)
                 {
-                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
+                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN && (i != 0 || kernel.draw_state_.color_formats_[i] != getBackBufferFormat()))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at color target %u", i);
                 }
                 else if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
