@@ -279,7 +279,10 @@ public:
         gfx_ = gfx; // keep reference to context
 
         IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
+        ImGuiContext* gui_context = ImGui::CreateContext();
+        if(gui_context == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Failed to initialize Imgui context");
+        ImGui::SetCurrentContext(gui_context);
         ImGui::StyleColorsDark();
         ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= flags; // config flags
@@ -335,6 +338,7 @@ public:
             if(ImGui::GetIO().BackendPlatformUserData != nullptr)
                 ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
+            ImGui::SetCurrentContext(nullptr);
         }
         if(font_count_ > 0)
         {
