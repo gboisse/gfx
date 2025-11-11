@@ -9418,14 +9418,6 @@ private:
                     if(dxc_source) dxc_source->Release();
                     return; // done
                 }
-                static bool created_shader_cache_directory;
-                if(!created_shader_cache_directory)
-                {
-                    int32_t const result = _wmkdir(shader_cache_dir.c_str());
-                    if(result < 0 && errno != EEXIST)
-                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
-                    created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
-                }
                 std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
                 if(is_directory(file_path))
                     shader_key_dir = relative(file_path).generic_wstring();
@@ -9451,13 +9443,21 @@ private:
                 std::transform(shader_key_dir.begin(), shader_key_dir.end(), shader_key_dir.begin(),
                     [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
                 shader_key_dir += '/';
-                std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
-                int32_t const result = _wmkdir(shader_key_file.c_str());
-                if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
-                shader_key_file += std::format(L"{:x}", shader_key);
                 if(cache_shaders_)
                 {
+                    static bool created_shader_cache_directory;
+                    if(!created_shader_cache_directory)
+                    {
+                        int32_t const result = _wmkdir(shader_cache_dir.c_str());
+                        if(result < 0 && errno != EEXIST)
+                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
+                        created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
+                    }
+                    std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
+                    int32_t const result = _wmkdir(shader_key_file.c_str());
+                    if(result < 0 && errno != EEXIST)
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                    shader_key_file += std::format(L"{:x}", shader_key);
                     shader_key_bytecode = shader_key_file + L".bytecode";
                     shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
