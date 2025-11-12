@@ -11233,4 +11233,3 @@ GfxResult gfxResetCommandList(GfxContext context)
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->resetCommandList();
 }
-
