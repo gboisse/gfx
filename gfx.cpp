@@ -978,7 +978,6 @@ public:
         window_height_ = window_rect.bottom - window_rect.top;
 
         IDXGIOutput *output = nullptr;
-        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         UINT output_i  = 0;
         LONG best_area = -1;
         IDXGIOutput *current_output;
@@ -1000,6 +999,7 @@ public:
             output_i++;
         }
         back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
+        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         if(output != nullptr)
         {
             IDXGIOutput6 *output6 = nullptr;
@@ -1355,7 +1355,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate dummy descriptors");
         {
             D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-            rtv_desc.Format        = back_buffer_format_;
+            rtv_desc.Format        = getBackBufferFormat();
             rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             device_->CreateRenderTargetView(nullptr, &rtv_desc, rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_));
         }
@@ -1717,27 +1717,6 @@ public:
         return device_ != nullptr && mem_allocator_ != nullptr && device_->GetDeviceRemovedReason() == S_OK;
     }
 
-    inline ID3D12Resource *getBackBuffer()
-    {
-        return back_buffers_[fence_index_];
-    }
-
-    ID3D12RootSignature *getRootSignature(GfxKernel kernel)
-    {
-        if(!kernel_handles_.has_handle(kernel.handle))
-            return nullptr;
-        Kernel const &gfx_kernel = kernels_[kernel];
-        return gfx_kernel.root_signature_;
-    }
-
-    ID3D12PipelineState *getPipelineState(GfxKernel kernel)
-    {
-        if(!kernel_handles_.has_handle(kernel.handle))
-            return nullptr;
-        Kernel const &gfx_kernel = kernels_[kernel];
-        return gfx_kernel.pipeline_state_;
-    }
-
     inline uint32_t getBackBufferWidth() const
     {
         return window_width_;
@@ -1760,7 +1739,7 @@ public:
 
     inline DXGI_FORMAT getBackBufferFormat() const
     {
-        return back_buffer_format_;
+        return back_buffer_format_ == DXGI_FORMAT_R8G8B8A8_UNORM ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : back_buffer_format_;
     }
 
     inline DXGI_COLOR_SPACE_TYPE getBackBufferColorSpace() const
@@ -2000,9 +1979,9 @@ public:
         return gfx_buffer.data_;
     }
 
-    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
+    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
     {
-        return createTexture2D(window_width_, window_height_, format, 1, clear_value, D3D12_RESOURCE_FLAG_NONE, Texture::kFlag_AutoResize);
+        return createTexture2D(window_width_, window_height_, format, 1, clear_value, flags, Texture::kFlag_AutoResize);
     }
 
     GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags, uint32_t flags = 0)
@@ -4948,63 +4927,6 @@ public:
         return kGfxResult_NoError;
     }
 
-    IDXGISwapChain4* getSwapChain()
-    {
-        return swap_chain_;
-    }
-
-    GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
-    {
-        if (!window_)
-            GFX_SET_ERROR(
-                kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
-        finish();
-        sync();
-        // clear old resources associated with the old swapchain
-        if (swap_chain_)
-        {
-            for (uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            {
-                back_buffers_[i]->Release();
-                back_buffers_[i] = nullptr;
-                freeRTVDescriptor(back_buffer_rtvs_[i]);
-            }
-            swap_chain_->Release();
-            swap_chain_ = nullptr;
-        }
-        sync();
-        // bind the new swap chain
-        if (swapchain)
-        {
-            swap_chain_ = swapchain;
-            // Redo window association and preferences setup
-            IDXGIFactory4 *factory = nullptr;
-            if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
-                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
-            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
-            factory->Release();
-
-            fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
-            swap_chain_->SetColorSpace1(color_space_);
-
-            // these should be allocated at the beginning.
-            GFX_ASSERT(back_buffers_ && back_buffer_rtvs_);
-
-            // recreate swap chain buffers and RTVs
-            GFX_TRY(acquireSwapChainBuffers());
-            GFX_TRY(createBackBufferRTVs());
-
-            D3D12_RESOURCE_BARRIER resource_barrier = {};
-            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
-            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
-            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
-            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-            command_list_->ResourceBarrier(1, &resource_barrier);
-        }
-        return kGfxResult_NoError;
-    }
-
     GfxBuffer createBuffer(ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
     {
         GfxBuffer buffer = {};
@@ -5283,6 +5205,84 @@ public:
         if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object");
         return handle;
+    }
+
+    inline ID3D12Resource *getBackBuffer()
+    {
+        return back_buffers_[fence_index_];
+    }
+
+    ID3D12RootSignature *getRootSignature(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.root_signature_;
+    }
+
+    ID3D12PipelineState *getPipelineState(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.pipeline_state_;
+    }
+
+    IDXGISwapChain4* getSwapChain()
+    {
+        return swap_chain_;
+    }
+
+    GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
+    {
+        if (!window_)
+            GFX_SET_ERROR(
+                kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
+        finish();
+        sync();
+        // clear old resources associated with the old swapchain
+        if (swap_chain_)
+        {
+            for (uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                back_buffers_[i]->Release();
+                back_buffers_[i] = nullptr;
+                freeRTVDescriptor(back_buffer_rtvs_[i]);
+            }
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+        }
+        sync();
+        // bind the new swap chain
+        if (swapchain)
+        {
+            swap_chain_ = swapchain;
+            // Redo window association and preferences setup
+            IDXGIFactory4 *factory = nullptr;
+            if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            factory->Release();
+
+            fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+            swap_chain_->SetColorSpace1(color_space_);
+
+            // these should be allocated at the beginning.
+            GFX_ASSERT(back_buffers_ && back_buffer_rtvs_);
+
+            // recreate swap chain buffers and RTVs
+            GFX_TRY(acquireSwapChainBuffers());
+            GFX_TRY(createBackBufferRTVs());
+
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
+            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
+        }
+        return kGfxResult_NoError;
     }
 
     GfxResult execute()
@@ -6585,7 +6585,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = back_buffer_format_;
+                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = getBackBufferFormat();
                 pso_desc.RTVFormats.RTVFormats.NumRenderTargets = 1;
             }
         }
@@ -6713,7 +6713,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats[0]    = back_buffer_format_;
+                pso_desc.RTVFormats[0]    = getBackBufferFormat();
                 pso_desc.NumRenderTargets = 1;
             }
         }
@@ -6807,7 +6807,7 @@ private:
             for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_formats_); ++i)
                 if(!bound_color_targets_[i].texture_)
                 {
-                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
+                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN && (i != 0 || kernel.draw_state_.color_formats_[i] != getBackBufferFormat()))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at color target %u", i);
                 }
                 else if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
@@ -9495,14 +9495,6 @@ private:
                     if(dxc_source) dxc_source->Release();
                     return; // done
                 }
-                static bool created_shader_cache_directory;
-                if(!created_shader_cache_directory)
-                {
-                    int32_t const result = _wmkdir(shader_cache_dir.c_str());
-                    if(result < 0 && errno != EEXIST)
-                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
-                    created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
-                }
                 std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
                 if(is_directory(file_path))
                     shader_key_dir = relative(file_path).generic_wstring();
@@ -9528,13 +9520,21 @@ private:
                 std::transform(shader_key_dir.begin(), shader_key_dir.end(), shader_key_dir.begin(),
                     [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
                 shader_key_dir += '/';
-                std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
-                int32_t const result = _wmkdir(shader_key_file.c_str());
-                if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
-                shader_key_file += std::format(L"{:x}", shader_key);
                 if(cache_shaders_)
                 {
+                    static bool created_shader_cache_directory;
+                    if(!created_shader_cache_directory)
+                    {
+                        int32_t const result = _wmkdir(shader_cache_dir.c_str());
+                        if(result < 0 && errno != EEXIST)
+                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
+                        created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
+                    }
+                    std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
+                    int32_t const result = _wmkdir(shader_key_file.c_str());
+                    if(result < 0 && errno != EEXIST)
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                    shader_key_file += std::format(L"{:x}", shader_key);
                     shader_key_bytecode = shader_key_file + L".bytecode";
                     shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
@@ -9748,7 +9748,7 @@ private:
     bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
         GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return false;
-        if((*buffer.resource_state_ & resource_state) == resource_state)
+        if((*buffer.resource_state_ & resource_state) == resource_state && (resource_state != 0 || *buffer.resource_state_ == resource_state))
         {
             if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
@@ -9817,7 +9817,7 @@ private:
 
     bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
-        if((texture.resource_state_ & resource_state) == resource_state)
+        if((texture.resource_state_ & resource_state) == resource_state && (resource_state != 0 || texture.resource_state_ == resource_state))
         {
             if(texture.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
@@ -9910,7 +9910,7 @@ private:
             resource_desc.Height           = window_height_;
             resource_desc.DepthOrArraySize = 1;
             resource_desc.MipLevels        = 1;
-            resource_desc.Format           = back_buffer_format_;
+            resource_desc.Format           = getBackBufferFormat();
             resource_desc.SampleDesc.Count = 1;
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -9934,7 +9934,10 @@ private:
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
             GFX_ASSERT(back_buffers_[i] != nullptr);
-            device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
+            D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+            rtv_desc.Format        = getBackBufferFormat();
+            rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device_->CreateRenderTargetView(back_buffers_[i], &rtv_desc, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
         return kGfxResult_NoError;
@@ -10111,27 +10114,6 @@ bool gfxContextIsValid(GfxContext context)
     return gfx->isValid();
 }
 
-ID3D12Resource *gfxGetBackBuffer(GfxContext context)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr;
-    return gfx->getBackBuffer();
-}
-
-ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr;
-    return gfx->getRootSignature(kernel);
-}
-
-ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr;
-    return gfx->getPipelineState(kernel);
-}
-
 uint32_t gfxGetBackBufferWidth(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -10239,12 +10221,12 @@ void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
     return gfx->getBufferData(buffer);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(format, clear_value);
+    return gfx->createTexture2D(format, clear_value, flags);
 }
 
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
@@ -11122,20 +11104,6 @@ GfxResult gfxResetCommandListState(GfxContext context)
     return gfx->resetCommandListState();
 }
 
-IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;
-    return gfx->getSwapChain();
-}
-
-GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
-{
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return kGfxResult_InvalidParameter;
-    return gfx->setSwapChain(swapchain);
-}
-
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state)
 {
     GfxBuffer const buffer = {};
@@ -11217,6 +11185,41 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
     return gfx->createBufferSharedHandle(buffer);
 }
 
+ID3D12Resource *gfxGetBackBuffer(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return nullptr;
+    return gfx->getBackBuffer();
+}
+
+ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return nullptr;
+    return gfx->getRootSignature(kernel);
+}
+
+ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return nullptr;
+    return gfx->getPipelineState(kernel);
+}
+
+IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getSwapChain();
+}
+
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setSwapChain(swapchain);
+}
+
 GfxResult gfxExecute(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -11230,3 +11233,4 @@ GfxResult gfxResetCommandList(GfxContext context)
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->resetCommandList();
 }
+

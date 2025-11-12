@@ -474,7 +474,7 @@ public:
                 "#if defined(OUTPUT_HDR)\r\n"
                 "    imgui.rgb *= ReferenceWhiteAdjust;\r\n"
                 "#endif\r\n"
-                "    output = lerp(imgui.rgb, output, imgui.a);\r\n"
+                "output = lerp(imgui.rgb, output, imgui.a);\r\n"
                 "// Convert to the output space.\r\n"
                 "#if defined(OUTPUT_SRGB)\r\n"
                 "    // convert to srgb\r\n"
