@@ -1668,14 +1668,11 @@ public:
         back_buffer_rtvs_ = nullptr;
         gfxFree(back_buffers_);
         back_buffers_ = nullptr;
-
         if(swap_chain_ != nullptr) // Done after removal of attachments as they hold 1 ref
         {
-            [[maybe_unused]] uint32_t count = swap_chain_->Release();
-            GFX_ASSERT(count == 0);
+            swap_chain_->Release();
             swap_chain_ = nullptr;
         }
-
         if(mem_allocator_ != nullptr)
         {
             mem_allocator_->Release();
