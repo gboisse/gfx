@@ -49,8 +49,6 @@ class GfxImGuiInternal
     GFX_NON_COPYABLE(GfxImGuiInternal);
 
     static uint32_t constexpr kConstant_Magic = 0x1E2D3C4Bu;
-    static uint32_t constexpr kKernelRenderToBackBuffer = 0;
-    static uint32_t constexpr kKernelRenderToTexture = 1;
 
     uint32_t const magic_ = kConstant_Magic;
 
@@ -60,24 +58,28 @@ class GfxImGuiInternal
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
-    GfxKernel imgui_kernels_[2] = {};
-    DXGI_COLOR_SPACE_TYPE backbuffer_colour_space_;
-    float reference_white_adjust_ = 1.0f;
+    GfxKernel imgui_kernel_ = {};
     char **font_filenames_ = nullptr;
     uint32_t font_count_ = 0;
     ImFontConfig *font_configs_ = nullptr;
     float dpi_scale_ = 1.0f;
     bool dpi_scale_changed_  = false;
 
+    GfxProgram composite_program_ = {};
+    GfxKernel composite_kernel_ = {};
+    DXGI_COLOR_SPACE_TYPE colour_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    float reference_white_adjust_ = 1.0f;
+
 public:
     GfxImGuiInternal() {}
     ~GfxImGuiInternal() { terminate(); }
 
-    GfxResult initializeKernels()
+    GfxResult initializeKernel()
     {
-        for (auto& kernel : imgui_kernels_)
-            gfxDestroyKernel(gfx_, kernel);
+        gfxDestroyKernel(gfx_, imgui_kernel_);
         gfxDestroyProgram(gfx_, imgui_program_);
+        gfxDestroyKernel(gfx_, composite_kernel_);
+        gfxDestroyProgram(gfx_, composite_program_);
         GfxDrawState imgui_draw_state;
         GfxProgramDesc imgui_program_desc = {};
         imgui_program_desc.vs =
@@ -107,14 +109,13 @@ public:
             "        ((input.col >> 24) & 0xFFu) / 255.0f);\r\n"
             "    output.pos = mul(ProjectionMatrix, float4(input.pos.xy, 0.0f, 1.0f));\r\n"
             "    output.uv  = input.uv;\r\n"
+            "    // imgui colors are all in srgb but as imgui is color space unaware it currently assumes using srgb for interpolation. This is mathematically incorrect but required to match imgui expected behaviour. As such just pass through colors untouched.\r\n"
             "    output.col = col;\r\n"
-            "    output.col.xyz = select(col.xyz < 0.03929337067685376f, col.xyz / 12.92f, pow((col.xyz + 0.055010718947587f) / 1.055010718947587f, 2.4f));\r\n"
             "    return output;\r\n"
             "}\r\n";
         imgui_program_desc.ps =
             "Texture2D FontBuffer;\r\n"
             "SamplerState FontSampler;\r\n"
-            "float ReferenceWhiteAdjust;\r\n"
             "\r\n"
             "struct Pixel\r\n"
             "{\r\n"
@@ -126,60 +127,20 @@ public:
             "float4 main(in Pixel input) : SV_Target\r\n"
             "{\r\n"
             "    float4 col = input.col * FontBuffer.SampleLevel(FontSampler, input.uv, 0.0f);\r\n"
-            "#ifdef OUTPUT_SRGB\r\n"
-            "    col.xyz = select(col.xyz < 0.003041282560128f, 12.92f * col.xyz, 1.055010718947587f * pow(col.xyz, 1.0f / 2.4f) - 0.055010718947587f);\r\n"
-            "#elif defined(OUTPUT_HDR10)\r\n"
-            "    col.xyz *= ReferenceWhiteAdjust * (1.0f / 10000.0f);\r\n"
-            "    const float3x3 mat = float3x3(0.6274178028f, 0.3292815089f, 0.04330066592f, 0.06909923255f, 0.919541657f, 0.01135913096f, 0.01639600657f, 0.08803547174f, 0.89556849f);\r\n"
-            "    col.xyz = mul(mat, col.xyz);\r\n"
-            "    float3 powM1 = pow(col.xyz, 0.1593017578125f);\r\n"
-            "    col.xyz = pow((0.8359375f + 18.8515625f * powM1) / (1.0f + 18.6875f * powM1), 78.84375f);\r\n"
-            "#else\r\n"
-            "    col.xyz *= ReferenceWhiteAdjust * (1.0f / 80.0f);\r\n"
-            "#endif\r\n"
+            "    // imgui assumes blending is performed in srgb which again is mathematically incorrect. To replicate expected behaviour we use pre-multiplied alpha and convert to linear space here.\r\n"
+            "    col.rgb *= col.a;\r\n"
+            "    col.a = 1.0f - col.a;\r\n"
+            "    col = select(col < 0.03929337067685376f, col / 12.92f, pow((col + 0.055010718947587f) / 1.055010718947587f, 2.4f));\r\n"
+            "    col.a = 1.0 - col.a;\r\n"
             "    return col;\r\n"
             "}\r\n";
         imgui_program_ = gfxCreateProgram(gfx_, imgui_program_desc, "gfx_ImGuiProgram");
-        GFX_TRY(gfxDrawStateEnableAlphaBlending(imgui_draw_state)); // enable alpha blending
+        GFX_TRY(gfxDrawStateSetBlendMode(imgui_draw_state, D3D12_BLEND_ONE, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD)); // enable alpha blending
         GFX_TRY(gfxDrawStateSetCullMode(imgui_draw_state, D3D12_CULL_MODE_NONE));
-
-        // Create kKernelRenderToBackBuffer kernel
-        {
-            backbuffer_colour_space_ = gfxGetBackBufferColorSpace(gfx_);
-            std::vector<char const *> defines;
-            if (backbuffer_colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
-            {
-                defines.push_back("OUTPUT_HDR10");
-            }
-            else if (backbuffer_colour_space_ == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
-            {
-                defines.push_back("OUTPUT_SRGB");
-            }
-            imgui_kernels_[kKernelRenderToBackBuffer] = gfxCreateGraphicsKernel(
-                gfx_, imgui_program_, imgui_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
-        }
-        // Create kKernelRenderToTexture kernel
-        {
-            // Always output in sRGB when rendering to texture.
-            char const *defines = "OUTPUT_SRGB";
-
-            // Blend state for render to texture requires more precision on alpha than 2 bits. So we can't use
-            // DXGI_FORMAT_R10G10B10A2_UNORM.
-            GFX_TRY(
-                gfxDrawStateSetBlendMode(imgui_draw_state, D3D12_BLEND_SRC_ALPHA, D3D12_BLEND_INV_SRC_ALPHA,
-                    D3D12_BLEND_OP_ADD, D3D12_BLEND_ONE, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD));
-            GFX_TRY(gfxDrawStateSetColorTarget(
-                imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM)); // see gfx_imgui.cpp
-            imgui_kernels_[kKernelRenderToTexture] =
-                gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state, nullptr, &defines, 1U);
-        }
-
-        if (!imgui_program_ || !imgui_kernels_[kKernelRenderToBackBuffer]
-            || !imgui_kernels_[kKernelRenderToTexture])
+        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB));
+        imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state);
+        if(!imgui_program_ || !imgui_kernel_)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
-        GfxDisplayDesc display_desc = gfxGetDisplayDescription(gfx_);
-        reference_white_adjust_     = display_desc.reference_sdr_white_level;
-
         return kGfxResult_NoError;
     }
 
@@ -242,8 +203,9 @@ public:
         }
         font_buffer_.setName("gfx_ImGuiFontBuffer");
         io.Fonts->TexID = (ImTextureID)&font_buffer_;
-        gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer);
+        GFX_TRY(gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer));
         GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
+        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
 
         return kGfxResult_NoError;
     }
@@ -255,10 +217,13 @@ public:
         gfx_ = gfx; // keep reference to context
 
         IMGUI_CHECKVERSION();
-        ImGui::CreateContext();
+        ImGuiContext* gui_context = ImGui::CreateContext();
+        if(gui_context == nullptr)
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Failed to initialize Imgui context");
+        ImGui::SetCurrentContext(gui_context);
         ImGui::StyleColorsDark();
         ImGuiIO &io = ImGui::GetIO();
-        io.ConfigFlags |= flags | ImGuiConfigFlags_IsSRGB; // config flags
+        io.ConfigFlags |= flags; // config flags
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData = this; // set magic number
@@ -289,9 +254,8 @@ public:
             UINT dpi = GetDpiForWindow(window);
             dpi_scale_ = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
         }
+        GFX_TRY(initializeKernel());
         GFX_TRY(initializeScale());
-
-        GFX_TRY(initializeKernels());
 
         index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         vertex_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -300,7 +264,6 @@ public:
             new(&index_buffers_[i]) GfxBuffer();
             new(&vertex_buffers_[i]) GfxBuffer();
         }
-        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
         ImGui::NewFrame();  // can now start submitting ImGui commands
 
         return kGfxResult_NoError;
@@ -313,6 +276,7 @@ public:
             if(ImGui::GetIO().BackendPlatformUserData != nullptr)
                 ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
+            ImGui::SetCurrentContext(nullptr);
         }
         if(font_count_ > 0)
         {
@@ -343,35 +307,36 @@ public:
                     vertex_buffers_[i].~GfxBuffer();
                 }
             GFX_TRY(gfxDestroyProgram(gfx_, imgui_program_));
-            for (auto& kernel : imgui_kernels_)
-                GFX_TRY(gfxDestroyKernel(gfx_, kernel));
+            GFX_TRY(gfxDestroyKernel(gfx_, imgui_kernel_));
+            GFX_TRY(gfxDestroyProgram(gfx_, composite_program_));
+            GFX_TRY(gfxDestroyKernel(gfx_, composite_kernel_));
+            composite_kernel_ = {};
             gfxFree(vertex_buffers_);
             gfxFree(index_buffers_);
         }
         return kGfxResult_NoError;
     }
 
-    GfxResult render(GfxTexture optionalDrawToTexture)
+    GfxResult render(GfxTexture output_texture)
     {
-        char buffer[256];
+        if (!output_texture && gfxGetBackBufferFormat(gfx_) != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "ImGui can only composite to sRGB render targets");
         ImGuiIO &io = ImGui::GetIO();
         ImGui::Render();    // implicit ImGui::EndFrame()
         ImDrawData const *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
-        DXGI_COLOR_SPACE_TYPE colour_space = gfxGetBackBufferColorSpace(gfx_);
-        if (colour_space != backbuffer_colour_space_)
-        {
-            initializeKernels();
-        }
 
         if(dpi_scale_changed_)
         {
-            initializeScale();
+            GFX_TRY(initializeScale());
             dpi_scale_changed_ = false;
         }
 
         if(draw_data->TotalVtxCount > 0)
         {
+            if (!!output_texture)
+                gfxCommandClearTexture(gfx_, output_texture);
+            char buffer[256];
             GfxBuffer &index_buffer = index_buffers_[buffer_index];
             uint64_t const index_buffer_size = draw_data->TotalIdxCount * sizeof(ImDrawIdx);
             if(index_buffer_size > index_buffer.getSize())
@@ -421,21 +386,13 @@ public:
                 { (R + L) / (L - R), (T + B) / (B - T), 0.5f, 1.0f }
             };
             gfxProgramSetParameter(gfx_, imgui_program_, "ProjectionMatrix", projection_matrix);
-            gfxProgramSetParameter(gfx_, imgui_program_, "ReferenceWhiteAdjust", reference_white_adjust_);
 
-            if (optionalDrawToTexture)
-            {
-                gfxCommandBindKernel(gfx_, imgui_kernels_[kKernelRenderToTexture]);
-                gfxTextureSetResourceState(gfx_, optionalDrawToTexture, D3D12_RESOURCE_STATE_RENDER_TARGET);
-                gfxCommandBindColorTarget(gfx_, 0, optionalDrawToTexture);
-            }
-            else
-            {
-                gfxCommandBindKernel(gfx_, imgui_kernels_[kKernelRenderToBackBuffer]);
-            }
+            gfxCommandBindKernel(gfx_, imgui_kernel_);
             gfxCommandBindIndexBuffer(gfx_, index_buffer);
             gfxCommandBindVertexBuffer(gfx_, vertex_buffer);
-            gfxCommandSetViewport(gfx_);    // draw to back buffer
+            if (!!output_texture)
+                gfxCommandBindColorTarget(gfx_, 0, output_texture);
+            gfxCommandSetViewport(gfx_); // draw to render texture
 
             int32_t vtx_offset = 0;
             int32_t idx_offset = 0;
@@ -474,6 +431,83 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult composite(GfxTexture color_texture, GfxTexture imgui_texture)
+    {
+        DXGI_COLOR_SPACE_TYPE colour_space = gfxGetBackBufferColorSpace(gfx_);
+        if(!composite_kernel_ || colour_space != colour_space_)
+        {
+            GfxProgramDesc composite_program_desc = {};
+            composite_program_desc.vs =
+                "struct VS_OUTPUT\r\n"
+                "{\r\n"
+                "    float4 pos : SV_POSITION;\r\n"
+                "    float2 texcoord : TEXCOORD;\r\n"
+                "};\r\n"
+                "\r\n"
+                "VS_OUTPUT main(in uint idx : SV_VertexID)\r\n"
+                "{\r\n"
+                "    VS_OUTPUT output;\r\n"
+                "    output.texcoord = float2(1.0f - 2.0f * (idx & 1), 2.0f * (idx >> 1));\r\n"
+                "    output.pos = 1.0f - float4(4.0f * (idx & 1), 4.0f * (idx >> 1), 1.0f, 0.0f);\r\n"
+                "    return output;\r\n"
+                "}\r\n";
+            composite_program_desc.ps =
+                "Texture2D InputBuffer;\r\n"
+                "Texture2D OutputBuffer;\r\n"
+                "float2 InputResolution;\r\n"
+                "float ReferenceWhiteAdjust;\r\n"
+                "\r\n"
+                "float4 main(in float4 pos : SV_POSITION, float2 texcoord : TEXCOORD) : SV_Target\r\n"
+                "{\r\n"
+                "    float2 inputPixel = texcoord * InputResolution;\r\n"
+                "    float4 imgui = InputBuffer.Load(int3(inputPixel, 0));\r\n"
+                "    float3 output = OutputBuffer.Load(int3(inputPixel, 0)).xyz;\r\n"
+                "#ifdef OUTPUT_HDR\r\n"
+                "    imgui.rgb *= ReferenceWhiteAdjust;\r\n"
+                "#endif\r\n"
+                "    output = lerp(imgui.rgb, output, imgui.a);\r\n"
+                "#ifdef OUTPUT_SRGB\r\n"
+                "    // convert to srgb\r\n"
+                "    output = select(output < 0.003041282560128f, 12.92f * output, 1.055010718947587f * pow(output, 1.0f / 2.4f) - 0.055010718947587f);\r\n"
+                "#elif defined(OUTPUT_HDR10)\r\n"
+                "    // convert to HDR10\r\n"
+                "    const float3x3 mat = float3x3(0.6274178028f, 0.3292815089f, 0.04330066592f, 0.06909923255f, 0.919541657f, 0.01135913096f, 0.01639600657f, 0.08803547174f, 0.89556849f);\r\n"
+                "    output = mul(mat, output);\r\n"
+                "    float3 powM1 = pow(output * (80.0f / 10000.0f), 0.1593017578125f);\r\n"
+                "    output = pow((0.8359375f + 18.8515625f * powM1) / (1.0f + 18.6875f * powM1), 78.84375f);\r\n"
+                "#endif\r\n"
+                "    return float4(output, 1.0f);\r\n"
+                "}\r\n";
+            DXGI_FORMAT const display_format = gfxGetBackBufferFormat(gfx_);
+            std::vector<char const *> defines;
+            if(colour_space == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+                defines.push_back("OUTPUT_HDR10");
+            else if(colour_space == DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709 && display_format != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+                defines.push_back("OUTPUT_SRGB");
+            if(display_format == DXGI_FORMAT_R16G16B16A16_FLOAT || (display_format == DXGI_FORMAT_R10G10B10A2_UNORM && colour_space == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020))
+                defines.push_back("OUTPUT_HDR");
+            composite_program_ = gfxCreateProgram(gfx_, composite_program_desc, "gfx_ImGuiCompositeProgram");
+            GfxDrawState composite_draw_state;
+            GFX_TRY(gfxDrawStateSetCullMode(composite_draw_state, D3D12_CULL_MODE_NONE));
+            composite_kernel_  = gfxCreateGraphicsKernel(
+                gfx_, composite_program_, composite_draw_state, nullptr, defines.data(), (uint32_t)defines.size());
+            if(!composite_program_ || !composite_kernel_)
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to composite ImGui");
+            GfxDisplayDesc display_desc = gfxGetDisplayDescription(gfx_);
+            reference_white_adjust_ = display_desc.reference_sdr_white_level;
+            colour_space_ = colour_space;
+            GFX_TRY(gfxProgramSetParameter(gfx_, composite_program_, "ReferenceWhiteAdjust", reference_white_adjust_ * (1.0f / 80.0f)));
+        }
+        gfxProgramSetParameter(gfx_, composite_program_, "InputBuffer", imgui_texture);
+        gfxProgramSetParameter(gfx_, composite_program_, "OutputBuffer", color_texture);
+        float const dimensions[2] = {
+            (float)gfxGetBackBufferWidth(gfx_), (float)gfxGetBackBufferHeight(gfx_)};
+        gfxProgramSetParameter(gfx_, composite_program_, "InputResolution", dimensions);
+        gfxCommandBindKernel(gfx_, composite_kernel_);
+        gfxCommandDraw(gfx_, 3);
+        return kGfxResult_NoError;
+    }
+
     void setDPIScale(float scale)
     {
         dpi_scale_changed_ = true;
@@ -504,11 +538,18 @@ GfxResult gfxImGuiTerminate()
     return kGfxResult_NoError;
 }
 
-GfxResult gfxImGuiRender(GfxTexture optionalDrawToTexture)
+GfxResult gfxImGuiRender(GfxTexture output_texture)
 {
     GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
     if(!gfx_imgui) return kGfxResult_NoError;   // nothing to render
-    return gfx_imgui->render(optionalDrawToTexture);
+    return gfx_imgui->render(output_texture);
+}
+
+GfxResult gfxImGuiComposite(GfxTexture color_texture, GfxTexture imgui_texture)
+{
+    GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
+    if(!gfx_imgui) return kGfxResult_NoError;   // nothing to do
+    return gfx_imgui->composite(color_texture, imgui_texture);
 }
 
 GfxResult gfxImGuiSetDPIScale(float scale)
