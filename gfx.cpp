@@ -9887,7 +9887,6 @@ private:
             GFX_SNPRINTF(buffer, sizeof(buffer), "gfx_BackBuffer%u", i);
             if(!SUCCEEDED(swap_chain_->GetBuffer(i, IID_PPV_ARGS(&back_buffers_[i]))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to acquire back buffer");
-
             SetDebugName(back_buffers_[i], buffer);
         }
 
