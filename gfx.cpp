@@ -5235,15 +5235,14 @@ public:
 
     GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
     {
-        if (!window_)
-            GFX_SET_ERROR(
-                kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
+        if(!window_)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
         finish();
         sync();
         // clear old resources associated with the old swapchain
-        if (swap_chain_)
+        if(swap_chain_)
         {
-            for (uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
             {
                 back_buffers_[i]->Release();
                 back_buffers_[i] = nullptr;
@@ -5254,7 +5253,7 @@ public:
         }
         sync();
         // bind the new swap chain
-        if (swapchain)
+        if(swapchain)
         {
             swap_chain_ = swapchain;
             // Redo window association and preferences setup
@@ -11188,21 +11187,21 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
 ID3D12Resource *gfxGetBackBuffer(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr;
+    if(!gfx) return nullptr;
     return gfx->getBackBuffer();
 }
 
 ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr;
+    if(!gfx) return nullptr;
     return gfx->getRootSignature(kernel);
 }
 
 ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return nullptr;
+    if(!gfx) return nullptr;
     return gfx->getPipelineState(kernel);
 }
 
@@ -11216,7 +11215,7 @@ IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
 GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return kGfxResult_InvalidParameter;
+    if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->setSwapChain(swapchain);
 }
 
