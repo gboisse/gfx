@@ -11190,14 +11190,14 @@ ID3D12Resource *gfxGetBackBuffer(GfxContext context)
     return gfx->getBackBuffer();
 }
 
-ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel)
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;
     return gfx->getRootSignature(kernel);
 }
 
-ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel)
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;

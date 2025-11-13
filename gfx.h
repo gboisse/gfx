@@ -501,8 +501,8 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
 
 ID3D12Resource *gfxGetBackBuffer(GfxContext context);
 
-ID3D12RootSignature *gfxGetKernelRootSignature(GfxContext context, GfxKernel kernel);
-ID3D12PipelineState *gfxGetKernelPipelineState(GfxContext context, GfxKernel kernel);
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel);
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel);
 
 IDXGISwapChain4* gfxGetSwapChain(GfxContext context);
 GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain);
