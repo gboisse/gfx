@@ -28,7 +28,7 @@ SOFTWARE.
 #define NOMINMAX
 #endif
 #include <d3d12.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include "gfx_core.h"
 
 
@@ -498,6 +498,14 @@ GfxResult gfxBufferSetResourceState(GfxContext context, GfxBuffer buffer, D3D12_
 GfxResult gfxTextureSetResourceState(GfxContext context, GfxTexture texture, D3D12_RESOURCE_STATES state);
 
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
+
+ID3D12Resource *gfxGetBackBuffer(GfxContext context);
+
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel);
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel);
+
+IDXGISwapChain4* gfxGetSwapChain(GfxContext context);
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain);
 
 GfxResult gfxExecute(GfxContext context);
 GfxResult gfxResetCommandList(GfxContext context);

@@ -118,7 +118,7 @@ class GfxInternal
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
 
-    IDXGISwapChain3 *swap_chain_ = nullptr;
+    IDXGISwapChain4 *swap_chain_ = nullptr;
     D3D12MA::Allocator *mem_allocator_ = nullptr;
     ID3D12CommandSignature *dispatch_signature_ = nullptr;
     ID3D12CommandSignature *multi_draw_signature_ = nullptr;
@@ -1654,11 +1654,6 @@ public:
             dxc_include_handler_ = nullptr;
         }
 
-        if(swap_chain_ != nullptr)
-        {
-            swap_chain_->Release();
-            swap_chain_ = nullptr;
-        }
         if(back_buffer_allocations_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffer_allocations_[i] != nullptr)
@@ -1673,7 +1668,11 @@ public:
         back_buffer_rtvs_ = nullptr;
         gfxFree(back_buffers_);
         back_buffers_ = nullptr;
-
+        if(swap_chain_ != nullptr) // Done after removal of attachments as they hold 1 ref
+        {
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+        }
         if(mem_allocator_ != nullptr)
         {
             mem_allocator_->Release();
@@ -5206,6 +5205,83 @@ public:
         if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object");
         return handle;
+    }
+
+    inline ID3D12Resource *getBackBuffer()
+    {
+        return back_buffers_[fence_index_];
+    }
+
+    ID3D12RootSignature *getRootSignature(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.root_signature_;
+    }
+
+    ID3D12PipelineState *getPipelineState(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.pipeline_state_;
+    }
+
+    IDXGISwapChain4* getSwapChain()
+    {
+        return swap_chain_;
+    }
+
+    GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
+    {
+        if(!window_)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
+        finish();
+        sync();
+        // clear old resources associated with the old swapchain
+        if(swap_chain_)
+        {
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                back_buffers_[i]->Release();
+                back_buffers_[i] = nullptr;
+                freeRTVDescriptor(back_buffer_rtvs_[i]);
+            }
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+        }
+        sync();
+        // bind the new swap chain
+        if(swapchain)
+        {
+            swap_chain_ = swapchain;
+            // Redo window association and preferences setup
+            IDXGIFactory4 *factory = nullptr;
+            if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            factory->Release();
+
+            fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+            swap_chain_->SetColorSpace1(color_space_);
+
+            // these should be allocated at the beginning.
+            GFX_ASSERT(back_buffers_ && back_buffer_rtvs_);
+
+            // recreate swap chain buffers and RTVs
+            GFX_TRY(acquireSwapChainBuffers());
+            GFX_TRY(createBackBufferRTVs());
+
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
+            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
+        }
+        return kGfxResult_NoError;
     }
 
     GfxResult execute()
@@ -11105,6 +11181,41 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->createBufferSharedHandle(buffer);
+}
+
+ID3D12Resource *gfxGetBackBuffer(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getBackBuffer();
+}
+
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getRootSignature(kernel);
+}
+
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getPipelineState(kernel);
+}
+
+IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getSwapChain();
+}
+
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setSwapChain(swapchain);
 }
 
 GfxResult gfxExecute(GfxContext context)
