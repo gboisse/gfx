@@ -158,7 +158,6 @@ Result main(in Params params)
     color *= 0.75f;
     color /= 1.0f + color;
     color  = saturate(color);
-    color  = sqrt(color);
     color  = color * color * (3.0f - 2.0f * color);
 
     // Populate our multiple render targets (i.e., MRT)
