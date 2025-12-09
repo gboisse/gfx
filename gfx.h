@@ -509,6 +509,7 @@ GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain);
 
 GfxResult gfxExecute(GfxContext context);
 GfxResult gfxResetCommandList(GfxContext context);
+GfxResult gfxWaitIdle(GfxContext context);
 
 //!
 //! Template helpers.

@@ -5302,6 +5302,31 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult WaitIdle()
+    {
+        ID3D12Fence *fence;
+        UINT64       fenceValue = 0;
+        device_->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+        HANDLE eventHandle = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+
+        command_list_->Close();
+        ID3D12CommandList *const command_lists[] = {command_list_};
+        command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
+        command_queue_->Signal(fence, fenceValue);
+
+        if (fence->GetCompletedValue() < fenceValue)
+        {
+            fence->SetEventOnCompletion(fenceValue, eventHandle);
+            WaitForSingleObject(eventHandle, INFINITE);
+        }
+
+        CloseHandle(eventHandle);
+        fence->Release();
+        resetCommandList();
+
+        return kGfxResult_NoError;
+    }
+
     void resetState()
     {
         bound_kernel_ = {};
@@ -11230,4 +11255,14 @@ GfxResult gfxResetCommandList(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->resetCommandList();
+}
+
+GfxResult gfxWaitIdle(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx)
+    {
+        return kGfxResult_InvalidParameter;
+    }
+    return gfx->WaitIdle();
 }
