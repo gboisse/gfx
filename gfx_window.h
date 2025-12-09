@@ -44,7 +44,8 @@ enum GfxCreateWindowFlag
     kGfxCreateWindowFlag_NoResizeWindow   = 1 << 1,
     kGfxCreateWindowFlag_HideWindow       = 1 << 2,
     kGfxCreateWindowFlag_FullscreenWindow = 1 << 3,
-    kGfxCreateWindowFlag_AcceptDrop       = 1 << 4
+    kGfxCreateWindowFlag_AcceptDrop       = 1 << 4,
+    kGfxCreateWindowFlag_FitToScreen      = 1 << 5
 };
 typedef uint32_t GfxCreateWindowFlags;
 
