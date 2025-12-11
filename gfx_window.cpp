@@ -97,25 +97,11 @@ public:
 
         if((flags_ & kGfxCreateWindowFlag_FullscreenWindow) != 0)
         {
-            MONITORINFO mi;
-            memset(&mi, 0, sizeof(mi));
-            mi.cbSize = sizeof(mi);
-            if(GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &mi))
-            {
-                SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-                                mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-                                SWP_NOOWNERZORDER);
-            }
+            setFullscreen();
         }
         else
         {
-            RECT window_rect = { 0, 0, (LONG)window_width_, (LONG)window_height_ };
-            UINT dpi = GetDpiForWindow(window_);
-            AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
-            LONG width = window_rect.right - window_rect.left;
-            LONG height = window_rect.bottom - window_rect.top;
-            SetWindowPos(window_, NULL, width / 2, height / 2, width,
-                height, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+            setWindowed(window_style, window_style_ex);
         }
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
@@ -201,24 +187,58 @@ public:
         return (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
     }
 
+    inline void setFullscreen(bool creation = true) const
+    {
+        MONITORINFO mi;
+        memset(&mi, 0, sizeof(mi));
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &mi);
+        SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_NOZORDER | (creation ? 0 : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
+    }
+
+    inline void setWindowed(DWORD window_style, DWORD window_style_ex, bool creation = true) const
+    {
+        RECT window_rect = { 0, 0, (LONG)original_window_width_, (LONG)original_window_height_ };
+        UINT dpi = GetDpiForWindow(window_);
+        AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
+        window_rect.right -= window_rect.left;
+        window_rect.bottom -= window_rect.top;
+        window_rect.left = 0;
+        window_rect.top = 0;
+        RECT work_area;
+        SystemParametersInfo(SPI_GETWORKAREA, 0, &work_area, 0);
+        LONG work_area_width = work_area.right - work_area.left;
+        LONG work_area_height = work_area.bottom - work_area.top;
+        if(work_area_width > window_rect.right)
+        {
+            window_rect.left = (work_area_width - window_rect.right) / 2;
+            window_rect.right += window_rect.left;
+        }
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
+            window_rect.right = work_area_width;
+        if(work_area_height > window_rect.bottom)
+        {
+            window_rect.top = (work_area_height - window_rect.bottom) / 2;
+            window_rect.bottom += window_rect.top;
+        }
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
+            window_rect.bottom = work_area_height;
+        SetWindowPos(window_, NULL, window_rect.left, window_rect.top, window_rect.right - window_rect.left,
+                     window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
+    }
+
     inline void toggleFullscreen() const
     {
         DWORD dwStyle = GetWindowLong(window_, GWL_STYLE);
         if((dwStyle & WS_SYSMENU) != 0)
         {
-            MONITORINFO mi;
-            memset(&mi, 0, sizeof(mi));
-            mi.cbSize = sizeof(mi);
-            if(GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
-            {
-                DWORD       window_style_ex;
-                DWORD const window_style = getWindowStyle(window_style_ex, flags_ | kGfxCreateWindowFlag_FullscreenWindow);
-                SetWindowLong(window_, GWL_STYLE, window_style);
-                SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
-                SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-                                mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-                                SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
-            }
+            DWORD       window_style_ex;
+            DWORD const window_style = getWindowStyle(window_style_ex, flags_ | kGfxCreateWindowFlag_FullscreenWindow);
+            SetWindowLong(window_, GWL_STYLE, window_style);
+            SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
+            setFullscreen(false);
         }
         else
         {
@@ -226,13 +246,7 @@ public:
             DWORD const window_style = getWindowStyle(window_style_ex, flags_ & ~kGfxCreateWindowFlag_FullscreenWindow);
             SetWindowLong(window_, GWL_STYLE, window_style);
             SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
-            RECT window_rect = { 0, 0, (LONG)original_window_width_, (LONG)original_window_height_ };
-            UINT dpi = GetDpiForWindow(window_);
-            AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
-            LONG width = window_rect.right - window_rect.left;
-            LONG height = window_rect.bottom - window_rect.top;
-            SetWindowPos(window_, NULL, width / 2, height / 2, width,
-                height, SWP_NOOWNERZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+            setWindowed(window_style, window_style_ex, false);
         }
     }
 
