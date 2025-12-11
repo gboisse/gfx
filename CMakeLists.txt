@@ -89,12 +89,12 @@ find_library(DXGI_LIB NAMES dxgi REQUIRED)
 target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 618)
+set(GFX_AGILITY_VERSION 717)
 set(GFX_AGILITY_MICRO_VERSION 1)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
-    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}"
+    URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}-preview"
     SOURCE_DIR     "${GFX_AGILITY_PATH}"
     FIND_PACKAGE_ARGS NAMES DirectX12-Agility
 )

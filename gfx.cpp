@@ -2885,7 +2885,7 @@ public:
         char const last_char = file_path[strlen(file_path) - 1];
         char const *path_separator = (last_char == '/' || last_char == '\\' ? "" : "/");
         GFX_SNPRINTF(program.name, sizeof(program.name), "%s%s%s", file_path, path_separator, file_name);
-        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_8" : "6_0");
+        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_9" : "6_0");
         program.handle = program_handles_.allocate_handle();
         Program &gfx_program = programs_.insert(program);
         gfx_program.shader_model_ = shader_model;
@@ -2904,7 +2904,7 @@ public:
             GFX_SNPRINTF(program.name, sizeof(program.name), "%s", name);
         else
             GFX_SNPRINTF(program.name, sizeof(program.name), "gfx_Program%llu", program.handle);
-        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_8" : "6_0");
+        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_9" : "6_0");
         Program &gfx_program = programs_.insert(program);
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_path_ = (name != nullptr ? name : program.name);
@@ -9363,10 +9363,7 @@ private:
         shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
         shader_args.push_back(DXC_ARG_RESOURCES_MAY_ALIAS);
         if(experimental_shaders_)
-        {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
-            shader_args.push_back(L"-select-validator internal");
-        }
 
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
