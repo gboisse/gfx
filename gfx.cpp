@@ -4786,7 +4786,7 @@ public:
                 uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
                 uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
                 fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
-                if(window_width != window_width_ || window_height != window_height_)
+                if(!IsIconic(window_) && (window_width != window_width_ || window_height != window_height_))
                 {
                     GFX_TRY(resizeCallback(window_width, window_height)); // reset fence index
                 }
