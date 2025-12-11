@@ -22,9 +22,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
 
-#include "gfx.h"
-#include "gfx_internal_types.h"
-
 #include <map>                  // std::map
 #include <deque>                // std::deque
 #include <memory>               // std::unique_ptr
@@ -74,6 +71,9 @@ SOFTWARE.
 #    pragma warning(pop)
 #endif
 
+#include "gfx.h"
+#include "gfx_internal_types.h"
+
 extern "C"
 {
 __declspec(dllexport) extern const UINT     D3D12SDKVersion = GFX_AGILITY_VERSION;
@@ -118,7 +118,7 @@ class GfxInternal
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
 
-    IDXGISwapChain3 *swap_chain_ = nullptr;
+    IDXGISwapChain4 *swap_chain_ = nullptr;
     D3D12MA::Allocator *mem_allocator_ = nullptr;
     ID3D12CommandSignature *dispatch_signature_ = nullptr;
     ID3D12CommandSignature *multi_draw_signature_ = nullptr;
@@ -978,7 +978,6 @@ public:
         window_height_ = window_rect.bottom - window_rect.top;
 
         IDXGIOutput *output = nullptr;
-        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         UINT output_i  = 0;
         LONG best_area = -1;
         IDXGIOutput *current_output;
@@ -1000,6 +999,7 @@ public:
             output_i++;
         }
         back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
+        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         if(output != nullptr)
         {
             IDXGIOutput6 *output6 = nullptr;
@@ -1355,7 +1355,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate dummy descriptors");
         {
             D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-            rtv_desc.Format        = back_buffer_format_;
+            rtv_desc.Format        = getBackBufferFormat();
             rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             device_->CreateRenderTargetView(nullptr, &rtv_desc, rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_));
         }
@@ -1654,11 +1654,6 @@ public:
             dxc_include_handler_ = nullptr;
         }
 
-        if(swap_chain_ != nullptr)
-        {
-            swap_chain_->Release();
-            swap_chain_ = nullptr;
-        }
         if(back_buffer_allocations_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffer_allocations_[i] != nullptr)
@@ -1673,7 +1668,11 @@ public:
         back_buffer_rtvs_ = nullptr;
         gfxFree(back_buffers_);
         back_buffers_ = nullptr;
-
+        if(swap_chain_ != nullptr) // Done after removal of attachments as they hold 1 ref
+        {
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+        }
         if(mem_allocator_ != nullptr)
         {
             mem_allocator_->Release();
@@ -1740,7 +1739,7 @@ public:
 
     inline DXGI_FORMAT getBackBufferFormat() const
     {
-        return back_buffer_format_;
+        return back_buffer_format_ == DXGI_FORMAT_R8G8B8A8_UNORM ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : back_buffer_format_;
     }
 
     inline DXGI_COLOR_SPACE_TYPE getBackBufferColorSpace() const
@@ -1980,9 +1979,9 @@ public:
         return gfx_buffer.data_;
     }
 
-    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
+    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
     {
-        return createTexture2D(window_width_, window_height_, format, 1, clear_value, D3D12_RESOURCE_FLAG_NONE, Texture::kFlag_AutoResize);
+        return createTexture2D(window_width_, window_height_, format, 1, clear_value, flags, Texture::kFlag_AutoResize);
     }
 
     GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags, uint32_t flags = 0)
@@ -5208,6 +5207,83 @@ public:
         return handle;
     }
 
+    inline ID3D12Resource *getBackBuffer()
+    {
+        return back_buffers_[fence_index_];
+    }
+
+    ID3D12RootSignature *getRootSignature(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.root_signature_;
+    }
+
+    ID3D12PipelineState *getPipelineState(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.pipeline_state_;
+    }
+
+    IDXGISwapChain4* getSwapChain()
+    {
+        return swap_chain_;
+    }
+
+    GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
+    {
+        if(!window_)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
+        finish();
+        sync();
+        // clear old resources associated with the old swapchain
+        if(swap_chain_)
+        {
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                back_buffers_[i]->Release();
+                back_buffers_[i] = nullptr;
+                freeRTVDescriptor(back_buffer_rtvs_[i]);
+            }
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+        }
+        sync();
+        // bind the new swap chain
+        if(swapchain)
+        {
+            swap_chain_ = swapchain;
+            // Redo window association and preferences setup
+            IDXGIFactory4 *factory = nullptr;
+            if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            factory->Release();
+
+            fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+            swap_chain_->SetColorSpace1(color_space_);
+
+            // these should be allocated at the beginning.
+            GFX_ASSERT(back_buffers_ && back_buffer_rtvs_);
+
+            // recreate swap chain buffers and RTVs
+            GFX_TRY(acquireSwapChainBuffers());
+            GFX_TRY(createBackBufferRTVs());
+
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
+            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
+        }
+        return kGfxResult_NoError;
+    }
+
     GfxResult execute()
     {
         if(isInterop())
@@ -6509,7 +6585,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = back_buffer_format_;
+                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = getBackBufferFormat();
                 pso_desc.RTVFormats.RTVFormats.NumRenderTargets = 1;
             }
         }
@@ -6637,7 +6713,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats[0]    = back_buffer_format_;
+                pso_desc.RTVFormats[0]    = getBackBufferFormat();
                 pso_desc.NumRenderTargets = 1;
             }
         }
@@ -6731,7 +6807,7 @@ private:
             for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_formats_); ++i)
                 if(!bound_color_targets_[i].texture_)
                 {
-                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
+                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN && (i != 0 || kernel.draw_state_.color_formats_[i] != getBackBufferFormat()))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at color target %u", i);
                 }
                 else if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
@@ -9295,11 +9371,10 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
-        shader_args.push_back(L"-Wno-parameter-usage");
-        shader_args.push_back(L"-Wno-uninitialized");
-        shader_args.push_back(L"-Wno-conditional-uninitialized");
-        shader_args.push_back(L"-Wno-sometimes-uninitialized");
+        shader_args.push_back(L"-Wno-parameter-usage"); // seems broken with current dxc
         shader_args.push_back(L"-fdiagnostics-format=msvc");
+        shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
+        shader_args.push_back(DXC_ARG_RESOURCES_MAY_ALIAS);
         if(experimental_shaders_)
         {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
@@ -9342,6 +9417,7 @@ private:
             shader_args.push_back(DXC_ARG_DEBUG);
             shader_args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
+            shader_args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);
         }
 
         std::vector<std::wstring> user_defines;
@@ -9386,8 +9462,12 @@ private:
         }
 
         uint64_t shader_key = 0;
-        std::string shader_key_bytecode;
-        std::string shader_key_reflection;
+        std::wstring shader_key_dir;
+        std::wstring shader_key_bytecode;
+        std::wstring shader_key_reflection;
+        std::wstring const shader_cache_dir = L"./shader_cache/";
+        std::wstring const shader_pdb_dir = L"./shader_pdb/";
+        constexpr uint32_t max_cached_files = 5;
         if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
         {
             IDxcResult *dxc_preprocess = nullptr;
@@ -9428,29 +9508,51 @@ private:
                     if(dxc_source) dxc_source->Release();
                     return; // done
                 }
+                std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
+                if(is_directory(file_path))
+                    shader_key_dir = relative(file_path).generic_wstring();
+                else
+                {
+                    shader_key_dir.resize(mbstowcs(nullptr, program.file_path_.c_str(), 0));
+                    mbstowcs(shader_key_dir.data(), program.file_path_.c_str(), program.file_path_.size());
+                }
+                shader_key_dir += L'_';
+                if(program.file_name_)
+                {
+                    size_t size = shader_key_dir.size();
+                    shader_key_dir.resize(size + mbstowcs(nullptr, program.file_name_.c_str(), 0));
+                    mbstowcs(shader_key_dir.data() + size, program.file_name_.c_str(), program.file_name_.size());
+                    shader_key_dir += L'_';
+                }
+                size_t size = shader_key_dir.size();
+                shader_key_dir.resize(shader_key_dir.size() + mbstowcs(nullptr, kernel.entry_point_.c_str(), 0));
+                mbstowcs(shader_key_dir.data() + size, kernel.entry_point_.c_str(), kernel.entry_point_.size());
+                size = shader_key_dir.size();
+                shader_key_dir.resize(shader_key_dir.size() + mbstowcs(nullptr, shader_extensions_[shader_type], 0));
+                mbstowcs(shader_key_dir.data() + size, shader_extensions_[shader_type], strlen(shader_extensions_[shader_type]));
+                std::transform(shader_key_dir.begin(), shader_key_dir.end(), shader_key_dir.begin(),
+                    [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
+                shader_key_dir += '/';
                 if(cache_shaders_)
                 {
-                    std::string shader_key_file = "./shader_cache/";
                     static bool created_shader_cache_directory;
                     if(!created_shader_cache_directory)
                     {
-                        int32_t const result = _mkdir(shader_key_file.c_str());
+                        int32_t const result = _wmkdir(shader_cache_dir.c_str());
                         if(result < 0 && errno != EEXIST)
-                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
                         created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
                     }
-                    shader_key_file += std::to_string(shader_key);
-                    shader_key_bytecode = shader_key_file + ".bytecode";
-                    shader_key_reflection = shader_key_file + ".reflection";
-                    std::vector<WCHAR> wshader_key_bytecode(shader_key_bytecode.size() + 1);
-                    std::vector<WCHAR> wshader_key_reflection(shader_key_reflection.size() + 1);
-                    memset(wshader_key_bytecode.data(), 0, wshader_key_bytecode.size() * sizeof(WCHAR));
-                    memset(wshader_key_reflection.data(), 0, wshader_key_reflection.size() * sizeof(WCHAR));
-                    mbstowcs(wshader_key_bytecode.data(), shader_key_bytecode.data(), shader_key_bytecode.size());
-                    mbstowcs(wshader_key_reflection.data(), shader_key_reflection.data(), shader_key_reflection.size());
+                    std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
+                    int32_t const result = _wmkdir(shader_key_file.c_str());
+                    if(result < 0 && errno != EEXIST)
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                    shader_key_file += std::format(L"{:x}", shader_key);
+                    shader_key_bytecode = shader_key_file + L".bytecode";
+                    shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
-                    dxc_utils_->LoadFile(wshader_key_bytecode.data(), nullptr, &bytecode_blob);
-                    dxc_utils_->LoadFile(wshader_key_reflection.data(), nullptr, &reflection_blob);
+                    dxc_utils_->LoadFile(shader_key_bytecode.data(), nullptr, &bytecode_blob);
+                    dxc_utils_->LoadFile(shader_key_reflection.data(), nullptr, &reflection_blob);
                     if(bytecode_blob != nullptr && reflection_blob != nullptr)
                     {
                         DxcBuffer reflection_data = {};
@@ -9517,24 +9619,37 @@ private:
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
             static bool created_shader_pdb_directory;
-            std::string_view const shader_pdb_directory = "./shader_pdb";
-            std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
-            std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
-            wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
-            shader_file.resize(shader_pdb_directory.size() + pdb_name.size() + 1);
-            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory.data(), pdb_name.data());
             if(!created_shader_pdb_directory)
             {
-                int32_t const result = _mkdir(shader_pdb_directory.data());
+                int32_t const result = _wmkdir(shader_pdb_dir.c_str());
                 if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory.data());
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_dir.data());
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
-            FILE *fd = fopen(shader_file.data(), "wb");
+            std::wstring wpdb_name = shader_pdb_dir + shader_key_dir;
+            int32_t const result = _wmkdir(wpdb_name.c_str());
+            if(result < 0 && errno != EEXIST)
+                GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", wpdb_name.data());
+            wpdb_name += std::wstring(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
+            FILE *fd = _wfopen(wpdb_name.data(), L"wb");
             if(fd != nullptr)
             {
                 fwrite(dxc_pdb->GetBufferPointer(), dxc_pdb->GetBufferSize(), 1, fd);
                 fclose(fd); // write out PDB for shader debugging
+            }
+            // Delete older pdb files
+            std::filesystem::directory_iterator const end;
+            std::vector<std::filesystem::path>        pdb_files;
+            for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_pdb_dir + shader_key_dir)}; iter != end; ++iter)
+                if(is_regular_file(*iter))
+                    if(iter->path().extension() == ".pdb")
+                        pdb_files.emplace_back(*iter);
+            if(pdb_files.size() > max_cached_files)
+            {
+                std::sort(pdb_files.begin(), pdb_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
+                    return last_write_time(a) > last_write_time(b); });
+                for(size_t i = max_cached_files; i < pdb_files.size(); ++i)
+                    std::filesystem::remove(pdb_files[i]);
             }
         }
 
@@ -9553,17 +9668,44 @@ private:
                 shader.shader_reflection_ = reflection;
                 if(cache_shaders_)
                 {
-                    FILE *fd = fopen(shader_key_bytecode.c_str(), "wb");
+                    FILE *fd = _wfopen(shader_key_bytecode.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
                         fclose(fd); // write out bytecode for shader caching
                     }
-                    fd = fopen(shader_key_reflection.c_str(), "wb");
+                    fd = _wfopen(shader_key_reflection.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
                         fclose(fd); // write out reflection for shader caching
+                    }
+                    // Delete older cached files
+                    std::filesystem::directory_iterator const end;
+                    std::vector<std::filesystem::path>        bytecode_files;
+                    std::vector<std::filesystem::path>        reflection_files;
+                    for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_cache_dir + shader_key_dir)}; iter != end; ++iter)
+                        if(is_regular_file(*iter))
+                        {
+                            if(iter->path().extension() == ".bytecode")
+                                bytecode_files.emplace_back(*iter);
+                            else if(iter->path().extension() == ".reflection")
+                                reflection_files.emplace_back(*iter);
+                        }
+                    if(bytecode_files.size() > max_cached_files)
+                    {
+                        std::sort(bytecode_files.begin(), bytecode_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
+                            return last_write_time(a) > last_write_time(b); });
+                        for(size_t i = max_cached_files; i < bytecode_files.size(); ++i)
+                            std::filesystem::remove(bytecode_files[i]);
+                    }
+                    if (reflection_files.size() > max_cached_files)
+                    {
+                        std::sort(reflection_files.begin(), reflection_files.end(),
+                            [](std::filesystem::path const &a, std::filesystem::path const &b) {
+                                return last_write_time(a) > last_write_time(b); });
+                        for(size_t i = max_cached_files; i < reflection_files.size(); ++i)
+                            std::filesystem::remove(reflection_files[i]);
                     }
                 }
             }
@@ -9619,7 +9761,7 @@ private:
     bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
         GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return false;
-        if((*buffer.resource_state_ & resource_state) == resource_state)
+        if((*buffer.resource_state_ & resource_state) == resource_state && (resource_state != 0 || *buffer.resource_state_ == resource_state))
         {
             if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
@@ -9688,7 +9830,7 @@ private:
 
     bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
-        if((texture.resource_state_ & resource_state) == resource_state)
+        if((texture.resource_state_ & resource_state) == resource_state && (resource_state != 0 || texture.resource_state_ == resource_state))
         {
             if(texture.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
@@ -9780,7 +9922,7 @@ private:
             resource_desc.Height           = window_height_;
             resource_desc.DepthOrArraySize = 1;
             resource_desc.MipLevels        = 1;
-            resource_desc.Format           = back_buffer_format_;
+            resource_desc.Format           = getBackBufferFormat();
             resource_desc.SampleDesc.Count = 1;
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -9804,7 +9946,10 @@ private:
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
             GFX_ASSERT(back_buffers_[i] != nullptr);
-            device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
+            D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+            rtv_desc.Format        = getBackBufferFormat();
+            rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device_->CreateRenderTargetView(back_buffers_[i], &rtv_desc, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
         return kGfxResult_NoError;
@@ -10088,12 +10233,12 @@ void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
     return gfx->getBufferData(buffer);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(format, clear_value);
+    return gfx->createTexture2D(format, clear_value, flags);
 }
 
 GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
@@ -11050,6 +11195,41 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->createBufferSharedHandle(buffer);
+}
+
+ID3D12Resource *gfxGetBackBuffer(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getBackBuffer();
+}
+
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getRootSignature(kernel);
+}
+
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getPipelineState(kernel);
+}
+
+IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getSwapChain();
+}
+
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setSwapChain(swapchain);
 }
 
 GfxResult gfxExecute(GfxContext context)

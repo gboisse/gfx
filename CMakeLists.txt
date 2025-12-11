@@ -90,23 +90,6 @@ if(DXGI_LIB)
   target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
 endif()
 
-set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
-FetchContent_Declare(
-    D3D12MemoryAllocator
-    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v3.0.1
-    SOURCE_DIR     "${GFX_D3D12MA_PATH}"
-    FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
-)
-FetchContent_MakeAvailable(D3D12MemoryAllocator)
-if(NOT D3D12MemoryAllocator_FOUND)
-    target_include_directories(gfx PRIVATE "${GFX_D3D12MA_PATH}/include")
-    target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
-    set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
-else()
-    target_link_libraries(gfx PRIVATE GPUOpen::D3D12MemoryAllocator)
-endif()
-
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 set(GFX_AGILITY_VERSION 717)
 set(GFX_AGILITY_MICRO_VERSION 1)
@@ -159,6 +142,24 @@ if(NOT directx-dxc_FOUND)
     target_link_libraries(gfx PRIVATE dxcompiler dxil)
 else()
     target_link_libraries(gfx PRIVATE Microsoft::DirectXShaderCompiler)
+endif()
+
+set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
+set(D3D12MA_AGILITY_SDK_DIRECTORY "${GFX_AGILITY_PATH}" CACHE STRING "")
+FetchContent_Declare(
+    D3D12MemoryAllocator
+    GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
+    GIT_TAG        v3.0.1
+    SOURCE_DIR     "${GFX_D3D12MA_PATH}"
+    FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
+)
+FetchContent_MakeAvailable(D3D12MemoryAllocator)
+if(NOT D3D12MemoryAllocator_FOUND)
+    target_include_directories(gfx PRIVATE "${GFX_D3D12MA_PATH}/include")
+    target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
+    set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+else()
+    target_link_libraries(gfx PRIVATE GPUOpen::D3D12MemoryAllocator)
 endif()
 
 set(GFX_PIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime")
@@ -245,7 +246,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.1
+        GIT_TAG        1.0.2
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
         FIND_PACKAGE_ARGS NAMES glm
     )
@@ -279,7 +280,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         tinyexr
         GIT_REPOSITORY https://github.com/syoyo/tinyexr.git
-        GIT_TAG        v1.0.10
+        GIT_TAG        v1.0.12
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/tinyexr/"
         FIND_PACKAGE_ARGS NAMES tinyexr
     )

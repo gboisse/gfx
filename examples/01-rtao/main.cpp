@@ -64,7 +64,7 @@ int32_t main()
     std::vector<GfxBuffer> vertex_buffers;
     std::vector<GfxTexture> albedo_buffers;
 
-    gfxSceneImport(scene, "data/sponza.obj");   // import our scene
+    gfxSceneImport(scene, "data/city.obj"); // import our scene
 
     uint32_t const mesh_count     = gfxSceneGetMeshCount(scene);
     uint32_t const material_count = gfxSceneGetMaterialCount(scene);
@@ -126,6 +126,10 @@ int32_t main()
         albedo_buffers[material_id] = albedo_buffer;
     }
 
+    float const albedo_value[] = { 0.7f, 0.7f, 0.7f, 1.0f };
+    GfxTexture dummy_albedo = gfxCreateTexture2D(gfx, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, 1, albedo_value);
+    gfxCommandClearTexture(gfx, dummy_albedo);
+
     GfxAccelerationStructure rt_scene = gfxCreateAccelerationStructure(gfx);
     std::vector<GfxRaytracingPrimitive> rt_meshes(instance_count);
 
@@ -182,7 +186,7 @@ int32_t main()
     // Run application loop
     glm::mat4 previous_view_projection_matrix;
 
-    float previous_ao_radius = 0.0f, ao_radius = 5.0f;
+    float previous_ao_radius = 0.0f, ao_radius = 1.0f;
 
     for(uint32_t frame_index = 0; !gfxWindowIsCloseRequested(window); ++frame_index)
     {
@@ -193,7 +197,7 @@ int32_t main()
         {
             if(gfxIsRaytracingSupported(gfx))
             {
-                ImGui::DragFloat("AO radius", &ao_radius, 1e-2f, 0.0f, 10.0f, "%.2f");
+                ImGui::DragFloat("AO radius", &ao_radius, 1e-2f, 0.0f, 5.0f, "%.2f");
             }
             else
             {
@@ -207,7 +211,7 @@ int32_t main()
         // Calculate our camera matrices
         float const aspect_ratio = gfxGetBackBufferWidth(gfx) / (float)gfxGetBackBufferHeight(gfx);
 
-        glm::mat4 view_matrix       = glm::lookAt(glm::vec3(15.0f, 2.5f, 0.0f), glm::vec3(0.0f, 2.5f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::mat4 view_matrix       = glm::lookAt(glm::vec3(15.0f, 10.0f, 5.0f), glm::vec3(0.0f, 2.5f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
         glm::mat4 projection_matrix = glm::perspective(0.6f, aspect_ratio, 1e-1f, 1e4f);
 
         if(ao_radius != previous_ao_radius || projection_matrix * view_matrix != previous_view_projection_matrix)
@@ -245,7 +249,7 @@ int32_t main()
             if(instance.material)
                 gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[(uint32_t)instance.material]);
             else
-                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", GfxTexture());    // will return black
+                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", dummy_albedo);    // dummy albedo map
 
             gfxCommandBindIndexBuffer(gfx, index_buffers[(uint32_t)instance.mesh]);
             gfxCommandBindVertexBuffer(gfx, vertex_buffers[(uint32_t)instance.mesh]);
@@ -294,6 +298,7 @@ int32_t main()
         gfxDestroyBuffer(gfx, vertex_buffers.data()[i]);
     for(uint32_t i = 0; i < albedo_buffers.size(); ++i)
         gfxDestroyTexture(gfx, albedo_buffers.data()[i]);
+    gfxDestroyTexture(gfx, dummy_albedo);
 
     gfxImGuiTerminate();
     gfxDestroyScene(scene);
