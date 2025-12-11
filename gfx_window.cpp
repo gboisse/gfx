@@ -216,14 +216,14 @@ public:
             window_rect.left = (work_area_width - window_rect.right) / 2;
             window_rect.right += window_rect.left;
         }
-        else if((flags_ & kGfxCreateWindowFlag_FitToScreen) != 0)
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
             window_rect.right = work_area_width;
         if(work_area_height > window_rect.bottom)
         {
             window_rect.top = (work_area_height - window_rect.bottom) / 2;
             window_rect.bottom += window_rect.top;
         }
-        else if((flags_ & kGfxCreateWindowFlag_FitToScreen) != 0)
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
             window_rect.bottom = work_area_height;
         SetWindowPos(window_, NULL, window_rect.left, window_rect.top, window_rect.right - window_rect.left,
                      window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
