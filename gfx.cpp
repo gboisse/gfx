@@ -4742,7 +4742,8 @@ public:
         GFX_ASSERT(max_frames_in_flight_ > 0);
         if(isInterop())
         {
-            fence_index_ = (fence_index_ + 1) % max_frames_in_flight_; back_buffer_index_ = fence_index_;
+            fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+            back_buffer_index_ = fence_index_;
         }
         else
         {
@@ -5234,7 +5235,7 @@ public:
         return gfx_kernel.pipeline_state_;
     }
 
-    IDXGISwapChain4* getSwapChain()
+    IDXGISwapChain4 *getSwapChain()
     {
         return swap_chain_;
     }
@@ -5260,7 +5261,7 @@ public:
         }
         if(swapchain)
         {
-            // bind the new swap chain
+            // Bind the new swap chain
             swap_chain_ = swapchain;
             // Redo window association and preferences setup
             IDXGIFactory4 *factory = nullptr;
@@ -11210,7 +11211,7 @@ ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel ker
     return gfx->getPipelineState(kernel);
 }
 
-IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
+IDXGISwapChain4 *gfxGetSwapChain(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;
