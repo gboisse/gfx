@@ -49,7 +49,7 @@ enum GfxCreateWindowFlag
 };
 typedef uint32_t GfxCreateWindowFlags;
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0);
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0, uint8_t monitor_index = 0xFF);
 GfxResult gfxDestroyWindow(GfxWindow window);
 
 GfxResult gfxWindowPumpEvents(GfxWindow window);
