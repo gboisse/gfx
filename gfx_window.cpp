@@ -45,15 +45,15 @@ struct MonitorEnumData
 
 BOOL CALLBACK EnumMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lParam)
 {
-    auto* data = reinterpret_cast<MonitorEnumData*>(lParam);
+    auto *data = reinterpret_cast<MonitorEnumData *>(lParam);
 
-    if (data->currentIndex == data->targetIndex)
+    if(data->currentIndex == data->targetIndex)
     {
         data->result = hMon;
-        return FALSE; // stop once the target monitor has been found
+        return FALSE;   // stop once the target monitor has been found
     }
-
     ++data->currentIndex;
+
     return TRUE;
 }
 } // namespace
@@ -232,7 +232,7 @@ public:
         HMONITOR targetMonitor = enumData.result;
 
         // Fallback if target monitor wasn't found
-        if (!targetMonitor)
+        if(!targetMonitor)
             targetMonitor = MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST);
 
         return targetMonitor;
@@ -267,12 +267,12 @@ public:
         LONG work_area_width  = work_area.right  - work_area.left;
         LONG work_area_height = work_area.bottom - work_area.top;
 
-        if (work_area_width > width)
+        if(work_area_width > width)
         {
             window_rect.left  = work_area.left + (work_area_width - width) / 2;
             window_rect.right = window_rect.left + width;
         }
-        else if ((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
         {
             width = work_area_width;
             window_rect.left  = work_area.left;
@@ -284,12 +284,12 @@ public:
             window_rect.right = window_rect.left + width;
         }
 
-        if (work_area_height > height)
+        if(work_area_height > height)
         {
             window_rect.top    = work_area.top + (work_area_height - height) / 2;
             window_rect.bottom = window_rect.top + height;
         }
-        else if ((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
         {
             height = work_area_height;
             window_rect.top    = work_area.top;
@@ -305,7 +305,6 @@ public:
         SetWindowPos(window_, NULL, window_rect.left, window_rect.top, window_rect.right - window_rect.left,
                      window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
     }
-
 
     inline void toggleFullscreen() const
     {
