@@ -1429,7 +1429,7 @@ public:
         }
 
         GfxProgramDesc clear_buffer_program_desc = {};
-        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
+        clear_buffer_program_desc.cs = "RWStructuredBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
