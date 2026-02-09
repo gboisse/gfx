@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -132,6 +132,7 @@ class GfxInternal
     DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
+    uint32_t back_buffer_index_ = 0;
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
@@ -1048,7 +1049,7 @@ public:
         swap_chain->QueryInterface(IID_PPV_ARGS(&swap_chain_)); swap_chain->Release();
         if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
-        fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
         swap_chain_->SetColorSpace1(color_space_);
 
         back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
@@ -1058,7 +1059,7 @@ public:
 
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+        resource_barrier.Transition.pResource = back_buffers_[back_buffer_index_];
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -1087,6 +1088,7 @@ public:
         window_width_ = width;
         window_height_ = height;
         fence_index_ = 0;
+        back_buffer_index_ = 0;
 
         GFX_TRY(initializeCommon(context));
 
@@ -1427,7 +1429,7 @@ public:
         }
 
         GfxProgramDesc clear_buffer_program_desc = {};
-        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
+        clear_buffer_program_desc.cs = "RWStructuredBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
@@ -1729,7 +1731,7 @@ public:
 
     inline uint32_t getBackBufferIndex() const
     {
-        return fence_index_;
+        return back_buffer_index_;
     }
 
     inline uint32_t getBackBufferCount() const
@@ -3471,7 +3473,7 @@ public:
         rect        = {};
         rect.right  = window_width_;
         rect.bottom = window_height_;
-        command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[fence_index_]), clear_color, 1, &rect);
+        command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[back_buffer_index_]), clear_color, 1, &rect);
         return kGfxResult_NoError;
     }
 
@@ -4739,7 +4741,10 @@ public:
     {
         GFX_ASSERT(max_frames_in_flight_ > 0);
         if(isInterop())
+        {
             fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+            back_buffer_index_ = fence_index_;
+        }
         else
         {
             if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty())
@@ -4766,7 +4771,7 @@ public:
                 D3D12_RESOURCE_BARRIER resource_barrier = {};
                 resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
                 resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+                resource_barrier.Transition.pResource = back_buffers_[back_buffer_index_];
                 resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
                 resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
                 command_list_->ResourceBarrier(1, &resource_barrier);
@@ -4785,7 +4790,8 @@ public:
                 }
                 uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
                 uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
-                fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+                back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
+                fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
                 if(!IsIconic(window_) && (window_width != window_width_ || window_height != window_height_))
                 {
                     GFX_TRY(resizeCallback(window_width, window_height)); // reset fence index
@@ -4797,7 +4803,7 @@ public:
                 }
                 command_allocators_[fence_index_]->Reset();
                 command_list_->Reset(command_allocators_[fence_index_], nullptr);
-                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+                resource_barrier.Transition.pResource = back_buffers_[back_buffer_index_];
                 resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
                 resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
                 command_list_->ResourceBarrier(1, &resource_barrier);
@@ -4809,6 +4815,7 @@ public:
                 command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
                 command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
                 fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+                back_buffer_index_ = fence_index_;
                 if(fences_[fence_index_]->GetCompletedValue() != fence_values_[fence_index_])
                 {
                     fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
@@ -5209,7 +5216,7 @@ public:
 
     inline ID3D12Resource *getBackBuffer()
     {
-        return back_buffers_[fence_index_];
+        return back_buffers_[back_buffer_index_];
     }
 
     ID3D12RootSignature *getRootSignature(GfxKernel kernel)
@@ -5228,7 +5235,7 @@ public:
         return gfx_kernel.pipeline_state_;
     }
 
-    IDXGISwapChain4* getSwapChain()
+    IDXGISwapChain4 *getSwapChain()
     {
         return swap_chain_;
     }
@@ -5250,11 +5257,11 @@ public:
             }
             swap_chain_->Release();
             swap_chain_ = nullptr;
+            sync();
         }
-        sync();
-        // bind the new swap chain
         if(swapchain)
         {
+            // Bind the new swap chain
             swap_chain_ = swapchain;
             // Redo window association and preferences setup
             IDXGIFactory4 *factory = nullptr;
@@ -5263,7 +5270,7 @@ public:
             factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
             factory->Release();
 
-            fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+            back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
             swap_chain_->SetColorSpace1(color_space_);
 
             // these should be allocated at the beginning.
@@ -5275,7 +5282,7 @@ public:
 
             D3D12_RESOURCE_BARRIER resource_barrier = {};
             resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-            resource_barrier.Transition.pResource   = back_buffers_[fence_index_];
+            resource_barrier.Transition.pResource   = back_buffers_[back_buffer_index_];
             resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
             resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
             resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -6849,7 +6856,7 @@ private:
             if(color_target_count == 0 && depth_stencil_target.ptr == 0)    // special case - if no color target is supplied, draw to back buffer
             {
                 render_width = window_width_; render_height = window_height_;
-                color_targets[color_target_count++] = rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[fence_index_]);
+                color_targets[color_target_count++] = rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[back_buffer_index_]);
             }
             D3D12_VIEWPORT viewport = { 0.0f, 0.0f, (float)render_width, (float)render_height, D3D12_MIN_DEPTH, D3D12_MAX_DEPTH };
             if(viewport_.x_ != 0.0f || viewport_.y_ != 0.0f || viewport_.width_ != 0.0f || viewport_.height_ != 0.0f)
@@ -10029,7 +10036,7 @@ private:
         {
             return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during resizeBuffers: %s", hr);
         }
-        fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         GFX_TRY(createBackBufferRTVs());
         return kGfxResult_NoError;
@@ -11218,7 +11225,7 @@ ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel ker
     return gfx->getPipelineState(kernel);
 }
 
-IDXGISwapChain4* gfxGetSwapChain(GfxContext context)
+IDXGISwapChain4 *gfxGetSwapChain(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;
