@@ -9383,11 +9383,7 @@ private:
         shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
         shader_args.push_back(DXC_ARG_RESOURCES_MAY_ALIAS);
         if(experimental_shaders_)
-        {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
-            // -select-validator option was removed from DXC 1.8.2505
-            //shader_args.push_back(L"-select-validator internal");
-        }
 
         std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
