@@ -549,14 +549,14 @@ private:
         transform[0].z = (2.0 * rot.x * rot.z - 2.0 * rot.y * rot.w) * scale.x;
         transform[0].w = 0.0;
 
-        transform[1].x = (2.0 * rot.x * rot.y - 2.0 * rot.z * rot.w) * scale.x;
-        transform[1].y = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.z * rot.z) * scale.x;
-        transform[1].z = (2.0 * rot.y * rot.z + 2 * rot.x * rot.w) * scale.x;
+        transform[1].x = (2.0 * rot.x * rot.y - 2.0 * rot.z * rot.w) * scale.y;
+        transform[1].y = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.z * rot.z) * scale.y;
+        transform[1].z = (2.0 * rot.y * rot.z + 2 * rot.x * rot.w) * scale.y;
         transform[1].w = 0.0;
 
-        transform[2].x = (2.0 * rot.x * rot.z + 2.0 * rot.y * rot.w) * scale.x;
-        transform[2].y = (2.0 * rot.y * rot.z - 2.0 * rot.x * rot.w) * scale.x;
-        transform[2].z = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.y * rot.y) * scale.x;
+        transform[2].x = (2.0 * rot.x * rot.z + 2.0 * rot.y * rot.w) * scale.z;
+        transform[2].y = (2.0 * rot.y * rot.z - 2.0 * rot.x * rot.w) * scale.z;
+        transform[2].z = (1.0 - 2.0 * rot.x * rot.x - 2.0 * rot.y * rot.y) * scale.z;
         transform[2].w = 0.0;
 
         transform[3].x = trans.x;
