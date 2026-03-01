@@ -4339,6 +4339,51 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult resolveTimestamp()
+    {
+        if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty()) {
+            for(std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>>::const_iterator it = timestamp_query_heaps_[fence_index_].timestamp_queries_.begin(); it != timestamp_query_heaps_[fence_index_].timestamp_queries_.end(); ++it)
+            {
+                if(!timestamp_query_handles_.has_handle((*it).second.second.handle))
+                    continue;   // timestamp query object was destroyed
+                TimestampQuery const &timestamp_query = timestamp_queries_[(*it).second.second];
+                if(timestamp_query.was_begun_)  // was the query not closed properly?
+                    encodeEndTimestampQuery((*it).second.second);
+                GFX_ASSERT(!timestamp_query.was_begun_);
+            }
+            uint32_t const timestamp_query_count = (uint32_t)timestamp_query_heaps_[fence_index_].timestamp_queries_.size();
+            GFX_ASSERT(buffer_handles_.has_handle(timestamp_query_heaps_[fence_index_].query_buffer_.handle));
+            Buffer const &query_buffer = buffers_[timestamp_query_heaps_[fence_index_].query_buffer_];
+            command_list_->ResolveQueryData(timestamp_query_heaps_[fence_index_].query_heap_,
+                D3D12_QUERY_TYPE_TIMESTAMP, 0, 2 * timestamp_query_count, query_buffer.resource_, query_buffer.data_offset_);
+        }
+        return kGfxResult_NoError;
+    }
+
+    GfxResult updateTimestamp()
+    {
+        if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty()) {
+            double const ticks_per_milliseconds = timestamp_query_ticks_per_second_ / 1000.0;
+            for(std::map<uint64_t, std::pair<uint32_t, GfxTimestampQuery>>::const_iterator it = timestamp_query_heaps_[fence_index_].timestamp_queries_.begin(); it != timestamp_query_heaps_[fence_index_].timestamp_queries_.end(); ++it)
+            {
+                if(!timestamp_query_handles_.has_handle((*it).second.second.handle))
+                    continue;   // timestamp query object was destroyed
+                uint32_t const timestamp_query_index = (*it).second.first;
+                TimestampQuery &timestamp_query = timestamp_queries_[(*it).second.second];
+                GFX_ASSERT(buffer_handles_.has_handle(timestamp_query_heaps_[fence_index_].query_buffer_.handle));
+                GFX_ASSERT(timestamp_query_index < timestamp_query_heaps_[fence_index_].timestamp_queries_.size());
+                Buffer const &query_buffer = buffers_[timestamp_query_heaps_[fence_index_].query_buffer_];
+                uint64_t const *timestamp_query_data = (uint64_t const *)((char const *)query_buffer.data_ + query_buffer.data_offset_);
+                double const begin = timestamp_query_data[2 * timestamp_query_index + 0] / ticks_per_milliseconds;
+                double const end   = timestamp_query_data[2 * timestamp_query_index + 1] / ticks_per_milliseconds;
+                float const duration    = (float)(GFX_MAX(begin, end) - begin); // elapsed time in milliseconds
+                timestamp_query.duration_ = duration;
+            }
+            timestamp_query_heaps_[fence_index_].timestamp_queries_.clear();
+        }
+        return kGfxResult_NoError;
+    }
+
     GfxResult encodeBeginEvent(uint64_t color, char const *format, va_list args)
     {
         char buffer[4096];
@@ -10977,6 +11022,20 @@ GfxResult gfxCommandEndTimestampQuery(GfxContext context, GfxTimestampQuery time
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->encodeEndTimestampQuery(timestamp_query);
+}
+
+GfxResult gfxCommandResolveTimestamp(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->resolveTimestamp();
+}
+
+GfxResult gfxCommandUpdateTimestamp(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->updateTimestamp();
 }
 
 GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...)

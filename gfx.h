@@ -425,6 +425,8 @@ GfxResult gfxDestroyTimestampQuery(GfxContext context, GfxTimestampQuery timesta
 float gfxTimestampQueryGetDuration(GfxContext context, GfxTimestampQuery timestamp_query);  // in milliseconds
 GfxResult gfxCommandBeginTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query);
 GfxResult gfxCommandEndTimestampQuery(GfxContext context, GfxTimestampQuery timestamp_query);
+GfxResult gfxCommandResolveTimestamp(GfxContext context);
+GfxResult gfxCommandUpdateTimestamp(GfxContext context);
 
 GfxResult gfxCommandBeginEvent(GfxContext context, char const *format, ...);
 GfxResult gfxCommandBeginEvent(GfxContext context, uint64_t color, char const *format, ...);
