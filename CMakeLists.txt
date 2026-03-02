@@ -89,8 +89,8 @@ find_library(DXGI_LIB NAMES dxgi REQUIRED)
 target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 618)
-set(GFX_AGILITY_MICRO_VERSION 1)
+set(GFX_AGILITY_VERSION 619)
+set(GFX_AGILITY_MICRO_VERSION 0)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
@@ -120,7 +120,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
