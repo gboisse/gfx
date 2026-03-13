@@ -6929,7 +6929,15 @@ private:
                 bound_scissor_rect_ = scissor_rect;
                 command_list_->RSSetScissorRects(1, &scissor_rect);
             }
-            command_list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            D3D_PRIMITIVE_TOPOLOGY primitive_topology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+            switch (kernel.draw_state_.primitive_topology_type_)
+            {
+            case D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST; break;
+            case D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_LINELIST; break;
+            case D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_POINTLIST; break;
+            default: return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Invalid primitive topology.");
+            };
+            command_list_->IASetPrimitiveTopology(primitive_topology);
             command_list_->OMSetRenderTargets(color_target_count, color_targets, false, depth_stencil_target.ptr != 0 ? &depth_stencil_target : nullptr);
         }
         uint64_t const previous_descriptor_heap_id = getDescriptorHeapId();
