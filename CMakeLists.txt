@@ -121,7 +121,6 @@ FetchContent_Declare(
     DirectX12-Agility
     URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}-preview"
     SOURCE_DIR     "${GFX_AGILITY_PATH}"
-    FIND_PACKAGE_ARGS NAMES DirectX12-Agility
 )
 FetchContent_MakeAvailable(DirectX12-Agility)
 if(NOT DirectX12-Agility_FOUND)
