@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,31 @@ SOFTWARE.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #   endif
 
+namespace
+{
+struct MonitorEnumData
+{
+    size_t      targetIndex;
+    size_t      currentIndex;
+    HMONITOR    result;
+};
+
+BOOL CALLBACK EnumMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lParam)
+{
+    auto *data = reinterpret_cast<MonitorEnumData *>(lParam);
+
+    if(data->currentIndex == data->targetIndex)
+    {
+        data->result = hMon;
+        return FALSE;   // stop once the target monitor has been found
+    }
+    ++data->currentIndex;
+
+    return TRUE;
+}
+} // namespace
+
+
 class GfxWindowInternal
 {
     GFX_NON_COPYABLE(GfxWindowInternal);
@@ -51,18 +76,25 @@ class GfxWindowInternal
     uint32_t window_height_;
     uint32_t original_window_width_;
     uint32_t original_window_height_;
+    uint8_t monitor_index_;
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxWindowInternal() { terminate(); }
 
-    GfxResult initialize(GfxWindow &window, uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags)
+    GfxResult initialize(GfxWindow &window,
+                        uint32_t window_width,
+                        uint32_t window_height,
+                        char const *window_title,
+                        GfxCreateWindowFlags flags,
+                        uint8_t monitor_index)
     {
         flags_ = flags;
         window_width_ = window_width;
         window_height_ = window_height;
         original_window_width_ = window_width_;
         original_window_height_ = window_height_;
+        monitor_index_ = monitor_index;
 
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
@@ -187,12 +219,32 @@ public:
         return (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
     }
 
+    inline HMONITOR selectMonitor() const
+    {
+        MonitorEnumData enumData{};
+        enumData.targetIndex  = monitor_index_; // target monitor
+        enumData.currentIndex = 0;
+        enumData.result       = nullptr;
+
+        EnumDisplayMonitors(nullptr, nullptr, EnumMonitorProc,
+                            reinterpret_cast<LPARAM>(&enumData));
+
+        HMONITOR targetMonitor = enumData.result;
+
+        // Fallback if target monitor wasn't found
+        if(!targetMonitor)
+            targetMonitor = MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST);
+
+        return targetMonitor;
+    }
+
+
     inline void setFullscreen(bool creation = true) const
     {
         MONITORINFO mi;
         memset(&mi, 0, sizeof(mi));
         mi.cbSize = sizeof(mi);
-        GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &mi);
+        GetMonitorInfo(selectMonitor(), &mi);
         SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
                      mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
                      SWP_NOZORDER | (creation ? 0 : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
@@ -200,31 +252,56 @@ public:
 
     inline void setWindowed(DWORD window_style, DWORD window_style_ex, bool creation = true) const
     {
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(selectMonitor(), &mi);
         RECT window_rect = { 0, 0, (LONG)original_window_width_, (LONG)original_window_height_ };
         UINT dpi = GetDpiForWindow(window_);
         AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
-        window_rect.right -= window_rect.left;
-        window_rect.bottom -= window_rect.top;
-        window_rect.left = 0;
-        window_rect.top = 0;
-        RECT work_area;
-        SystemParametersInfo(SPI_GETWORKAREA, 0, &work_area, 0);
-        LONG work_area_width = work_area.right - work_area.left;
+
+        // Normalize to width/height
+        LONG width  = window_rect.right  - window_rect.left;
+        LONG height = window_rect.bottom - window_rect.top;
+
+        const RECT& work_area = mi.rcWork;
+        LONG work_area_width  = work_area.right  - work_area.left;
         LONG work_area_height = work_area.bottom - work_area.top;
-        if(work_area_width > window_rect.right)
+
+        if(work_area_width > width)
         {
-            window_rect.left = (work_area_width - window_rect.right) / 2;
-            window_rect.right += window_rect.left;
+            window_rect.left  = work_area.left + (work_area_width - width) / 2;
+            window_rect.right = window_rect.left + width;
         }
         else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
-            window_rect.right = work_area_width;
-        if(work_area_height > window_rect.bottom)
         {
-            window_rect.top = (work_area_height - window_rect.bottom) / 2;
-            window_rect.bottom += window_rect.top;
+            width = work_area_width;
+            window_rect.left  = work_area.left;
+            window_rect.right = window_rect.left + width;
+        }
+        else
+        {
+            window_rect.left  = work_area.left;
+            window_rect.right = window_rect.left + width;
+        }
+
+        if(work_area_height > height)
+        {
+            window_rect.top    = work_area.top + (work_area_height - height) / 2;
+            window_rect.bottom = window_rect.top + height;
         }
         else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
-            window_rect.bottom = work_area_height;
+        {
+            height = work_area_height;
+            window_rect.top    = work_area.top;
+            window_rect.bottom = window_rect.top + height;
+        }
+        else
+        {
+            // Align to top of the work area
+            window_rect.top    = work_area.top;
+            window_rect.bottom = window_rect.top + height;
+        }
+
         SetWindowPos(window_, NULL, window_rect.left, window_rect.top, window_rect.right - window_rect.left,
                      window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
     }
@@ -385,13 +462,13 @@ private:
     }
 };
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags)
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags, uint8_t monitor_index)
 {
     GfxResult result;
     GfxWindow window = {};
     GfxWindowInternal *gfx_window = new GfxWindowInternal(window);
     if(!gfx_window) return window;  // out of memory
-    result = gfx_window->initialize(window, window_width, window_height, window_title, flags);
+    result = gfx_window->initialize(window, window_width, window_height, window_title, flags, monitor_index);
     if(result != kGfxResult_NoError)
     {
         window = {};

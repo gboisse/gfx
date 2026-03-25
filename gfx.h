@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -504,7 +504,7 @@ ID3D12Resource *gfxGetBackBuffer(GfxContext context);
 ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel);
 ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel);
 
-IDXGISwapChain4* gfxGetSwapChain(GfxContext context);
+IDXGISwapChain4 *gfxGetSwapChain(GfxContext context);
 GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain);
 
 GfxResult gfxExecute(GfxContext context);

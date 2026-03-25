@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -202,7 +202,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
         }
         font_buffer_.setName("gfx_ImGuiFontBuffer");
-        io.Fonts->TexID = (ImTextureID)&font_buffer_;
+        io.Fonts->TexRef = (ImTextureID)&font_buffer_;
         GFX_TRY(gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer));
         GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
         GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
@@ -407,7 +407,7 @@ public:
                     else if(cmd->ClipRect.x != cmd->ClipRect.z &&
                             cmd->ClipRect.y != cmd->ClipRect.w)
                     {
-                        GfxTexture const *font_buffer = (GfxTexture const *)cmd->TextureId;
+                        GfxTexture const *font_buffer = (GfxTexture const *)cmd->GetTexID();
                         if(font_buffer != nullptr)
                             gfxProgramSetParameter(gfx_, imgui_program_, "FontBuffer", *font_buffer);
                         gfxCommandSetScissorRect(gfx_, (int32_t)cmd->ClipRect.x,

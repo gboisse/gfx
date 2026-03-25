@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -49,7 +49,7 @@ enum GfxCreateWindowFlag
 };
 typedef uint32_t GfxCreateWindowFlags;
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0);
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0, uint8_t monitor_index = 0xFF);
 GfxResult gfxDestroyWindow(GfxWindow window);
 
 GfxResult gfxWindowPumpEvents(GfxWindow window);

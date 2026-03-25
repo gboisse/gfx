@@ -120,7 +120,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
@@ -192,7 +192,7 @@ if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.91.9
+        GIT_TAG        v1.92.6
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
@@ -232,7 +232,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             cgltf
             GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-            GIT_TAG        v1.14
+            GIT_TAG        v1.15
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/"
         )
         FetchContent_MakeAvailable(cgltf)
@@ -244,7 +244,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.2
+        GIT_TAG        1.0.3
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
         FIND_PACKAGE_ARGS NAMES glm
     )
@@ -303,7 +303,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-            GIT_TAG        v4.4.0
+            GIT_TAG        v4.4.2
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
             FIND_PACKAGE_ARGS NAMES Ktx
         )
@@ -318,7 +318,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             vulkan-headers
             GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-            GIT_TAG        v1.4.307
+            GIT_TAG        v1.4.341
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/"
             FIND_PACKAGE_ARGS NAMES VulkanHeaders
         )
