@@ -308,6 +308,10 @@ public:
 
     inline void toggleFullscreen() const
     {
+        // Borderless windows do not participate in fullscreen toggling.
+        if((flags_ & kGfxCreateWindowFlag_BorderlessWindow) != 0)
+            return;
+
         DWORD dwStyle = GetWindowLong(window_, GWL_STYLE);
         if((dwStyle & WS_SYSMENU) != 0)
         {
@@ -332,10 +336,14 @@ public:
 private:
     static inline DWORD getWindowStyle(DWORD &window_style_ex, GfxCreateWindowFlags flags)
     {
-        DWORD const window_style = ((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0) ? WS_POPUP :
+        // Both fullscreen and borderless use WS_POPUP (no title bar / frame).
+        // Fullscreen additionally covers the entire monitor via setFullscreen();
+        // borderless is positioned normally via setWindowed().
+        bool const isPopup = (flags & (kGfxCreateWindowFlag_FullscreenWindow | kGfxCreateWindowFlag_BorderlessWindow)) != 0;
+        DWORD const window_style = isPopup ? WS_POPUP :
                                        (WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
                                                                     WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0));
-        window_style_ex = (((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0) ? 0 : WS_EX_OVERLAPPEDWINDOW) |
+        window_style_ex = (isPopup ? 0 : WS_EX_OVERLAPPEDWINDOW) |
                                       ((flags & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
         return window_style;
     }
