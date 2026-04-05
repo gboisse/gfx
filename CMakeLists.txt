@@ -90,6 +90,31 @@ if(DXGI_LIB)
   target_link_libraries(gfx PRIVATE ${D3D12_LIB} ${DXGI_LIB})
 endif()
 
+set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
+FetchContent_Declare(
+    directx-dxc
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip"
+    SOURCE_DIR     "${GFX_DXC_PATH}"
+    FIND_PACKAGE_ARGS NAMES directx-dxc
+)
+FetchContent_MakeAvailable(directx-dxc)
+if(NOT directx-dxc_FOUND)
+    add_library(dxcompiler SHARED IMPORTED)
+    set_target_properties(dxcompiler PROPERTIES
+        IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxcompiler.dll"
+        IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "${GFX_DXC_PATH}/inc"
+    )
+    add_library(dxil SHARED IMPORTED)
+    set_target_properties(dxil PROPERTIES
+        IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxil.dll"
+        IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
+    )
+    target_link_libraries(gfx PRIVATE dxcompiler dxil)
+else()
+    target_link_libraries(gfx PRIVATE Microsoft::DirectXShaderCompiler)
+endif()
+
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 set(GFX_AGILITY_VERSION 717)
 set(GFX_AGILITY_MICRO_VERSION 1)
@@ -119,33 +144,10 @@ else()
     target_link_libraries(gfx PRIVATE Microsoft::DirectX-Headers Microsoft::DirectX12-Agility)
 endif()
 
-set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
-FetchContent_Declare(
-    directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.8.2505.1/dxc_2025_07_14.zip"
-    SOURCE_DIR     "${GFX_DXC_PATH}"
-    FIND_PACKAGE_ARGS NAMES directx-dxc
-)
-FetchContent_MakeAvailable(directx-dxc)
-if(NOT directx-dxc_FOUND)
-    add_library(dxcompiler SHARED IMPORTED)
-    set_target_properties(dxcompiler PROPERTIES
-        IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxcompiler.dll"
-        IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
-        INTERFACE_INCLUDE_DIRECTORIES "${GFX_DXC_PATH}/inc"
-    )
-    add_library(dxil SHARED IMPORTED)
-    set_target_properties(dxil PROPERTIES
-        IMPORTED_LOCATION "${GFX_DXC_PATH}/bin/x64/dxil.dll"
-        IMPORTED_IMPLIB "${GFX_DXC_PATH}/lib/x64/dxcompiler.lib"
-    )
-    target_link_libraries(gfx PRIVATE dxcompiler dxil)
-else()
-    target_link_libraries(gfx PRIVATE Microsoft::DirectXShaderCompiler)
-endif()
-
 set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
-set(D3D12MA_AGILITY_SDK_DIRECTORY "${GFX_AGILITY_PATH}" CACHE STRING "")
+if(NOT DirectX12-Agility_FOUND)
+    set(D3D12MA_AGILITY_SDK_DIRECTORY "${GFX_AGILITY_PATH}" CACHE STRING "")
+endif()
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
@@ -158,8 +160,17 @@ if(NOT D3D12MemoryAllocator_FOUND)
     target_include_directories(gfx PRIVATE "${GFX_D3D12MA_PATH}/include")
     target_link_libraries(gfx PRIVATE D3D12MemoryAllocator)
     set_target_properties(D3D12MemoryAllocator PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+    if(DirectX12-Agility_FOUND)
+        target_compile_definitions(D3D12MemoryAllocator PUBLIC D3D12MA_USING_DIRECTX_HEADERS=1)
+        target_include_directories(D3D12MemoryAllocator BEFORE PRIVATE "${DirectX12-Agility_DIR}/../../include")
+    endif()
 else()
     target_link_libraries(gfx PRIVATE GPUOpen::D3D12MemoryAllocator)
+    if(NOT DirectX12-Agility_FOUND)
+        get_target_property(defs GPUOpen::D3D12MemoryAllocator INTERFACE_COMPILE_DEFINITIONS)
+        list(FILTER defs EXCLUDE REGEX [[^D3D12MA_USING_DIRECTX_HEADERS$]])
+        set_property(TARGET GPUOpen::D3D12MemoryAllocator PROPERTY INTERFACE_COMPILE_DEFINITIONS ${defs})
+    endif()
 endif()
 
 set(GFX_PIX_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/WinPixEventRuntime")
@@ -194,7 +205,7 @@ if(GFX_ENABLE_GUI)
     FetchContent_Declare(
         imgui
         GIT_REPOSITORY https://github.com/ocornut/imgui.git
-        GIT_TAG        v1.91.9
+        GIT_TAG        v1.92.6
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/imgui/"
         FIND_PACKAGE_ARGS NAMES imgui
     )
@@ -234,7 +245,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             cgltf
             GIT_REPOSITORY https://github.com/jkuhlmann/cgltf.git
-            GIT_TAG        v1.14
+            GIT_TAG        v1.15
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf/"
         )
         FetchContent_MakeAvailable(cgltf)
@@ -246,7 +257,7 @@ if(GFX_ENABLE_SCENE)
     FetchContent_Declare(
         glm
         GIT_REPOSITORY https://github.com/g-truc/glm.git
-        GIT_TAG        1.0.2
+        GIT_TAG        1.0.3
         SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/glm/"
         FIND_PACKAGE_ARGS NAMES glm
     )
@@ -305,7 +316,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             ktx
             GIT_REPOSITORY https://github.com/KhronosGroup/KTX-Software.git
-            GIT_TAG        v4.4.0
+            GIT_TAG        v4.4.2
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/KTX-Software/"
             FIND_PACKAGE_ARGS NAMES Ktx
         )
@@ -320,7 +331,7 @@ if(GFX_ENABLE_SCENE)
         FetchContent_Declare(
             vulkan-headers
             GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
-            GIT_TAG        v1.4.307
+            GIT_TAG        v1.4.341
             SOURCE_DIR     "${CMAKE_CURRENT_SOURCE_DIR}/third_party/Vulkan-Headers/"
             FIND_PACKAGE_ARGS NAMES VulkanHeaders
         )
