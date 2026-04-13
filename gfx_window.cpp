@@ -336,9 +336,6 @@ public:
 private:
     static inline DWORD getWindowStyle(DWORD &window_style_ex, GfxCreateWindowFlags flags)
     {
-        // Both fullscreen and borderless use WS_POPUP (no title bar / frame).
-        // Fullscreen additionally covers the entire monitor via setFullscreen();
-        // borderless is positioned normally via setWindowed().
         bool const isPopup = (flags & (kGfxCreateWindowFlag_FullscreenWindow | kGfxCreateWindowFlag_BorderlessWindow)) != 0;
         DWORD const window_style = isPopup ? WS_POPUP :
                                        (WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
