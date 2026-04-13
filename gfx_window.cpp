@@ -67,6 +67,7 @@ class GfxWindowInternal
     bool is_minimized_ = false;
     bool is_maximized_ = false;
     bool is_close_requested_ = false;
+    bool is_full_screen_ = false;
     bool is_key_down_[VK_OEM_CLEAR] = {};
     bool is_previous_key_down_[VK_OEM_CLEAR] = {};
     void (*drop_callback_)(char const *, uint32_t, void *) = nullptr;
@@ -130,10 +131,12 @@ public:
         if((flags_ & kGfxCreateWindowFlag_FullscreenWindow) != 0)
         {
             setFullscreen();
+            is_full_screen_ = true;
         }
         else
         {
             setWindowed(window_style, window_style_ex);
+            is_full_screen_ = false;
         }
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
@@ -306,20 +309,16 @@ public:
                      window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
     }
 
-    inline void toggleFullscreen() const
+    inline void toggleFullscreen()
     {
-        // Borderless windows do not participate in fullscreen toggling.
-        if((flags_ & kGfxCreateWindowFlag_BorderlessWindow) != 0)
-            return;
-
-        DWORD dwStyle = GetWindowLong(window_, GWL_STYLE);
-        if((dwStyle & WS_SYSMENU) != 0)
+        if(!is_full_screen_)
         {
             DWORD       window_style_ex;
             DWORD const window_style = getWindowStyle(window_style_ex, flags_ | kGfxCreateWindowFlag_FullscreenWindow);
             SetWindowLong(window_, GWL_STYLE, window_style);
             SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
             setFullscreen(false);
+            is_full_screen_ = true;
         }
         else
         {
@@ -328,6 +327,7 @@ public:
             SetWindowLong(window_, GWL_STYLE, window_style);
             SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
             setWindowed(window_style, window_style_ex, false);
+            is_full_screen_ = false;
         }
     }
 
