@@ -474,6 +474,19 @@ GfxResult gfxFrame(GfxContext context, bool vsync = true);
 GfxResult gfxFinish(GfxContext context);
 
 //!
+//! Linear algebra matrix conversion.
+//!
+
+uint64_t gfxGetMatrixMemorySize(GfxContext context, uint32_t num_rows, uint32_t num_columns,
+    uint32_t dest_layout, uint32_t dest_data_type,
+    uint32_t dest_stride = 0);
+
+GfxResult gfxConvertMatrix(GfxContext context,
+    GfxBuffer dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type,
+    GfxBuffer src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type,
+    uint32_t num_rows, uint32_t num_columns);
+
+//!
 //! Interop interface.
 //!
 

@@ -11140,6 +11140,66 @@ GfxResult gfxFinish(GfxContext context)
     return gfx->finish();
 }
 
+uint64_t gfxGetMatrixMemorySize(GfxContext context, uint32_t num_rows, uint32_t num_columns,
+    uint32_t dest_layout, uint32_t dest_data_type,
+    uint32_t dest_stride)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0;
+    ID3D12Device *device = gfx->getDevice();
+    if(!device) return 0;
+    ID3D12DevicePreview *device_preview = nullptr;
+    if(!SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&device_preview))) || !device_preview) return 0;
+    D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_DEST_INFO dest_info = {};
+    dest_info.DestSize = 0;
+    dest_info.DestLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>(dest_layout);
+    dest_info.DestStride = dest_stride;
+    dest_info.NumRows = num_rows;
+    dest_info.NumColumns = num_columns;
+    dest_info.DestDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(dest_data_type);
+    device_preview->GetLinearAlgebraMatrixConversionDestinationInfo(&dest_info);
+    device_preview->Release();
+    return static_cast<uint64_t>(dest_info.DestSize);
+}
+
+GfxResult gfxConvertMatrix(GfxContext context,
+    GfxBuffer dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type,
+    GfxBuffer src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type,
+    uint32_t num_rows, uint32_t num_columns)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    ID3D12GraphicsCommandList *command_list = gfx->getCommandList();
+    if(!command_list) return kGfxResult_InvalidOperation;
+    ID3D12GraphicsCommandListPreview *command_list_preview = nullptr;
+    if(!SUCCEEDED(command_list->QueryInterface(IID_PPV_ARGS(&command_list_preview))) || !command_list_preview)
+        return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to query ID3D12GraphicsCommandListPreview interface");
+    ID3D12Resource *dst_resource = gfxBufferGetResource(context, dst_buffer);
+    ID3D12Resource *src_resource = gfxBufferGetResource(context, src_buffer);
+    if(!dst_resource || !src_resource) {
+        command_list_preview->Release();
+        return kGfxResult_InvalidParameter;
+    }
+    D3D12_GPU_VIRTUAL_ADDRESS dst_va = dst_resource->GetGPUVirtualAddress() + dst_offset;
+    D3D12_GPU_VIRTUAL_ADDRESS src_va = src_resource->GetGPUVirtualAddress() + src_offset;
+    D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_INFO info = {};
+    info.DestInfo.DestSize = dst_size;
+    info.DestInfo.DestLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>(dst_layout);
+    info.DestInfo.DestStride = dst_stride;
+    info.DestInfo.NumRows = num_rows;
+    info.DestInfo.NumColumns = num_columns;
+    info.DestInfo.DestDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(dst_data_type);
+    info.SrcInfo.SrcSize = src_size;
+    info.SrcInfo.SrcDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(src_data_type);
+    info.SrcInfo.SrcLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>(src_layout);
+    info.SrcInfo.SrcStride = src_stride;
+    info.DataDesc.DestVA = dst_va;
+    info.DataDesc.SrcVA = src_va;
+    command_list_preview->ConvertLinearAlgebraMatrix(&info, 1);
+    command_list_preview->Release();
+    return kGfxResult_NoError;
+}
+
 GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight)
 {
     GfxResult result;
