@@ -476,15 +476,45 @@ GfxResult gfxFinish(GfxContext context);
 //!
 //! Linear algebra matrix conversion.
 //!
+//! These functions use the D3D12 Preview API (ID3D12DevicePreview / ID3D12GraphicsCommandListPreview)
+//! to query and perform GPU-accelerated matrix layout conversions for cooperative vector operations.
+//!
+//! Supported layouts (D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT):
+//!   ROW_MAJOR (0), COLUMN_MAJOR (1), MUL_OPTIMAL (2), OUTER_PRODUCT_OPTIMAL (3)
+//!
+//! Supported data types (D3D12_LINEAR_ALGEBRA_DATATYPE):
+//!   FLOAT16 (7), FLOAT32 (8), SINT16 (2), UINT16 (3), SINT32 (4), UINT32 (5), etc.
+//!
 
-uint64_t gfxGetMatrixMemorySize(GfxContext context, uint32_t num_rows, uint32_t num_columns,
-    uint32_t dest_layout, uint32_t dest_data_type,
-    uint32_t dest_stride = 0);
+//! Query the destination buffer size (in bytes) required for a matrix conversion.
+//! Returns 0 if the device does not support the requested layout/datatype combination,
+//! or if the Preview API is unavailable.
+//! @param context       Active GFX context
+//! @param num_rows      Number of rows in the matrix
+//! @param num_columns   Number of columns in the matrix
+//! @param dest_layout   Target layout (D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT value)
+//! @param dest_data_type Target data type (D3D12_LINEAR_ALGEBRA_DATATYPE value)
+//! @param dest_stride   Destination stride in bytes (0 = let the driver choose)
+uint64_t gfxGetMatrixMemorySize(GfxContext context, uint32_t num_rows, uint32_t num_columns, uint32_t dest_layout, uint32_t dest_data_type, uint32_t dest_stride = 0);
 
-GfxResult gfxConvertMatrix(GfxContext context,
-    GfxBuffer dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type,
-    GfxBuffer src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type,
-    uint32_t num_rows, uint32_t num_columns);
+//! Convert a matrix between layouts on the GPU command list.
+//! Records a ConvertLinearAlgebraMatrix command; the caller must submit the command list.
+//! @param context       Active GFX context
+//! @param dst_buffer    Destination buffer
+//! @param dst_offset    Byte offset into dst_buffer
+//! @param dst_size      Destination size in bytes (from gfxGetMatrixMemorySize)
+//! @param dst_layout    Destination layout (D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT value)
+//! @param dst_stride    Destination stride in bytes (0 = driver default)
+//! @param dst_data_type Destination data type (D3D12_LINEAR_ALGEBRA_DATATYPE value)
+//! @param src_buffer    Source buffer
+//! @param src_offset    Byte offset into src_buffer
+//! @param src_size      Source data size in bytes
+//! @param src_layout    Source layout (D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT value)
+//! @param src_stride    Source stride in bytes
+//! @param src_data_type Source data type (D3D12_LINEAR_ALGEBRA_DATATYPE value)
+//! @param num_rows      Number of rows in the matrix
+//! @param num_columns   Number of columns in the matrix
+GfxResult gfxConvertMatrix(GfxContext context, GfxBuffer dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type, GfxBuffer src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type, uint32_t num_rows, uint32_t num_columns);
 
 //!
 //! Interop interface.
