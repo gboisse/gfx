@@ -104,6 +104,10 @@ class GfxInternal
     ID3D12GraphicsCommandList6 *mesh_command_list_ = nullptr;
     ID3D12CommandAllocator **command_allocators_ = nullptr;
     ID3D12DebugCommandList *dbg_command_list_ = nullptr;
+    // In the GfxInternal class member declarations (around line 92-93, after mesh_command_list_):
+    ID3D12DevicePreview* coopvec_device_ = nullptr;
+    ID3D12GraphicsCommandListPreview* coopvec_command_list_ = nullptr;
+    GfxLinearAlgebraMatrixInfo linear_algebra_info_;
     std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
@@ -944,6 +948,8 @@ public:
                                  { gfx.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxInternal() { terminate(); }
 
+    inline GfxLinearAlgebraMatrixInfo const &getLinearAlgebraMatrixInfo() const { return linear_algebra_info_; }
+
     GfxResult initialize(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
         if(!window)
@@ -1292,6 +1298,9 @@ public:
         fence_values_ = (uint64_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint64_t));
         memset(fence_values_, 0, max_frames_in_flight_ * sizeof(uint64_t));
 
+        device_->QueryInterface(IID_PPV_ARGS(&coopvec_device_));
+        command_list_->QueryInterface(IID_PPV_ARGS(&coopvec_command_list_));
+        queryLinearAlgebraFeatures();
         return kGfxResult_NoError;
     }
 
@@ -1613,6 +1622,16 @@ public:
         {
             mesh_command_list_->Release();
             mesh_command_list_ = nullptr;
+        }
+        if ( coopvec_device_ != nullptr )
+        { 
+          coopvec_device_->Release();
+          coopvec_device_ = nullptr;
+        }
+        if ( coopvec_command_list_ != nullptr )
+        { 
+          coopvec_command_list_->Release();
+          coopvec_command_list_ = nullptr;
         }
         if(command_allocators_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
@@ -5107,6 +5126,165 @@ public:
             return nullptr; // invalid buffer object
         Buffer const &gfx_buffer = buffers_[buffer];
         return gfx_buffer.resource_;
+    }
+
+    uint64_t getMatrixMemorySize(uint32_t num_rows, uint32_t num_columns, uint32_t dest_layout, uint32_t dest_data_type, uint32_t dest_stride)
+    {
+      if ( !coopvec_device_ ) return 0;
+
+      D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_DEST_INFO dest_info = {};
+      dest_info.DestSize = 0;
+      dest_info.DestLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>( dest_layout );
+      dest_info.DestStride = dest_stride;
+      dest_info.NumRows = num_rows;
+      dest_info.NumColumns = num_columns;
+      dest_info.DestDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>( dest_data_type );
+
+      coopvec_device_->GetLinearAlgebraMatrixConversionDestinationInfo(&dest_info);
+      return static_cast<uint64_t>( dest_info.DestSize );
+    }
+
+    GfxResult convertMatrix(GfxBuffer const& dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type,
+      GfxBuffer const& src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type,
+      uint32_t num_rows, uint32_t num_columns)
+    {
+      if ( !coopvec_command_list_ )
+        return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cooperative vector command list not available");
+
+      if ( !buffer_handles_.has_handle(dst_buffer.handle) || !buffer_handles_.has_handle(src_buffer.handle) )
+        return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Invalid buffer resource for matrix conversion");
+
+      Buffer &gfx_dst = buffers_[dst_buffer];
+      Buffer &gfx_src = buffers_[src_buffer];
+
+      ID3D12Resource* dst_resource = gfx_dst.resource_;
+      ID3D12Resource* src_resource = gfx_src.resource_;
+      if ( !dst_resource || !src_resource )
+        return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Invalid buffer resource for matrix conversion");
+
+      // Transition resources: src → NON_PIXEL_SHADER_RESOURCE, dst → UNORDERED_ACCESS
+      // Use explicit transitions so the resources won't be decayed back to COMMON
+      // after ExecuteCommandLists (D3D12 decays implicitly promoted states).
+      bool transitions = false;
+      transitions  = transitionResource(gfx_src, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+      transitions |= transitionResource(gfx_dst, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+      if (transitions)
+        submitPipelineBarriers();
+
+      D3D12_GPU_VIRTUAL_ADDRESS const dst_va = dst_resource->GetGPUVirtualAddress() + dst_offset;
+      D3D12_GPU_VIRTUAL_ADDRESS const src_va = src_resource->GetGPUVirtualAddress() + src_offset;
+
+      D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_INFO info = {};
+      info.DestInfo.DestSize = dst_size;
+      info.DestInfo.DestLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>( dst_layout );
+      info.DestInfo.DestStride = dst_stride;
+      info.DestInfo.NumRows = num_rows;
+      info.DestInfo.NumColumns = num_columns;
+      info.DestInfo.DestDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>( dst_data_type );
+      info.SrcInfo.SrcSize = src_size;
+      info.SrcInfo.SrcDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>( src_data_type );
+      info.SrcInfo.SrcLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>( src_layout );
+      info.SrcInfo.SrcStride = src_stride;
+      info.DataDesc.DestVA = dst_va;
+      info.DataDesc.SrcVA = src_va;
+
+      coopvec_command_list_->ConvertLinearAlgebraMatrix(&info, 1);
+      return kGfxResult_NoError;
+    }
+
+    void queryLinearAlgebraFeatures()
+    {
+      linear_algebra_info_ = {};
+      if (!device_) return;
+
+      // Query linear algebra tier (D3D12_FEATURE_LINEAR_ALGEBRA_SUPPORT = 77)
+      D3D12_FEATURE_DATA_LINEAR_ALGEBRA_SUPPORT linAlgSupport{};
+      HRESULT hr = device_->CheckFeatureSupport(
+          static_cast<D3D12_FEATURE>(77), &linAlgSupport, sizeof(linAlgSupport));
+      if (SUCCEEDED(hr)) {
+        linear_algebra_info_.tier = static_cast<uint32_t>(linAlgSupport.LinearAlgebraTier);
+      }
+
+      if (!linear_algebra_info_.isSupported()) return;
+
+      // Query per-operation support (D3D12_FEATURE_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT = 78)
+      constexpr auto kFeatureOpSupport = static_cast<D3D12_FEATURE>(78);
+
+      // --- ThreadVectorMatrixMultiply ---
+      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kMulVecTypes[] = {
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
+      };
+      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kMulMatTypes[] = {
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT8_E4M3FN,
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT8_E5M2,
+      };
+      for (auto vecType : kMulVecTypes) {
+        for (auto matType : kMulMatTypes) {
+          for (auto resType : kMulVecTypes) {
+            D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
+            opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_THREAD_VECTOR_MATRIX_MULTIPLY;
+            opData.ThreadVectorMatrixMultiply.VectorInputType = vecType;
+            opData.ThreadVectorMatrixMultiply.MatrixInputType = matType;
+            opData.ThreadVectorMatrixMultiply.BiasInputType = resType;
+            opData.ThreadVectorMatrixMultiply.VectorResultType = resType;
+            opData.ThreadVectorMatrixMultiply.SupportFlags = D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_NONE;
+            hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
+            if (SUCCEEDED(hr) && (opData.ThreadVectorMatrixMultiply.SupportFlags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED)) {
+              linear_algebra_info_.mulProperties.push_back({
+                  static_cast<uint32_t>(vecType),
+                  static_cast<uint32_t>(matType),
+                  static_cast<uint32_t>(resType),
+                  static_cast<uint32_t>(resType),
+                  static_cast<uint32_t>(opData.ThreadVectorMatrixMultiply.SupportFlags)});
+            }
+          }
+        }
+      }
+
+      // --- ThreadOuterProduct ---
+      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kOuterTypes[] = {
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
+      };
+      for (auto inType : kOuterTypes) {
+        for (auto resType : kOuterTypes) {
+          D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
+          opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_THREAD_OUTER_PRODUCT;
+          opData.ThreadOuterProductSupport.InputComponentType = inType;
+          opData.ThreadOuterProductSupport.ResultComponentType = resType;
+          opData.ThreadOuterProductSupport.Supported = FALSE;
+          hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
+          if (SUCCEEDED(hr) && opData.ThreadOuterProductSupport.Supported) {
+            linear_algebra_info_.outerProductProperties.push_back({
+                static_cast<uint32_t>(inType),
+                static_cast<uint32_t>(resType),
+                true});
+          }
+        }
+      }
+
+      // --- AtomicAccumulateStore ---
+      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kAtomicTypes[] = {
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
+          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
+      };
+      for (auto compType : kAtomicTypes) {
+        D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
+        opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_ATOMIC_ACCUMULATE_STORE;
+        opData.AccumulateStore.ComponentType = compType;
+        opData.AccumulateStore.RWByteAddressBufferSupported = FALSE;
+        opData.AccumulateStore.GroupSharedSupported = FALSE;
+        hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
+        if (SUCCEEDED(hr) && (opData.AccumulateStore.RWByteAddressBufferSupported || opData.AccumulateStore.GroupSharedSupported)) {
+          linear_algebra_info_.atomicAccProperties.push_back({
+              static_cast<uint32_t>(compType),
+              opData.AccumulateStore.RWByteAddressBufferSupported != FALSE,
+              opData.AccumulateStore.GroupSharedSupported != FALSE});
+        }
+      }
     }
 
     ID3D12Resource *getTextureResource(GfxTexture const &texture)
@@ -11142,75 +11320,49 @@ GfxResult gfxFinish(GfxContext context)
 
 uint64_t gfxGetMatrixMemorySize(GfxContext context, uint32_t num_rows, uint32_t num_columns, uint32_t dest_layout, uint32_t dest_data_type, uint32_t dest_stride)
 {
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return 0;
-
-    ID3D12Device *device = gfx->getDevice();
-    if(!device) return 0;
-
-    // Query the Preview interface for cooperative vector matrix operations
-    ID3D12DevicePreview *device_preview = nullptr;
-    if(!SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&device_preview))) || !device_preview) return 0;
-
-    // Fill the destination info and let the driver compute the required buffer size.
-    // DestSize is an in/out parameter: set to 0 on input, filled by the driver on output.
-    D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_DEST_INFO dest_info = {};
-    dest_info.DestSize = 0;
-    dest_info.DestLayout = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>(dest_layout);
-    dest_info.DestStride = dest_stride;
-    dest_info.NumRows = num_rows;
-    dest_info.NumColumns = num_columns;
-    dest_info.DestDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(dest_data_type);
-
-    device_preview->GetLinearAlgebraMatrixConversionDestinationInfo(&dest_info);
-    device_preview->Release();
-
-    return static_cast<uint64_t>(dest_info.DestSize);
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if ( !gfx ) return 0;
+  return gfx->getMatrixMemorySize(num_rows, num_columns, dest_layout, dest_data_type, dest_stride);
 }
 
 GfxResult gfxConvertMatrix(GfxContext context, GfxBuffer dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type, GfxBuffer src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type, uint32_t num_rows, uint32_t num_columns)
 {
-    GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return kGfxResult_InvalidParameter;
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if ( !gfx ) return kGfxResult_InvalidParameter;
+  return gfx->convertMatrix(dst_buffer, dst_offset, dst_size, dst_layout, dst_stride, dst_data_type, src_buffer, src_offset, src_size, src_layout, src_stride, src_data_type, num_rows, num_columns);
+}
 
-    ID3D12GraphicsCommandList *command_list = gfx->getCommandList();
-    if(!command_list) return kGfxResult_InvalidOperation;
+std::string GfxLinearAlgebraMatrixInfo::tierName() const
+{
+  switch (tier) {
+    case 0x00: return "NOT_SUPPORTED";
+    case 0x10: return "TIER_1_0";
+    default: return "UNKNOWN(0x" + std::to_string(tier) + ")";
+  }
+}
 
-    // Query the Preview command list interface for matrix conversion commands
-    ID3D12GraphicsCommandListPreview *command_list_preview = nullptr;
-    if(!SUCCEEDED(command_list->QueryInterface(IID_PPV_ARGS(&command_list_preview))) || !command_list_preview)
-        return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to query ID3D12GraphicsCommandListPreview interface");
+std::string GfxLinearAlgebraMatrixInfo::dataTypeName(const uint32_t dataType)
+{
+  switch (dataType) {
+    case 2: return "SINT16";
+    case 3: return "UINT16";
+    case 4: return "SINT32";
+    case 5: return "UINT32";
+    case 7: return "FLOAT16";
+    case 8: return "FLOAT32";
+    case 18: return "SINT8";
+    case 19: return "UINT8";
+    case 20: return "FLOAT8_E4M3FN";
+    case 21: return "FLOAT8_E5M2";
+    default: return "UNKNOWN(" + std::to_string(dataType) + ")";
+  }
+}
 
-    // Resolve GPU virtual addresses for source and destination buffers
-    ID3D12Resource *dst_resource = gfxBufferGetResource(context, dst_buffer);
-    ID3D12Resource *src_resource = gfxBufferGetResource(context, src_buffer);
-    if(!dst_resource || !src_resource) {
-        command_list_preview->Release();
-        return kGfxResult_InvalidParameter;
-    }
-
-    const D3D12_GPU_VIRTUAL_ADDRESS dst_va = dst_resource->GetGPUVirtualAddress() + dst_offset;
-    const D3D12_GPU_VIRTUAL_ADDRESS src_va = src_resource->GetGPUVirtualAddress() + src_offset;
-
-    // Build the conversion descriptor and record the command
-    D3D12_LINEAR_ALGEBRA_MATRIX_CONVERSION_INFO info = {};
-    info.DestInfo.DestSize    = dst_size;
-    info.DestInfo.DestLayout  = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>(dst_layout);
-    info.DestInfo.DestStride  = dst_stride;
-    info.DestInfo.NumRows     = num_rows;
-    info.DestInfo.NumColumns  = num_columns;
-    info.DestInfo.DestDataType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(dst_data_type);
-    info.SrcInfo.SrcSize      = src_size;
-    info.SrcInfo.SrcDataType  = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(src_data_type);
-    info.SrcInfo.SrcLayout    = static_cast<D3D12_LINEAR_ALGEBRA_MATRIX_LAYOUT>(src_layout);
-    info.SrcInfo.SrcStride    = src_stride;
-    info.DataDesc.DestVA      = dst_va;
-    info.DataDesc.SrcVA       = src_va;
-
-    command_list_preview->ConvertLinearAlgebraMatrix(&info, 1);
-    command_list_preview->Release();
-
-    return kGfxResult_NoError;
+GfxLinearAlgebraMatrixInfo gfxGetLinearAlgebraMatrixInfo(GfxContext context)
+{
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if (!gfx) return {};
+  return gfx->getLinearAlgebraMatrixInfo();
 }
 
 GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight)

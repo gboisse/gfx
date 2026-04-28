@@ -93,7 +93,7 @@ endif()
 set(GFX_DXC_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx-dxc")
 FetchContent_Declare(
     directx-dxc
-    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2602/dxc_2026_02_20.zip"
+    URL            "https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.10.2605.2/dxc_preview_2026_04_22.zip"
     SOURCE_DIR     "${GFX_DXC_PATH}"
     FIND_PACKAGE_ARGS NAMES directx-dxc
 )
@@ -116,10 +116,9 @@ else()
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 719)
-set(GFX_AGILITY_MICRO_VERSION 1)
-#target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
-target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=720)
+set(GFX_AGILITY_VERSION 720)
+set(GFX_AGILITY_MICRO_VERSION 0)
+target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
     URL            "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.D3D12/1.${GFX_AGILITY_VERSION}.${GFX_AGILITY_MICRO_VERSION}-preview"

@@ -27,6 +27,9 @@ SOFTWARE.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <cstdint>
+#include <string>
+#include <vector>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include "gfx_core.h"
@@ -515,6 +518,58 @@ uint64_t gfxGetMatrixMemorySize(GfxContext context, uint32_t num_rows, uint32_t 
 //! @param num_rows      Number of rows in the matrix
 //! @param num_columns   Number of columns in the matrix
 GfxResult gfxConvertMatrix(GfxContext context, GfxBuffer dst_buffer, uint64_t dst_offset, uint32_t dst_size, uint32_t dst_layout, uint32_t dst_stride, uint32_t dst_data_type, GfxBuffer src_buffer, uint64_t src_offset, uint32_t src_size, uint32_t src_layout, uint32_t src_stride, uint32_t src_data_type, uint32_t num_rows, uint32_t num_columns);
+
+//!
+//! Linear algebra feature information.
+//!
+//! Queried at context creation time via CheckFeatureSupport.
+//! Provides the linear algebra tier and supported operation properties.
+//!
+
+struct GfxLinearAlgebraMatrixInfo
+{
+    //! Linear algebra tier (D3D12_LINEAR_ALGEBRA_TIER value; 0 = NOT_SUPPORTED, 0x10 = TIER_1_0)
+    uint32_t tier = 0;
+
+    //! Supported ThreadVectorMatrixMultiply property combinations
+    struct MulProperty
+    {
+        uint32_t vectorInputType;
+        uint32_t matrixInputType;
+        uint32_t biasInputType;
+        uint32_t vectorResultType;
+        uint32_t supportFlags;
+    };
+    std::vector<MulProperty> mulProperties;
+
+    //! Supported ThreadOuterProduct property combinations
+    struct OuterProductProperty
+    {
+        uint32_t inputComponentType;
+        uint32_t resultComponentType;
+        bool supported;
+    };
+    std::vector<OuterProductProperty> outerProductProperties;
+
+    //! Supported AtomicAccumulateStore property combinations
+    struct AtomicAccumulateProperty
+    {
+        uint32_t componentType;
+        bool rwByteAddressBufferSupported;
+        bool groupSharedSupported;
+    };
+    std::vector<AtomicAccumulateProperty> atomicAccProperties;
+
+    inline bool isSupported() const { return tier > 0; }
+
+    //! Get a human-readable tier name
+    std::string tierName() const;
+
+    //! Get a human-readable data type name
+    static std::string dataTypeName(uint32_t dataType);
+};
+
+GfxLinearAlgebraMatrixInfo gfxGetLinearAlgebraMatrixInfo(GfxContext context);
 
 //!
 //! Interop interface.
