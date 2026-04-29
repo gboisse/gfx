@@ -528,9 +528,6 @@ GfxResult gfxConvertMatrix(GfxContext context, GfxBuffer dst_buffer, uint64_t ds
 
 struct GfxLinearAlgebraMatrixInfo
 {
-    //! Linear algebra tier (D3D12_LINEAR_ALGEBRA_TIER value; 0 = NOT_SUPPORTED, 0x10 = TIER_1_0)
-    uint32_t tier = 0;
-
     //! Supported ThreadVectorMatrixMultiply property combinations
     struct MulProperty
     {
@@ -540,7 +537,6 @@ struct GfxLinearAlgebraMatrixInfo
         uint32_t vectorResultType;
         uint32_t supportFlags;
     };
-    std::vector<MulProperty> mulProperties;
 
     //! Supported ThreadOuterProduct property combinations
     struct OuterProductProperty
@@ -549,7 +545,6 @@ struct GfxLinearAlgebraMatrixInfo
         uint32_t resultComponentType;
         bool supported;
     };
-    std::vector<OuterProductProperty> outerProductProperties;
 
     //! Supported AtomicAccumulateStore property combinations
     struct AtomicAccumulateProperty
@@ -558,7 +553,6 @@ struct GfxLinearAlgebraMatrixInfo
         bool rwByteAddressBufferSupported;
         bool groupSharedSupported;
     };
-    std::vector<AtomicAccumulateProperty> atomicAccProperties;
 
     inline bool isSupported() const { return tier > 0; }
 
@@ -567,6 +561,12 @@ struct GfxLinearAlgebraMatrixInfo
 
     //! Get a human-readable data type name
     static std::string dataTypeName(uint32_t dataType);
+
+    //! Linear algebra tier (D3D12_LINEAR_ALGEBRA_TIER value; 0 = NOT_SUPPORTED, 0x10 = TIER_1_0)
+    uint32_t tier = 0;
+    std::vector<MulProperty> mulProperties;
+    std::vector<OuterProductProperty> outerProductProperties;
+    std::vector<AtomicAccumulateProperty> atomicAccProperties;
 };
 
 GfxLinearAlgebraMatrixInfo gfxGetLinearAlgebraMatrixInfo(GfxContext context);
