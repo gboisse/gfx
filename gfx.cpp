@@ -107,7 +107,7 @@ class GfxInternal
     // In the GfxInternal class member declarations (around line 92-93, after mesh_command_list_):
     ID3D12DevicePreview* coopvec_device_ = nullptr;
     ID3D12GraphicsCommandListPreview* coopvec_command_list_ = nullptr;
-    GfxLinearAlgebraMatrixInfo linear_algebra_info_;
+    uint32_t linear_algebra_tier_ = 0;
     std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
@@ -948,7 +948,7 @@ public:
                                  { gfx.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxInternal() { terminate(); }
 
-    inline GfxLinearAlgebraMatrixInfo const &getLinearAlgebraMatrixInfo() const { return linear_algebra_info_; }
+    inline uint32_t getLinearAlgebraTier() const { return linear_algebra_tier_; }
 
     GfxResult initialize(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter, GfxContext &context)
     {
@@ -5195,7 +5195,7 @@ public:
 
     void queryLinearAlgebraFeatures()
     {
-      linear_algebra_info_ = {};
+      linear_algebra_tier_ = 0;
       if (!device_) return;
 
       // Query linear algebra tier (D3D12_FEATURE_LINEAR_ALGEBRA_SUPPORT = 77)
@@ -5203,100 +5203,75 @@ public:
       HRESULT hr = device_->CheckFeatureSupport(
           static_cast<D3D12_FEATURE>(77), &linAlgSupport, sizeof(linAlgSupport));
       if (SUCCEEDED(hr)) {
-        linear_algebra_info_.tier = static_cast<uint32_t>(linAlgSupport.LinearAlgebraTier);
+        linear_algebra_tier_ = static_cast<uint32_t>(linAlgSupport.LinearAlgebraTier);
       }
+    }
 
-      if (!linear_algebra_info_.isSupported()) return;
+    GfxMatrixMultiplySupportResult checkMatrixMultiplySupport(uint32_t vectorInputType, uint32_t matrixInputType, uint32_t resultType)
+    {
+      return checkMatrixMultiplyAddSupport(vectorInputType, matrixInputType, resultType, resultType);
+    }
 
-      // Query per-operation support (D3D12_FEATURE_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT = 78)
+    GfxMatrixMultiplySupportResult checkMatrixMultiplyAddSupport(uint32_t vectorInputType, uint32_t matrixInputType, uint32_t biasInputType, uint32_t resultType)
+    {
+      GfxMatrixMultiplySupportResult result{};
+      if (!device_ || linear_algebra_tier_ == 0) return result;
+
       constexpr auto kFeatureOpSupport = static_cast<D3D12_FEATURE>(78);
-
-      // --- ThreadVectorMatrixMultiply ---
-      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kMulVecTypes[] = {
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_SINT8,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_UINT8,
-      };
-      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kMulMatTypes[] = {
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT8_E4M3FN,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT8_E5M2,
-          static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(17), // PackedS8x32
-          D3D12_LINEAR_ALGEBRA_DATATYPE_SINT8,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_UINT8,
-      };
-      for (auto vecType : kMulVecTypes) {
-        for (auto matType : kMulMatTypes) {
-          for (auto resType : kMulVecTypes) {
-            D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
-            opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_THREAD_VECTOR_MATRIX_MULTIPLY;
-            opData.ThreadVectorMatrixMultiply.VectorInputType = vecType;
-            opData.ThreadVectorMatrixMultiply.MatrixInputType = matType;
-            opData.ThreadVectorMatrixMultiply.BiasInputType = resType;
-            opData.ThreadVectorMatrixMultiply.VectorResultType = resType;
-            opData.ThreadVectorMatrixMultiply.SupportFlags = D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_NONE;
-            hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
-            if (SUCCEEDED(hr) && (opData.ThreadVectorMatrixMultiply.SupportFlags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED)) {
-              linear_algebra_info_.mulProperties.push_back({
-                  static_cast<uint32_t>(vecType),
-                  static_cast<uint32_t>(matType),
-                  static_cast<uint32_t>(resType),
-                  static_cast<uint32_t>(resType),
-                  static_cast<uint32_t>(opData.ThreadVectorMatrixMultiply.SupportFlags)});
-            }
-          }
-        }
+      D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
+      opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_THREAD_VECTOR_MATRIX_MULTIPLY;
+      opData.ThreadVectorMatrixMultiply.VectorInputType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(vectorInputType);
+      opData.ThreadVectorMatrixMultiply.MatrixInputType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(matrixInputType);
+      opData.ThreadVectorMatrixMultiply.BiasInputType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(biasInputType);
+      opData.ThreadVectorMatrixMultiply.VectorResultType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(resultType);
+      opData.ThreadVectorMatrixMultiply.SupportFlags = D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_NONE;
+      HRESULT hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
+      if (SUCCEEDED(hr)) {
+        auto flags = opData.ThreadVectorMatrixMultiply.SupportFlags;
+        result.supported = (flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED) != 0;
+        result.hardwareAccelerated = result.supported
+            && !(flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_EMULATED_INPUTS)
+            && !(flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_EMULATED_OUTPUTS);
+        result.transposeSupported = (flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_TRANSPOSE) != 0;
       }
+      return result;
+    }
 
-      // --- ThreadOuterProduct ---
-      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kOuterTypes[] = {
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
-          static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(17), // PackedS8x32
-          D3D12_LINEAR_ALGEBRA_DATATYPE_SINT8,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_UINT8,
-      };
-      for (auto inType : kOuterTypes) {
-        for (auto resType : kOuterTypes) {
-          D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
-          opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_THREAD_OUTER_PRODUCT;
-          opData.ThreadOuterProductSupport.InputComponentType = inType;
-          opData.ThreadOuterProductSupport.ResultComponentType = resType;
-          opData.ThreadOuterProductSupport.Supported = FALSE;
-          hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
-          if (SUCCEEDED(hr) && opData.ThreadOuterProductSupport.Supported) {
-            linear_algebra_info_.outerProductProperties.push_back({
-                static_cast<uint32_t>(inType),
-                static_cast<uint32_t>(resType),
-                true});
-          }
-        }
-      }
+    GfxOuterProductSupportResult checkOuterProductSupport(uint32_t inputComponentType, uint32_t resultComponentType)
+    {
+      GfxOuterProductSupportResult result{};
+      if (!device_ || linear_algebra_tier_ == 0) return result;
 
-      // --- AtomicAccumulateStore ---
-      constexpr D3D12_LINEAR_ALGEBRA_DATATYPE kAtomicTypes[] = {
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT16,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_FLOAT32,
-          static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(17), // PackedS8x32
-          D3D12_LINEAR_ALGEBRA_DATATYPE_SINT8,
-          D3D12_LINEAR_ALGEBRA_DATATYPE_UINT8,
-      };
-      for (auto compType : kAtomicTypes) {
-        D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
-        opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_ATOMIC_ACCUMULATE_STORE;
-        opData.AccumulateStore.ComponentType = compType;
-        opData.AccumulateStore.RWByteAddressBufferSupported = FALSE;
-        opData.AccumulateStore.GroupSharedSupported = FALSE;
-        hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
-        if (SUCCEEDED(hr) && (opData.AccumulateStore.RWByteAddressBufferSupported || opData.AccumulateStore.GroupSharedSupported)) {
-          linear_algebra_info_.atomicAccProperties.push_back({
-              static_cast<uint32_t>(compType),
-              opData.AccumulateStore.RWByteAddressBufferSupported != FALSE,
-              opData.AccumulateStore.GroupSharedSupported != FALSE});
-        }
+      constexpr auto kFeatureOpSupport = static_cast<D3D12_FEATURE>(78);
+      D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
+      opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_THREAD_OUTER_PRODUCT;
+      opData.ThreadOuterProductSupport.InputComponentType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(inputComponentType);
+      opData.ThreadOuterProductSupport.ResultComponentType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(resultComponentType);
+      opData.ThreadOuterProductSupport.Supported = FALSE;
+      HRESULT hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
+      if (SUCCEEDED(hr)) {
+        result.supported = opData.ThreadOuterProductSupport.Supported != FALSE;
       }
+      return result;
+    }
+
+    GfxAtomicAccumulationSupportResult checkAtomicAccumulationSupport(uint32_t componentType)
+    {
+      GfxAtomicAccumulationSupportResult result{};
+      if (!device_ || linear_algebra_tier_ == 0) return result;
+
+      constexpr auto kFeatureOpSupport = static_cast<D3D12_FEATURE>(78);
+      D3D12_FEATURE_DATA_LINEAR_ALGEBRA_MATRIX_OPERATION_SUPPORT opData{};
+      opData.OperationType = D3D12_LINEAR_ALGEBRA_OPERATION_TYPE_ATOMIC_ACCUMULATE_STORE;
+      opData.AccumulateStore.ComponentType = static_cast<D3D12_LINEAR_ALGEBRA_DATATYPE>(componentType);
+      opData.AccumulateStore.RWByteAddressBufferSupported = FALSE;
+      opData.AccumulateStore.GroupSharedSupported = FALSE;
+      HRESULT hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
+      if (SUCCEEDED(hr)) {
+        result.rwByteAddressBufferSupported = opData.AccumulateStore.RWByteAddressBufferSupported != FALSE;
+        result.groupSharedSupported = opData.AccumulateStore.GroupSharedSupported != FALSE;
+      }
+      return result;
     }
 
     ID3D12Resource *getTextureResource(GfxTexture const &texture)
@@ -11344,7 +11319,7 @@ GfxResult gfxConvertMatrix(GfxContext context, GfxBuffer dst_buffer, uint64_t ds
   return gfx->convertMatrix(dst_buffer, dst_offset, dst_size, dst_layout, dst_stride, dst_data_type, src_buffer, src_offset, src_size, src_layout, src_stride, src_data_type, num_rows, num_columns);
 }
 
-std::string GfxLinearAlgebraMatrixInfo::tierName() const
+static std::string linearAlgebraTierName(uint32_t tier)
 {
   switch (tier) {
     case 0x00: return "NOT_SUPPORTED";
@@ -11353,7 +11328,7 @@ std::string GfxLinearAlgebraMatrixInfo::tierName() const
   }
 }
 
-std::string GfxLinearAlgebraMatrixInfo::dataTypeName(const uint32_t dataType)
+std::string gfxGetLinearAlgebraDataTypeName(const uint32_t dataType)
 {
   switch (dataType) {
     case 2: return "SINT16";
@@ -11371,11 +11346,44 @@ std::string GfxLinearAlgebraMatrixInfo::dataTypeName(const uint32_t dataType)
   }
 }
 
-GfxLinearAlgebraMatrixInfo gfxGetLinearAlgebraMatrixInfo(GfxContext context)
+uint32_t gfxGetLinearAlgebraTier(GfxContext context)
+{
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if (!gfx) return 0;
+  return gfx->getLinearAlgebraTier();
+}
+
+std::string gfxGetLinearAlgebraTierName(GfxContext context)
+{
+  return linearAlgebraTierName(gfxGetLinearAlgebraTier(context));
+}
+
+GfxMatrixMultiplySupportResult gfxCheckMatrixMultiplySupport(GfxContext context, uint32_t vectorInputType, uint32_t matrixInputType, uint32_t resultType)
 {
   GfxInternal* gfx = GfxInternal::GetGfx(context);
   if (!gfx) return {};
-  return gfx->getLinearAlgebraMatrixInfo();
+  return gfx->checkMatrixMultiplySupport(vectorInputType, matrixInputType, resultType);
+}
+
+GfxMatrixMultiplySupportResult gfxCheckMatrixMultiplyAddSupport(GfxContext context, uint32_t vectorInputType, uint32_t matrixInputType, uint32_t biasInputType, uint32_t resultType)
+{
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if (!gfx) return {};
+  return gfx->checkMatrixMultiplyAddSupport(vectorInputType, matrixInputType, biasInputType, resultType);
+}
+
+GfxOuterProductSupportResult gfxCheckMatrixOuterProductSupport(GfxContext context, uint32_t inputComponentType, uint32_t resultComponentType)
+{
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if (!gfx) return {};
+  return gfx->checkOuterProductSupport(inputComponentType, resultComponentType);
+}
+
+GfxAtomicAccumulationSupportResult gfxCheckMatrixAtomicAccumulationSupport(GfxContext context, uint32_t componentType)
+{
+  GfxInternal* gfx = GfxInternal::GetGfx(context);
+  if (!gfx) return {};
+  return gfx->checkAtomicAccumulationSupport(componentType);
 }
 
 GfxContext gfxCreateContext(ID3D12Device *device, uint32_t max_frames_in_flight)

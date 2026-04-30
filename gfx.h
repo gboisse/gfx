@@ -29,7 +29,6 @@ SOFTWARE.
 #endif
 #include <cstdint>
 #include <string>
-#include <vector>
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include "gfx_core.h"
@@ -522,54 +521,61 @@ GfxResult gfxConvertMatrix(GfxContext context, GfxBuffer dst_buffer, uint64_t ds
 //!
 //! Linear algebra feature information.
 //!
-//! Queried at context creation time via CheckFeatureSupport.
-//! Provides the linear algebra tier and supported operation properties.
+//! Query functions for checking device support for linear algebra operations.
+//! Each function queries the device directly via CheckFeatureSupport.
 //!
 
-struct GfxLinearAlgebraMatrixInfo
+//! Result of a matrix multiply support query
+struct GfxMatrixMultiplySupportResult
 {
-    //! Supported ThreadVectorMatrixMultiply property combinations
-    struct MulProperty
-    {
-        uint32_t vectorInputType;
-        uint32_t matrixInputType;
-        uint32_t biasInputType;
-        uint32_t vectorResultType;
-        uint32_t supportFlags;
-    };
-
-    //! Supported ThreadOuterProduct property combinations
-    struct OuterProductProperty
-    {
-        uint32_t inputComponentType;
-        uint32_t resultComponentType;
-        bool supported;
-    };
-
-    //! Supported AtomicAccumulateStore property combinations
-    struct AtomicAccumulateProperty
-    {
-        uint32_t componentType;
-        bool rwByteAddressBufferSupported;
-        bool groupSharedSupported;
-    };
-
-    inline bool isSupported() const { return tier > 0; }
-
-    //! Get a human-readable tier name
-    std::string tierName() const;
-
-    //! Get a human-readable data type name
-    static std::string dataTypeName(uint32_t dataType);
-
-    //! Linear algebra tier (D3D12_LINEAR_ALGEBRA_TIER value; 0 = NOT_SUPPORTED, 0x10 = TIER_1_0)
-    uint32_t tier = 0;
-    std::vector<MulProperty> mulProperties;
-    std::vector<OuterProductProperty> outerProductProperties;
-    std::vector<AtomicAccumulateProperty> atomicAccProperties;
+    bool supported = false;
+    bool hardwareAccelerated = false;
+    bool transposeSupported = false;
 };
 
-GfxLinearAlgebraMatrixInfo gfxGetLinearAlgebraMatrixInfo(GfxContext context);
+//! Result of an outer product support query
+struct GfxOuterProductSupportResult
+{
+    bool supported = false;
+};
+
+//! Result of an atomic accumulation support query
+struct GfxAtomicAccumulationSupportResult
+{
+    bool rwByteAddressBufferSupported = false;
+    bool groupSharedSupported = false;
+};
+
+//! Get the linear algebra tier (0 = NOT_SUPPORTED, 0x10 = TIER_1_0)
+uint32_t gfxGetLinearAlgebraTier(GfxContext context);
+
+//! Get a human-readable tier name
+std::string gfxGetLinearAlgebraTierName(GfxContext context);
+
+//! Get a human-readable data type name
+std::string gfxGetLinearAlgebraDataTypeName(uint32_t dataType);
+
+//! Check matrix multiply support for a given data type combination.
+//! @param vectorInputType  D3D12_LINEAR_ALGEBRA_DATATYPE for vector input
+//! @param matrixInputType  D3D12_LINEAR_ALGEBRA_DATATYPE for matrix input
+//! @param resultType       D3D12_LINEAR_ALGEBRA_DATATYPE for result (also used as bias type)
+GfxMatrixMultiplySupportResult gfxCheckMatrixMultiplySupport(GfxContext context, uint32_t vectorInputType, uint32_t matrixInputType, uint32_t resultType);
+
+//! Check matrix multiply+add support for a given data type combination.
+//! @param vectorInputType  D3D12_LINEAR_ALGEBRA_DATATYPE for vector input
+//! @param matrixInputType  D3D12_LINEAR_ALGEBRA_DATATYPE for matrix input
+//! @param biasInputType    D3D12_LINEAR_ALGEBRA_DATATYPE for bias input
+//! @param resultType       D3D12_LINEAR_ALGEBRA_DATATYPE for result
+GfxMatrixMultiplySupportResult gfxCheckMatrixMultiplyAddSupport(GfxContext context, uint32_t vectorInputType, uint32_t matrixInputType, uint32_t biasInputType, uint32_t resultType);
+
+//! Check outer product support for a given data type combination.
+//! @param inputComponentType   D3D12_LINEAR_ALGEBRA_DATATYPE for input
+//! @param resultComponentType  D3D12_LINEAR_ALGEBRA_DATATYPE for result
+GfxOuterProductSupportResult gfxCheckMatrixOuterProductSupport(GfxContext context, uint32_t inputComponentType, uint32_t resultComponentType);
+
+//! Check atomic accumulation support for a given data type.
+//! @param componentType  D3D12_LINEAR_ALGEBRA_DATATYPE for the component
+GfxAtomicAccumulationSupportResult gfxCheckMatrixAtomicAccumulationSupport(GfxContext context, uint32_t componentType);
 
 //!
 //! Interop interface.
