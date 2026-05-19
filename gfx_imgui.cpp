@@ -53,7 +53,6 @@ class GfxImGuiInternal
     uint32_t const magic_ = kConstant_Magic;
 
     GfxContext gfx_ = {};
-    GfxTexture font_buffer_ = {};
     GfxSamplerState font_sampler_ = {};
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
@@ -146,7 +145,6 @@ public:
 
     GfxResult initializeScale()
     {
-        gfxDestroyTexture(gfx_, font_buffer_);
         gfxDestroySamplerState(gfx_, font_sampler_);
 
         ImGui::StyleColorsDark();
@@ -190,24 +188,61 @@ public:
                 io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, nullptr);
             }
         }
-        uint8_t *font_data;
-        int32_t font_width, font_height;
-        io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
-        GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
-        font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
         font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        if(!font_buffer || !font_buffer_ || !font_sampler_)
-        {
-            gfxDestroyBuffer(gfx_, font_buffer);
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
-        }
-        font_buffer_.setName("gfx_ImGuiFontBuffer");
-        io.Fonts->TexRef = (ImTextureID)&font_buffer_;
-        GFX_TRY(gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer));
-        GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
+        if(!font_sampler_)
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font sampler");
         GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
 
         return kGfxResult_NoError;
+    }
+
+    void destroyTexture(ImTextureData *tex)
+    {
+        GfxTexture *texture = (GfxTexture *)tex->BackendUserData;
+        if(texture == nullptr)
+            return;
+        gfxDestroyTexture(gfx_, *texture);
+        delete texture;
+        tex->SetTexID(ImTextureID_Invalid);
+        tex->SetStatus(ImTextureStatus_Destroyed);
+        tex->BackendUserData = nullptr;
+    }
+
+    void updateTexture(ImTextureData *tex)
+    {
+        if(tex->Status == ImTextureStatus_WantCreate)
+        {
+            IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
+            IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
+            GfxTexture *texture = new GfxTexture();
+            *texture = gfxCreateTexture2D(gfx_, (uint32_t)tex->Width, (uint32_t)tex->Height, DXGI_FORMAT_R8G8B8A8_UNORM);
+            if(!*texture)
+            {
+                delete texture;
+                return;
+            }
+            texture->setName("gfx_ImGuiTexture");
+            uint64_t const size = (uint64_t)tex->GetPitch() * (uint64_t)tex->Height;
+            GfxBuffer upload_buffer = gfxCreateBuffer(gfx_, size, tex->GetPixels(), kGfxCpuAccess_Write);
+            gfxCommandCopyBufferToTexture(gfx_, *texture, upload_buffer);
+            gfxDestroyBuffer(gfx_, upload_buffer);
+            tex->SetTexID((ImTextureID)(intptr_t)texture);
+            tex->SetStatus(ImTextureStatus_OK);
+            tex->BackendUserData = texture;
+        }
+        else if(tex->Status == ImTextureStatus_WantUpdates)
+        {
+            // gfx has no partial texture update path; re-upload the full texture.
+            GfxTexture *texture = (GfxTexture *)tex->BackendUserData;
+            IM_ASSERT(texture != nullptr);
+            uint64_t const size = (uint64_t)tex->GetPitch() * (uint64_t)tex->Height;
+            GfxBuffer upload_buffer = gfxCreateBuffer(gfx_, size, tex->GetPixels(), kGfxCpuAccess_Write);
+            gfxCommandCopyBufferToTexture(gfx_, *texture, upload_buffer);
+            gfxDestroyBuffer(gfx_, upload_buffer);
+            tex->SetStatus(ImTextureStatus_OK);
+        }
+        if(tex->Status == ImTextureStatus_WantDestroy && tex->UnusedFrames > 0)
+            destroyTexture(tex);
     }
 
     GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
@@ -224,6 +259,10 @@ public:
         ImGui::StyleColorsDark();
         ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= flags; // config flags
+        io.BackendRendererName = "imgui_impl_gfx";
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures; // We can honor ImGuiPlatformIO::Textures[] requests during render.
+        ImGuiPlatformIO &platform_io = ImGui::GetPlatformIO();
+        platform_io.Renderer_TextureMaxWidth = platform_io.Renderer_TextureMaxHeight = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION;
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData = this; // set magic number
@@ -273,7 +312,15 @@ public:
     {
         if(ImGui::GetCurrentContext() != nullptr)
         {
-            if(ImGui::GetIO().BackendPlatformUserData != nullptr)
+            // Destroy all dynamic textures owned by the backend before tearing down the context.
+            if(gfx_)
+                for(ImTextureData *tex : ImGui::GetPlatformIO().Textures)
+                    if(tex->RefCount == 1)
+                        destroyTexture(tex);
+            ImGuiIO &io = ImGui::GetIO();
+            io.BackendRendererName = nullptr;
+            io.BackendFlags &= ~ImGuiBackendFlags_RendererHasTextures;
+            if(io.BackendPlatformUserData != nullptr)
                 ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
             ImGui::SetCurrentContext(nullptr);
@@ -292,7 +339,6 @@ public:
         }
         if(gfx_)
         {
-            GFX_TRY(gfxDestroyTexture(gfx_, font_buffer_));
             GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_));
             if(index_buffers_ != nullptr)
                 for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
@@ -323,7 +369,7 @@ public:
             GFX_SET_ERROR(kGfxResult_InvalidParameter, "ImGui can only composite to sRGB render targets");
         ImGuiIO &io = ImGui::GetIO();
         ImGui::Render();    // implicit ImGui::EndFrame()
-        ImDrawData const *draw_data = ImGui::GetDrawData();
+        ImDrawData *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
 
         if(dpi_scale_changed_)
@@ -331,6 +377,13 @@ public:
             GFX_TRY(initializeScale());
             dpi_scale_changed_ = false;
         }
+
+        // Catch up with texture updates. Most of the times, the list will have 1 element with an OK status, aka nothing to do.
+        // (This almost always points to ImGui::GetPlatformIO().Textures[] but is part of ImDrawData to allow overriding or disabling texture updates.)
+        if(draw_data->Textures != nullptr)
+            for(ImTextureData *tex : *draw_data->Textures)
+                if(tex->Status != ImTextureStatus_OK)
+                    updateTexture(tex);
 
         if(draw_data->TotalVtxCount > 0)
         {
