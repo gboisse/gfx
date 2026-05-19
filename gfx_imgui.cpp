@@ -62,9 +62,7 @@ class GfxImGuiInternal
     GfxKernel imgui_kernel_ = {};
     char **font_filenames_ = nullptr;
     uint32_t font_count_ = 0;
-    ImFontConfig *font_configs_ = nullptr;
     float dpi_scale_ = 1.0f;
-    bool dpi_scale_changed_  = false;
 
     GfxProgram composite_program_ = {};
     GfxKernel composite_kernel_ = {};
@@ -224,7 +222,8 @@ public:
         ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= flags; // config flags
         io.BackendRendererName = "imgui_impl_gfx";
-        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures; // We can honor ImGuiPlatformIO::Textures[] requests during render.
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;  // We can honor ImGuiPlatformIO::Textures[] requests during render.
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset; // We can honor the ImDrawCmd::VtxOffset field, allowing for large meshes.
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData      = this; // set magic number
@@ -285,7 +284,7 @@ public:
                         destroyTexture(tex);
             ImGuiIO &io = ImGui::GetIO();
             io.BackendRendererName = nullptr;
-            io.BackendFlags &= ~ImGuiBackendFlags_RendererHasTextures;
+            io.BackendFlags &= ~(ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset);
             if(io.BackendPlatformUserData != nullptr)
                 ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
@@ -299,8 +298,6 @@ public:
             }
             gfxFree(font_filenames_);
             font_filenames_ = nullptr;
-            gfxFree(font_configs_);
-            font_configs_ = nullptr;
             font_count_ = 0;
         }
         if(gfx_)
@@ -433,10 +430,10 @@ public:
                                                        (int32_t)cmd->ClipRect.y,
                                                        (int32_t)(cmd->ClipRect.z - cmd->ClipRect.x),
                                                        (int32_t)(cmd->ClipRect.w - cmd->ClipRect.y));
-                        gfxCommandDrawIndexed(gfx_, cmd->ElemCount, 1, idx_offset, vtx_offset);
+                        gfxCommandDrawIndexed(gfx_, cmd->ElemCount, 1, idx_offset + cmd->IdxOffset, vtx_offset + cmd->VtxOffset);
                     }
-                    idx_offset += cmd->ElemCount;
                 }
+                idx_offset += cmd_list->IdxBuffer.Size;
                 vtx_offset += cmd_list->VtxBuffer.Size;
             }
             gfxCommandSetScissorRect(gfx_); // reset scissor test
