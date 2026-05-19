@@ -53,8 +53,8 @@ class GfxImGuiInternal
     uint32_t const magic_ = kConstant_Magic;
 
     GfxContext gfx_ = {};
-    GfxSamplerState font_sampler_ = {};         // nearest sampler (default)
-    GfxSamplerState font_sampler_linear_ = {};  // linear sampler (selected via callback)
+    GfxSamplerState font_sampler_ = {};         // linear sampler (default)
+    GfxSamplerState font_sampler_nearest_ = {}; // nearest sampler (selected via callback)
     GfxSamplerState current_sampler_ = {};      // sampler in use for the current draw
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
@@ -198,13 +198,13 @@ public:
     static void gfx_DrawCallback_SetSamplerLinear(ImDrawList const *, ImDrawCmd const *)
     {
         GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
-        gfx->current_sampler_ = gfx->font_sampler_linear_;
+        gfx->current_sampler_ = gfx->font_sampler_;
     }
 
     static void gfx_DrawCallback_SetSamplerNearest(ImDrawList const *, ImDrawCmd const *)
     {
         GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
-        gfx->current_sampler_ = gfx->font_sampler_;
+        gfx->current_sampler_ = gfx->font_sampler_nearest_;
     }
 
     GfxResult initialize(GfxContext const &gfx, ImGuiConfigFlags flags)
@@ -251,10 +251,10 @@ public:
         GFX_TRY(initializeKernel());
 
         gfxDestroySamplerState(gfx_, font_sampler_);
-        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        gfxDestroySamplerState(gfx_, font_sampler_linear_);
-        font_sampler_linear_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
-        if (!font_sampler_ || !font_sampler_linear_)
+        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+        gfxDestroySamplerState(gfx_, font_sampler_nearest_);
+        font_sampler_nearest_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
+        if (!font_sampler_ || !font_sampler_nearest_)
         {
             return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font sampler");
         }
@@ -303,7 +303,7 @@ public:
         if(gfx_)
         {
             GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_));
-            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_linear_));
+            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_nearest_));
             if(index_buffers_ != nullptr)
                 for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
                 {
@@ -529,8 +529,8 @@ public:
     {
         ImGuiStyle &style = ImGui::GetStyle();
         style.ScaleAllSizes(scale / dpi_scale_);
-        style.FontScaleDpi = dpi_scale_;
         dpi_scale_         = scale;
+        style.FontScaleDpi = dpi_scale_;
     }
 
     void setupRenderState(GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, GfxTexture const &output_texture)
