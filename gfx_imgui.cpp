@@ -143,59 +143,6 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult initializeScale()
-    {
-        gfxDestroySamplerState(gfx_, font_sampler_);
-
-        ImGui::StyleColorsDark();
-        ImGuiStyle &style = ImGui::GetStyle();
-        style.ScaleAllSizes(dpi_scale_);
-
-        ImGuiIO &io = ImGui::GetIO();
-        io.Fonts->Clear();
-        for(uint32_t i = 0; i < font_count_; ++i)
-        {
-            if(i == 0 && font_configs_ != nullptr && font_configs_[0].MergeMode)
-            {
-                ImFontConfig defaultConfig = {};
-                defaultConfig.SizePixels = 13.0f * dpi_scale_;
-                io.Fonts->AddFontDefault(&defaultConfig);
-            }
-            if(font_configs_ != nullptr)
-            {
-                float const pre_dpi_size = font_configs_[i].SizePixels;
-                ImVec2 const pre_dpi_glyph_offset = font_configs_[i].GlyphOffset;
-                float const pre_dpi_glyph_extra_advance_x = font_configs_[i].GlyphExtraAdvanceX;
-                float const pre_dpi_glyph_min_advance_x   = font_configs_[i].GlyphMinAdvanceX;
-                float const pre_dpi_glyph_max_advance_x   = font_configs_[i].GlyphMaxAdvanceX;
-                font_configs_[i].SizePixels *= dpi_scale_;
-                font_configs_[i].GlyphOffset.x *= dpi_scale_;
-                font_configs_[i].GlyphOffset.y *= dpi_scale_;
-                font_configs_[i].GlyphExtraAdvanceX *= dpi_scale_;
-                font_configs_[i].GlyphMinAdvanceX *= dpi_scale_;
-                font_configs_[i].GlyphMaxAdvanceX *= dpi_scale_;
-                float const font_size = (font_configs_[i].SizePixels > 0.0f) ? font_configs_[i].SizePixels : 16.0f * dpi_scale_;
-                io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, &font_configs_[i]);
-                font_configs_[i].SizePixels = pre_dpi_size;
-                font_configs_[i].GlyphOffset = pre_dpi_glyph_offset;
-                font_configs_[i].GlyphExtraAdvanceX = pre_dpi_glyph_extra_advance_x;
-                font_configs_[i].GlyphMinAdvanceX   = pre_dpi_glyph_min_advance_x;
-                font_configs_[i].GlyphMaxAdvanceX   = pre_dpi_glyph_max_advance_x;
-            }
-            else
-            {
-                float const font_size = 16.0f * dpi_scale_;
-                io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, nullptr);
-            }
-        }
-        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        if(!font_sampler_)
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font sampler");
-        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
-
-        return kGfxResult_NoError;
-    }
-
     void destroyTexture(ImTextureData *tex)
     {
         GfxTexture *texture = (GfxTexture *)tex->BackendUserData;
@@ -245,7 +192,7 @@ public:
             destroyTexture(tex);
     }
 
-    GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
+    GfxResult initialize(GfxContext const &gfx, ImGuiConfigFlags flags)
     {
         if(!gfx)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
@@ -267,25 +214,6 @@ public:
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData = this; // set magic number
 
-        if(font_count > 0)
-        {
-            font_filenames_ = (char **)gfxMalloc(font_count * sizeof(char *));
-            font_count_     = font_count;
-            for(uint32_t i = 0; i < font_count; ++i)
-            {
-                font_filenames_[i] = (char *)gfxMalloc(strlen(font_filenames[i]) + 1);
-                strcpy(font_filenames_[i], font_filenames[i]);
-            }
-            if(font_configs != nullptr)
-            {
-                font_configs_ = (ImFontConfig *)gfxMalloc(font_count * sizeof(ImFontConfig));
-                for(uint32_t i = 0; i < font_count; ++i)
-                {
-                    font_configs_[i] = font_configs[i];
-                }
-            }
-        }
-
         HWND window = gfxGetWindowHandle(gfx_);
         dpi_scale_ = 1.0f;
         if(window != nullptr)
@@ -293,8 +221,22 @@ public:
             UINT dpi = GetDpiForWindow(window);
             dpi_scale_ = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
         }
+
+        ImGui::StyleColorsDark();
+        ImGuiStyle &style = ImGui::GetStyle();
+        style.ScaleAllSizes(dpi_scale_);
+        style.FontScaleDpi = dpi_scale_;
+        io.DisplayFramebufferScale = ImVec2(dpi_scale_, dpi_scale_);
+
         GFX_TRY(initializeKernel());
-        GFX_TRY(initializeScale());
+
+        gfxDestroySamplerState(gfx_, font_sampler_);
+        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
+        if (!font_sampler_)
+        {
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font sampler");
+        }
+        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
 
         index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         vertex_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -371,12 +313,6 @@ public:
         ImGui::Render();    // implicit ImGui::EndFrame()
         ImDrawData *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
-
-        if(dpi_scale_changed_)
-        {
-            GFX_TRY(initializeScale());
-            dpi_scale_changed_ = false;
-        }
 
         // Catch up with texture updates. Most of the times, the list will have 1 element with an OK status, aka nothing to do.
         // (This almost always points to ImGui::GetPlatformIO().Textures[] but is part of ImDrawData to allow overriding or disabling texture updates.)
@@ -479,6 +415,7 @@ public:
         ImGui_ImplWin32_NewFrame();
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
+        io.DisplayFramebufferScale = ImVec2(dpi_scale_, dpi_scale_);
         ImGui::NewFrame();  // can start recording new commands again
 
         return kGfxResult_NoError;
@@ -563,20 +500,21 @@ public:
 
     void setDPIScale(float scale)
     {
-        dpi_scale_changed_ = true;
+        ImGuiStyle &style = ImGui::GetStyle();
+        style.ScaleAllSizes(scale / dpi_scale_);
+        style.FontScaleDpi = dpi_scale_;
         dpi_scale_         = scale;
     }
 
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count,
-    ImFontConfig const *font_configs, ImGuiConfigFlags flags)
+GfxResult gfxImGuiInitialize(GfxContext gfx, ImGuiConfigFlags flags)
 {
     GfxResult result;
     GfxImGuiInternal *gfx_imgui = new GfxImGuiInternal();
     if(!gfx_imgui) return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to initialize ImGui");
-    result = gfx_imgui->initialize(gfx, font_filenames, font_count, font_configs, flags);
+    result = gfx_imgui->initialize(gfx, flags);
     if(result != kGfxResult_NoError)
     {
         delete gfx_imgui;
