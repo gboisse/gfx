@@ -53,15 +53,13 @@ class GfxImGuiInternal
     uint32_t const magic_ = kConstant_Magic;
 
     GfxContext gfx_ = {};
-    GfxSamplerState font_sampler_ = {};         // linear sampler (default)
+    GfxSamplerState font_sampler_linear_ = {};         // linear sampler (default)
     GfxSamplerState font_sampler_nearest_ = {}; // nearest sampler (selected via callback)
     GfxSamplerState current_sampler_ = {};      // sampler in use for the current draw
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernel_ = {};
-    char **font_filenames_ = nullptr;
-    uint32_t font_count_ = 0;
     float dpi_scale_ = 1.0f;
 
     GfxProgram composite_program_ = {};
@@ -198,7 +196,7 @@ public:
     static void gfx_DrawCallback_SetSamplerLinear(ImDrawList const *, ImDrawCmd const *)
     {
         GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
-        gfx->current_sampler_ = gfx->font_sampler_;
+        gfx->current_sampler_ = gfx->font_sampler_linear_;
     }
 
     static void gfx_DrawCallback_SetSamplerNearest(ImDrawList const *, ImDrawCmd const *)
@@ -207,7 +205,7 @@ public:
         gfx->current_sampler_ = gfx->font_sampler_nearest_;
     }
 
-    GfxResult initialize(GfxContext const &gfx, ImGuiConfigFlags flags)
+    GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
     {
         if(!gfx)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot initialize ImGui using an invalid context object");
@@ -227,6 +225,23 @@ public:
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
         io.UserData      = this; // set magic number
+
+        if(font_count > 0)
+        {
+            io.Fonts->Clear();
+            for(uint32_t i = 0; i < font_count; ++i)
+            {
+                if(i == 0 && font_configs != nullptr && font_configs[0].MergeMode)
+                {
+                    ImFontConfig defaultConfig = {};
+                    io.Fonts->AddFontDefault(&defaultConfig);
+                }
+                if(font_configs != nullptr)
+                    io.Fonts->AddFontFromFileTTF(font_filenames[i], 0, &font_configs[i]);
+                else
+                    io.Fonts->AddFontFromFileTTF(font_filenames[i], 0);
+            }
+        }
 
         ImGuiPlatformIO &platform_io = ImGui::GetPlatformIO();
         platform_io.Renderer_TextureMaxWidth = platform_io.Renderer_TextureMaxHeight = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION;
@@ -250,15 +265,15 @@ public:
 
         GFX_TRY(initializeKernel());
 
-        gfxDestroySamplerState(gfx_, font_sampler_);
-        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+        gfxDestroySamplerState(gfx_, font_sampler_linear_);
+        font_sampler_linear_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
         gfxDestroySamplerState(gfx_, font_sampler_nearest_);
         font_sampler_nearest_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        if (!font_sampler_ || !font_sampler_nearest_)
+        if (!font_sampler_linear_ || !font_sampler_nearest_)
         {
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font sampler");
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font samplers");
         }
-        current_sampler_ = font_sampler_;
+        current_sampler_ = font_sampler_linear_;
         GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_));
 
         index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -290,19 +305,9 @@ public:
             ImGui::DestroyContext();
             ImGui::SetCurrentContext(nullptr);
         }
-        if(font_count_ > 0)
-        {
-            for(uint32_t i = 0; i < font_count_; ++i)
-            {
-                gfxFree(font_filenames_[i]);
-            }
-            gfxFree(font_filenames_);
-            font_filenames_ = nullptr;
-            font_count_ = 0;
-        }
         if(gfx_)
         {
-            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_));
+            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_linear_));
             GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_nearest_));
             if(index_buffers_ != nullptr)
                 for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
@@ -336,8 +341,6 @@ public:
         ImDrawData *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
 
-        // Catch up with texture updates. Most of the times, the list will have 1 element with an OK status, aka nothing to do.
-        // (This almost always points to ImGui::GetPlatformIO().Textures[] but is part of ImDrawData to allow overriding or disabling texture updates.)
         if(draw_data->Textures != nullptr)
             for(ImTextureData *tex : *draw_data->Textures)
                 if(tex->Status != ImTextureStatus_OK)
@@ -541,19 +544,19 @@ public:
         if (!!output_texture)
             gfxCommandBindColorTarget(gfx_, 0, output_texture);
         gfxCommandSetViewport(gfx_); // draw to render texture
-        current_sampler_ = font_sampler_;
+        current_sampler_ = font_sampler_linear_;
         gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_);
     }
 
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, ImGuiConfigFlags flags)
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
 {
     GfxResult result;
     GfxImGuiInternal *gfx_imgui = new GfxImGuiInternal();
     if(!gfx_imgui) return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to initialize ImGui");
-    result = gfx_imgui->initialize(gfx, flags);
+    result = gfx_imgui->initialize(gfx, font_filenames, font_count, font_configs, flags);
     if(result != kGfxResult_NoError)
     {
         delete gfx_imgui;
