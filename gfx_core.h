@@ -51,7 +51,7 @@ enum GfxConstant
     kGfxConstant_MaxRenderTarget  = 8,
     kGfxConstant_MaxAnisotropy    = 8,
     kGfxConstant_MaxNameLength    = 64,
-    kGfxConstant_NumBindlessSlots = 1024
+    kGfxConstant_NumBindlessSlots = 2048
 };
 
 //!
