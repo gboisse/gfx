@@ -5214,6 +5214,73 @@ public:
         return handle;
     }
 
+    HANDLE createTextureSharedHandle(GfxTexture const &texture)
+    {
+        HANDLE handle = {};
+        if(!texture_handles_.has_handle(texture.handle))
+        {
+            if(!!texture)
+                GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create shared handle from invalid texture object");
+            return handle;  // invalid texture object
+        }
+        Texture &gfx_texture = textures_[texture];
+        if(gfx_texture.isInterop())
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from interop texture object");
+            return handle;  // invalid texture object type
+        }
+        D3D12_HEAP_FLAGS heap_flags = D3D12_HEAP_FLAG_NONE;
+        if(!SUCCEEDED(gfx_texture.resource_->GetHeapProperties(nullptr, &heap_flags)))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Cannot query heap information from texture object");
+            return handle;  // internal error
+        }
+        if(!((heap_flags & D3D12_HEAP_FLAG_SHARED) != 0))
+        {
+            ID3D12Resource *resource = nullptr;
+            D3D12MA::Allocation *allocation = nullptr;
+            D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+            D3D12MA::ALLOCATION_DESC
+            allocation_desc                = {};
+            allocation_desc.HeapType       = D3D12_HEAP_TYPE_DEFAULT;
+            allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
+            resource_desc.Alignment        = 0;    // default alignment
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, gfx_texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            {
+                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared texture object");
+                return handle;  // out of memory
+            }
+            bool transitioned = transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+            ID3D12Resource *previous_resource = gfx_texture.resource_;
+            collect(gfx_texture);    // release previous texture
+            gfx_texture.Object::flags_ &= ~Object::kFlag_Named;
+            gfx_texture.allocation_ = allocation;
+            gfx_texture.resource_ = resource;
+            gfx_texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            gfx_texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            gfx_texture.transitioned_ = false;
+            transitioned |= transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+            if(transitioned) submitPipelineBarriers();
+            command_list_->CopyResource(gfx_texture.resource_, previous_resource);
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
+        WindowsSecurityAttributes security_attributes;
+        if(HRESULT status = device_->CreateSharedHandle(gfx_texture.resource_, &security_attributes, GENERIC_ALL, nullptr, &handle); !SUCCEEDED(status))
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from texture object: 0x%08X", status);
+        return handle;
+    }
+
     inline ID3D12Resource *getBackBuffer()
     {
         return back_buffers_[back_buffer_index_];
@@ -11196,6 +11263,13 @@ HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->createBufferSharedHandle(buffer);
+}
+
+HANDLE gfxTextureCreateSharedHandle(GfxContext context, GfxTexture texture)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;    // invalid context
+    return gfx->createTextureSharedHandle(texture);
 }
 
 ID3D12Resource *gfxGetBackBuffer(GfxContext context)
