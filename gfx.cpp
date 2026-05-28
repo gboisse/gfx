@@ -5174,7 +5174,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Cannot query heap information from buffer object");
             return handle;  // internal error
         }
-        if(!((heap_flags & D3D12_HEAP_FLAG_SHARED) != 0))
+        if((heap_flags & D3D12_HEAP_FLAG_SHARED) == 0)
         {
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
@@ -5206,11 +5206,9 @@ public:
             if(transitioned) submitPipelineBarriers();
             command_list_->CopyResource(gfx_buffer.resource_, previous_resource);
         }
-        WCHAR wname[ARRAYSIZE(buffer.name)] = {};
         WindowsSecurityAttributes security_attributes;
-        mbstowcs(wname, buffer.name, ARRAYSIZE(buffer.name));
-        if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
-            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object");
+        if(HRESULT const status = device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, nullptr, &handle); !SUCCEEDED(status))
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object: 0x%08X", status);
         return handle;
     }
 
@@ -5235,7 +5233,7 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Cannot query heap information from texture object");
             return handle;  // internal error
         }
-        if(!((heap_flags & D3D12_HEAP_FLAG_SHARED) != 0))
+        if((heap_flags & D3D12_HEAP_FLAG_SHARED) == 0)
         {
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
@@ -5276,7 +5274,7 @@ public:
             }
         }
         WindowsSecurityAttributes security_attributes;
-        if(HRESULT status = device_->CreateSharedHandle(gfx_texture.resource_, &security_attributes, GENERIC_ALL, nullptr, &handle); !SUCCEEDED(status))
+        if(HRESULT const status = device_->CreateSharedHandle(gfx_texture.resource_, &security_attributes, GENERIC_ALL, nullptr, &handle); !SUCCEEDED(status))
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from texture object: 0x%08X", status);
         return handle;
     }
