@@ -53,17 +53,14 @@ class GfxImGuiInternal
     uint32_t const magic_ = kConstant_Magic;
 
     GfxContext gfx_ = {};
-    GfxTexture font_buffer_ = {};
-    GfxSamplerState font_sampler_ = {};
+    GfxSamplerState font_sampler_linear_ = {};         // linear sampler (default)
+    GfxSamplerState font_sampler_nearest_ = {}; // nearest sampler (selected via callback)
+    GfxSamplerState current_sampler_ = {};      // sampler in use for the current draw
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
     GfxKernel imgui_kernel_ = {};
-    char **font_filenames_ = nullptr;
-    uint32_t font_count_ = 0;
-    ImFontConfig *font_configs_ = nullptr;
     float dpi_scale_ = 1.0f;
-    bool dpi_scale_changed_  = false;
 
     GfxProgram composite_program_ = {};
     GfxKernel composite_kernel_ = {};
@@ -144,70 +141,68 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult initializeScale()
+    void destroyTexture(ImTextureData *tex)
     {
-        gfxDestroyTexture(gfx_, font_buffer_);
-        gfxDestroySamplerState(gfx_, font_sampler_);
+        GfxTexture *texture = (GfxTexture *)tex->BackendUserData;
+        if(texture == nullptr)
+            return;
+        gfxDestroyTexture(gfx_, *texture);
+        delete texture;
+        tex->SetTexID(ImTextureID_Invalid);
+        tex->SetStatus(ImTextureStatus_Destroyed);
+        tex->BackendUserData = nullptr;
+    }
 
-        ImGui::StyleColorsDark();
-        ImGuiStyle &style = ImGui::GetStyle();
-        style.ScaleAllSizes(dpi_scale_);
-
-        ImGuiIO &io = ImGui::GetIO();
-        io.Fonts->Clear();
-        for(uint32_t i = 0; i < font_count_; ++i)
+    void updateTexture(ImTextureData *tex)
+    {
+        if(tex->Status == ImTextureStatus_WantCreate)
         {
-            if(i == 0 && font_configs_ != nullptr && font_configs_[0].MergeMode)
+            IM_ASSERT(tex->TexID == ImTextureID_Invalid && tex->BackendUserData == nullptr);
+            IM_ASSERT(tex->Format == ImTextureFormat_RGBA32);
+            GfxTexture *texture = new GfxTexture();
+            *texture = gfxCreateTexture2D(gfx_, (uint32_t)tex->Width, (uint32_t)tex->Height, DXGI_FORMAT_R8G8B8A8_UNORM);
+            if(!*texture)
             {
-                ImFontConfig defaultConfig = {};
-                defaultConfig.SizePixels = 13.0f * dpi_scale_;
-                io.Fonts->AddFontDefault(&defaultConfig);
+                delete texture;
+                return;
             }
-            if(font_configs_ != nullptr)
-            {
-                float const pre_dpi_size = font_configs_[i].SizePixels;
-                ImVec2 const pre_dpi_glyph_offset = font_configs_[i].GlyphOffset;
-                float const pre_dpi_glyph_extra_advance_x = font_configs_[i].GlyphExtraAdvanceX;
-                float const pre_dpi_glyph_min_advance_x   = font_configs_[i].GlyphMinAdvanceX;
-                float const pre_dpi_glyph_max_advance_x   = font_configs_[i].GlyphMaxAdvanceX;
-                font_configs_[i].SizePixels *= dpi_scale_;
-                font_configs_[i].GlyphOffset.x *= dpi_scale_;
-                font_configs_[i].GlyphOffset.y *= dpi_scale_;
-                font_configs_[i].GlyphExtraAdvanceX *= dpi_scale_;
-                font_configs_[i].GlyphMinAdvanceX *= dpi_scale_;
-                font_configs_[i].GlyphMaxAdvanceX *= dpi_scale_;
-                float const font_size = (font_configs_[i].SizePixels > 0.0f) ? font_configs_[i].SizePixels : 16.0f * dpi_scale_;
-                io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, &font_configs_[i]);
-                font_configs_[i].SizePixels = pre_dpi_size;
-                font_configs_[i].GlyphOffset = pre_dpi_glyph_offset;
-                font_configs_[i].GlyphExtraAdvanceX = pre_dpi_glyph_extra_advance_x;
-                font_configs_[i].GlyphMinAdvanceX   = pre_dpi_glyph_min_advance_x;
-                font_configs_[i].GlyphMaxAdvanceX   = pre_dpi_glyph_max_advance_x;
-            }
-            else
-            {
-                float const font_size = 16.0f * dpi_scale_;
-                io.Fonts->AddFontFromFileTTF(font_filenames_[i], font_size, nullptr);
-            }
+            texture->setName("gfx_ImGuiTexture");
+            uint64_t const size = (uint64_t)tex->GetPitch() * (uint64_t)tex->Height;
+            GfxBuffer upload_buffer = gfxCreateBuffer(gfx_, size, tex->GetPixels(), kGfxCpuAccess_Write);
+            gfxCommandCopyBufferToTexture(gfx_, *texture, upload_buffer);
+            gfxDestroyBuffer(gfx_, upload_buffer);
+            tex->SetTexID((ImTextureID)(intptr_t)texture);
+            tex->SetStatus(ImTextureStatus_OK);
+            tex->BackendUserData = texture;
         }
-        uint8_t *font_data;
-        int32_t font_width, font_height;
-        io.Fonts->GetTexDataAsRGBA32(&font_data, &font_width, &font_height);
-        GfxBuffer font_buffer = gfxCreateBuffer(gfx_, font_width * font_height * 4, font_data, kGfxCpuAccess_Write);
-        font_buffer_ = gfxCreateTexture2D(gfx_, font_width, font_height, DXGI_FORMAT_R8G8B8A8_UNORM);
-        font_sampler_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
-        if(!font_buffer || !font_buffer_ || !font_sampler_)
+        else if(tex->Status == ImTextureStatus_WantUpdates)
         {
-            gfxDestroyBuffer(gfx_, font_buffer);
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font buffer");
+            // gfx has no partial texture update path; re-upload the full texture.
+            GfxTexture *texture = (GfxTexture *)tex->BackendUserData;
+            IM_ASSERT(texture != nullptr);
+            uint64_t const size = (uint64_t)tex->GetPitch() * (uint64_t)tex->Height;
+            GfxBuffer upload_buffer = gfxCreateBuffer(gfx_, size, tex->GetPixels(), kGfxCpuAccess_Write);
+            gfxCommandCopyBufferToTexture(gfx_, *texture, upload_buffer);
+            gfxDestroyBuffer(gfx_, upload_buffer);
+            tex->SetStatus(ImTextureStatus_OK);
         }
-        font_buffer_.setName("gfx_ImGuiFontBuffer");
-        io.Fonts->TexRef = (ImTextureID)&font_buffer_;
-        GFX_TRY(gfxCommandCopyBufferToTexture(gfx_, font_buffer_, font_buffer));
-        GFX_TRY(gfxDestroyBuffer(gfx_, font_buffer));
-        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", font_sampler_));
+        if(tex->Status == ImTextureStatus_WantDestroy && tex->UnusedFrames > 0)
+            destroyTexture(tex);
+    }
 
-        return kGfxResult_NoError;
+    // Draw callbacks
+    static void gfx_DrawCallback_ResetRenderState(ImDrawList const *, ImDrawCmd const *) {}
+
+    static void gfx_DrawCallback_SetSamplerLinear(ImDrawList const *, ImDrawCmd const *)
+    {
+        GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
+        gfx->current_sampler_ = gfx->font_sampler_linear_;
+    }
+
+    static void gfx_DrawCallback_SetSamplerNearest(ImDrawList const *, ImDrawCmd const *)
+    {
+        GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
+        gfx->current_sampler_ = gfx->font_sampler_nearest_;
     }
 
     GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
@@ -224,28 +219,35 @@ public:
         ImGui::StyleColorsDark();
         ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= flags; // config flags
+        io.BackendRendererName = "imgui_impl_gfx";
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasTextures;  // We can honor ImGuiPlatformIO::Textures[] requests during render.
+        io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset; // We can honor the ImDrawCmd::VtxOffset field, allowing for large meshes.
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
-        io.UserData = this; // set magic number
+        io.UserData      = this; // set magic number
 
         if(font_count > 0)
         {
-            font_filenames_ = (char **)gfxMalloc(font_count * sizeof(char *));
-            font_count_     = font_count;
+            io.Fonts->Clear();
             for(uint32_t i = 0; i < font_count; ++i)
             {
-                font_filenames_[i] = (char *)gfxMalloc(strlen(font_filenames[i]) + 1);
-                strcpy(font_filenames_[i], font_filenames[i]);
-            }
-            if(font_configs != nullptr)
-            {
-                font_configs_ = (ImFontConfig *)gfxMalloc(font_count * sizeof(ImFontConfig));
-                for(uint32_t i = 0; i < font_count; ++i)
+                if(i == 0 && font_configs != nullptr && font_configs[0].MergeMode)
                 {
-                    font_configs_[i] = font_configs[i];
+                    ImFontConfig defaultConfig = {};
+                    io.Fonts->AddFontDefault(&defaultConfig);
                 }
+                if(font_configs != nullptr)
+                    io.Fonts->AddFontFromFileTTF(font_filenames[i], 0, &font_configs[i]);
+                else
+                    io.Fonts->AddFontFromFileTTF(font_filenames[i], 0);
             }
         }
+
+        ImGuiPlatformIO &platform_io = ImGui::GetPlatformIO();
+        platform_io.Renderer_TextureMaxWidth = platform_io.Renderer_TextureMaxHeight = D3D12_REQ_TEXTURE2D_U_OR_V_DIMENSION;
+        platform_io.DrawCallback_ResetRenderState  = gfx_DrawCallback_ResetRenderState;
+        platform_io.DrawCallback_SetSamplerLinear  = gfx_DrawCallback_SetSamplerLinear;
+        platform_io.DrawCallback_SetSamplerNearest = gfx_DrawCallback_SetSamplerNearest;
 
         HWND window = gfxGetWindowHandle(gfx_);
         dpi_scale_ = 1.0f;
@@ -254,8 +256,25 @@ public:
             UINT dpi = GetDpiForWindow(window);
             dpi_scale_ = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
         }
+
+        ImGui::StyleColorsDark();
+        ImGuiStyle &style = ImGui::GetStyle();
+        style.ScaleAllSizes(dpi_scale_);
+        style.FontScaleDpi = dpi_scale_;
+        io.DisplayFramebufferScale = ImVec2(dpi_scale_, dpi_scale_);
+
         GFX_TRY(initializeKernel());
-        GFX_TRY(initializeScale());
+
+        gfxDestroySamplerState(gfx_, font_sampler_linear_);
+        font_sampler_linear_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_LINEAR);
+        gfxDestroySamplerState(gfx_, font_sampler_nearest_);
+        font_sampler_nearest_ = gfxCreateSamplerState(gfx_, D3D12_FILTER_MIN_MAG_MIP_POINT);
+        if (!font_sampler_linear_ || !font_sampler_nearest_)
+        {
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create ImGui font samplers");
+        }
+        current_sampler_ = font_sampler_linear_;
+        GFX_TRY(gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_));
 
         index_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
         vertex_buffers_ = (GfxBuffer *)gfxMalloc(gfxGetBackBufferCount(gfx_) * sizeof(GfxBuffer));
@@ -273,27 +292,23 @@ public:
     {
         if(ImGui::GetCurrentContext() != nullptr)
         {
-            if(ImGui::GetIO().BackendPlatformUserData != nullptr)
+            // Destroy all dynamic textures owned by the backend before tearing down the context.
+            if(gfx_)
+                for(ImTextureData *tex : ImGui::GetPlatformIO().Textures)
+                    if(tex->RefCount == 1)
+                        destroyTexture(tex);
+            ImGuiIO &io = ImGui::GetIO();
+            io.BackendRendererName = nullptr;
+            io.BackendFlags &= ~(ImGuiBackendFlags_RendererHasTextures | ImGuiBackendFlags_RendererHasVtxOffset);
+            if(io.BackendPlatformUserData != nullptr)
                 ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
             ImGui::SetCurrentContext(nullptr);
         }
-        if(font_count_ > 0)
-        {
-            for(uint32_t i = 0; i < font_count_; ++i)
-            {
-                gfxFree(font_filenames_[i]);
-            }
-            gfxFree(font_filenames_);
-            font_filenames_ = nullptr;
-            gfxFree(font_configs_);
-            font_configs_ = nullptr;
-            font_count_ = 0;
-        }
         if(gfx_)
         {
-            GFX_TRY(gfxDestroyTexture(gfx_, font_buffer_));
-            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_));
+            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_linear_));
+            GFX_TRY(gfxDestroySamplerState(gfx_, font_sampler_nearest_));
             if(index_buffers_ != nullptr)
                 for(uint32_t i = 0; i < gfxGetBackBufferCount(gfx_); ++i)
                 {
@@ -323,14 +338,13 @@ public:
             GFX_SET_ERROR(kGfxResult_InvalidParameter, "ImGui can only composite to sRGB render targets");
         ImGuiIO &io = ImGui::GetIO();
         ImGui::Render();    // implicit ImGui::EndFrame()
-        ImDrawData const *draw_data = ImGui::GetDrawData();
+        ImDrawData *draw_data = ImGui::GetDrawData();
         uint32_t const buffer_index = gfxGetBackBufferIndex(gfx_);
 
-        if(dpi_scale_changed_)
-        {
-            GFX_TRY(initializeScale());
-            dpi_scale_changed_ = false;
-        }
+        if(draw_data->Textures != nullptr)
+            for(ImTextureData *tex : *draw_data->Textures)
+                if(tex->Status != ImTextureStatus_OK)
+                    updateTexture(tex);
 
         if(draw_data->TotalVtxCount > 0)
         {
@@ -387,12 +401,7 @@ public:
             };
             gfxProgramSetParameter(gfx_, imgui_program_, "ProjectionMatrix", projection_matrix);
 
-            gfxCommandBindKernel(gfx_, imgui_kernel_);
-            gfxCommandBindIndexBuffer(gfx_, index_buffer);
-            gfxCommandBindVertexBuffer(gfx_, vertex_buffer);
-            if (!!output_texture)
-                gfxCommandBindColorTarget(gfx_, 0, output_texture);
-            gfxCommandSetViewport(gfx_); // draw to render texture
+            setupRenderState(index_buffer, vertex_buffer, output_texture);
 
             int32_t vtx_offset = 0;
             int32_t idx_offset = 0;
@@ -403,21 +412,31 @@ public:
                 {
                     ImDrawCmd const *cmd = &cmd_list->CmdBuffer[j];
                     if(cmd->UserCallback)
-                        cmd->UserCallback(cmd_list, cmd);
+                    {
+                        // ImDrawCallback_ResetRenderState is a special sentinel value used by imgui
+                        // to request the renderer to reset its render state.
+                        if(cmd->UserCallback == ImDrawCallback_ResetRenderState)
+                            setupRenderState(index_buffer, vertex_buffer, output_texture);
+                        else
+                            cmd->UserCallback(cmd_list, cmd);
+                    }
                     else if(cmd->ClipRect.x != cmd->ClipRect.z &&
                             cmd->ClipRect.y != cmd->ClipRect.w)
                     {
                         GfxTexture const *font_buffer = (GfxTexture const *)cmd->GetTexID();
                         if(font_buffer != nullptr)
                             gfxProgramSetParameter(gfx_, imgui_program_, "FontBuffer", *font_buffer);
+                        // Re-bind sampler each draw so callback-driven sampler changes (e.g.
+                        // gfxImGuiDrawCallback_SetSamplerLinear) take effect on subsequent draws.
+                        gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_);
                         gfxCommandSetScissorRect(gfx_, (int32_t)cmd->ClipRect.x,
                                                        (int32_t)cmd->ClipRect.y,
                                                        (int32_t)(cmd->ClipRect.z - cmd->ClipRect.x),
                                                        (int32_t)(cmd->ClipRect.w - cmd->ClipRect.y));
-                        gfxCommandDrawIndexed(gfx_, cmd->ElemCount, 1, idx_offset, vtx_offset);
+                        gfxCommandDrawIndexed(gfx_, cmd->ElemCount, 1, idx_offset + cmd->IdxOffset, vtx_offset + cmd->VtxOffset);
                     }
-                    idx_offset += cmd->ElemCount;
                 }
+                idx_offset += cmd_list->IdxBuffer.Size;
                 vtx_offset += cmd_list->VtxBuffer.Size;
             }
             gfxCommandSetScissorRect(gfx_); // reset scissor test
@@ -426,6 +445,7 @@ public:
         ImGui_ImplWin32_NewFrame();
         io.DisplaySize.x = (float)gfxGetBackBufferWidth(gfx_);
         io.DisplaySize.y = (float)gfxGetBackBufferHeight(gfx_);
+        io.DisplayFramebufferScale = ImVec2(dpi_scale_, dpi_scale_);
         ImGui::NewFrame();  // can start recording new commands again
 
         return kGfxResult_NoError;
@@ -510,15 +530,28 @@ public:
 
     void setDPIScale(float scale)
     {
-        dpi_scale_changed_ = true;
+        ImGuiStyle &style = ImGui::GetStyle();
+        style.ScaleAllSizes(scale / dpi_scale_);
         dpi_scale_         = scale;
+        style.FontScaleDpi = dpi_scale_;
+    }
+
+    void setupRenderState(GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, GfxTexture const &output_texture)
+    {
+        gfxCommandBindKernel(gfx_, imgui_kernel_);
+        gfxCommandBindIndexBuffer(gfx_, index_buffer);
+        gfxCommandBindVertexBuffer(gfx_, vertex_buffer);
+        if (!!output_texture)
+            gfxCommandBindColorTarget(gfx_, 0, output_texture);
+        gfxCommandSetViewport(gfx_); // draw to render texture
+        current_sampler_ = font_sampler_linear_;
+        gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_);
     }
 
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
 };
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count,
-    ImFontConfig const *font_configs, ImGuiConfigFlags flags)
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
 {
     GfxResult result;
     GfxImGuiInternal *gfx_imgui = new GfxImGuiInternal();
