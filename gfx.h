@@ -498,6 +498,7 @@ GfxResult gfxBufferSetResourceState(GfxContext context, GfxBuffer buffer, D3D12_
 GfxResult gfxTextureSetResourceState(GfxContext context, GfxTexture texture, D3D12_RESOURCE_STATES state);
 
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
+HANDLE gfxTextureCreateSharedHandle(GfxContext context, GfxTexture texture);
 
 ID3D12Resource *gfxGetBackBuffer(GfxContext context);
 
