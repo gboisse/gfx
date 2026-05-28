@@ -5228,7 +5228,7 @@ public:
       HRESULT hr = device_->CheckFeatureSupport(kFeatureOpSupport, &opData, sizeof(opData));
       if (SUCCEEDED(hr)) {
         auto flags = opData.ThreadVectorMatrixMultiply.SupportFlags;
-        result.supported = (flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED) != 0;
+        result.supported = (flags & (D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_SUPPORTED | D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_EMULATED_INPUTS)) != 0;
         result.hardwareAccelerated = result.supported
             && !(flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_EMULATED_INPUTS)
             && !(flags & D3D12_LINEAR_ALGEBRA_MULTIPLICATION_SUPPORT_FLAG_EMULATED_OUTPUTS);
