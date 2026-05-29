@@ -2500,7 +2500,7 @@ public:
 
     uint64_t getAccelerationStructureDataSize(GfxAccelerationStructure const &acceleration_structure)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr || !acceleration_structure.handle) return 0;  // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid acceleration structure object");
@@ -2770,7 +2770,7 @@ public:
 
     uint64_t getRaytracingPrimitiveDataSize(GfxRaytracingPrimitive const &raytracing_primitive)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr || !raytracing_primitive.handle) return 0;    // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid raytracing primitive object");
