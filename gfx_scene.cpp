@@ -177,6 +177,8 @@ class GfxSceneInternal
     GfxArray<uint64_t> instance_refs_;
     GfxArray<GfxMetadata> instance_metadata_;
     GfxHandles instance_handles_;
+    
+    std::vector<std::vector<uint64_t>> instances_by_transform_;
 
     static GfxArray<GfxScene> scenes_;
     static GfxHandles scene_handles_;
@@ -521,6 +523,11 @@ public:
     }
 
     static inline GfxSceneInternal *GetGfxScene(GfxScene scene) { return reinterpret_cast<GfxSceneInternal *>(scene.handle); }
+
+    inline std::vector<std::vector<uint64_t>> getInstancesBySameTransform() const
+    {
+        return instances_by_transform_;
+    }
 
 private:
     static inline uint32_t GetObjectIndex(uint64_t object_handle)
@@ -1958,10 +1965,14 @@ private:
                 if(it != meshes.end())
                 {
                     instances.reserve((*it).second.size());
+                    std::vector<uint64_t> same_transform;
+                    same_transform.reserve((*it).second.size());
+                    
                     for(size_t i = 0; i < (*it).second.size(); ++i)
                     {
                         GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
                         instances.push_back(instance_ref);
+                        same_transform.push_back(instance_ref);
                         GfxConstRef<GfxMesh> mesh = it->second[i].first;
                         instance_ref->mesh      = mesh;
                         instance_ref->material  = it->second[i].second;
@@ -1983,6 +1994,8 @@ private:
                         else
                             instance_metadata.asset_file = asset_file;
                     }
+                    
+                    instances_by_transform_.push_back(same_transform);
                 }
             }
             GfxRef<GfxCamera> camera;
@@ -3621,4 +3634,11 @@ bool gfxSceneSetInstanceMetadata(GfxScene scene, uint64_t instance_handle, GfxMe
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return false;    // invalid parameter
     return gfx_scene->setObjectMetadata<GfxInstance>(instance_handle, metadata);
+}
+
+std::vector<std::vector<uint64_t>> gfxSceneGetInstancesBySameTransform(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return {};    // invalid parameter
+    return gfx_scene->getInstancesBySameTransform();
 }
