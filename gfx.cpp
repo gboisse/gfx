@@ -1340,7 +1340,8 @@ public:
 
         D3D12MA::ALLOCATOR_DESC
         allocator_desc          = {};
-        allocator_desc.Flags    = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
+        allocator_desc.Flags =
+            D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
         allocator_desc.pDevice  = device_;
         allocator_desc.pAdapter = adapter_;
         if(!SUCCEEDED(D3D12MA::CreateAllocator(&allocator_desc, &mem_allocator_)))
@@ -3612,7 +3613,8 @@ public:
         Texture &gfx_texture = textures_[dst]; SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -3695,7 +3697,8 @@ public:
         SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, face * dst.mip_levels, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -3742,7 +3745,8 @@ public:
         Buffer &gfx_buffer = buffers_[dst]; SetObjectName(gfx_buffer, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, src.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
