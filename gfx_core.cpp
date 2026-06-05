@@ -29,6 +29,21 @@ SOFTWARE.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+static gfxMessageCallback userMessageCallback;
+
+static void OutputMessage(char const* message, GfxVerbosity verbosity)
+{
+    if (userMessageCallback)
+    {
+        userMessageCallback(message, verbosity);
+    }
+    else
+    {
+        OutputDebugStringA(message);
+        puts(message);
+    }
+}
+
 char const *gfxResultGetString(GfxResult result)
 {
     switch(result)
@@ -65,8 +80,7 @@ void GFX_PRINTLN_IMPL(char const *file_name, uint32_t line_number, char const *f
     vsnprintf(message.data(), message.size(), body.data(), args);
     va_end(args);
     message[message.size() - 2] = '\n';
-    OutputDebugStringA(message.data());
-    puts(message.data());
+    OutputMessage(message.data(), kGfxVerbosity_Info);
 }
 
 void GFX_PRINT_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...)
@@ -82,8 +96,7 @@ void GFX_PRINT_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t line
     vsnprintf(message.data(), message.size(), body.data(), args);
     va_end(args);
     message[message.size() - 2] = '\n';
-    OutputDebugStringA(message.data());
-    puts(message.data());
+    OutputMessage(message.data(), kGfxVerbosity_Error);
 }
 
 GfxResult GFX_SET_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...)
@@ -99,7 +112,11 @@ GfxResult GFX_SET_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t l
     vsnprintf(message.data(), message.size(), body.data(), args);
     va_end(args);
     message[message.size() - 2] = '\n';
-    OutputDebugStringA(message.data());
-    puts(message.data());
+    OutputMessage(message.data(), kGfxVerbosity_Error);
     return result;
+}
+
+void gfxSetMessageCallback(gfxMessageCallback callback)
+{
+    userMessageCallback = callback;
 }
