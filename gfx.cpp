@@ -5182,11 +5182,12 @@ public:
         {
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
-            D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
+            D3D12_RESOURCE_DESC resource_desc = gfx_buffer.resource_->GetDesc();
             D3D12MA::ALLOCATION_DESC
             allocation_desc                = {};
             allocation_desc.HeapType       = D3D12_HEAP_TYPE_DEFAULT;
             allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
+            resource_desc.Alignment        = 0; // default alignment
             if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared buffer object");
@@ -10052,6 +10053,7 @@ private:
             D3D12MA::Allocation *allocation = nullptr;
             D3D12_RESOURCE_DESC
             resource_desc        = texture.resource_->GetDesc();
+            resource_desc.Alignment = 0;
             resource_desc.Width  = window_width;
             resource_desc.Height = window_height;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
