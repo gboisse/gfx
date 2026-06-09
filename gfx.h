@@ -211,7 +211,9 @@ uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAcceleration
 
 enum GfxBuildRaytracingPrimitiveFlag
 {
-    kGfxBuildRaytracingPrimitiveFlag_Opaque = 1 << 0
+    kGfxBuildRaytracingPrimitiveFlag_None    = 0,
+    kGfxBuildRaytracingPrimitiveFlag_Opaque  = 1 << 0,
+    kGfxBuildRaytracingPrimitiveFlag_Compact = 1 << 1, // It's recommended to avoid compaction for dynamic geometry since compaction requires extra CPU-GPU sync
 };
 typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 
