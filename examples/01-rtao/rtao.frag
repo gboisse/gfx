@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -136,5 +136,5 @@ float4 Resolve(in float4 pos : SV_Position) : SV_Target
     float4 color_sample = AccumBuffer.Load(int3(pos.xy, 0));
     float3 color_value  = color_sample.xyz / max(color_sample.w - 1.0f, 1.0f);
 
-    return float4(sqrt(color_value), 1.0f);
+    return float4(color_value, 1.0f);
 }

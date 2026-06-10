@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,9 +21,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-
-#include "gfx.h"
-#include "gfx_internal_types.h"
 
 #include <map>                  // std::map
 #include <deque>                // std::deque
@@ -74,6 +71,9 @@ SOFTWARE.
 #    pragma warning(pop)
 #endif
 
+#include "gfx.h"
+#include "gfx_internal_types.h"
+
 extern "C"
 {
 __declspec(dllexport) extern const UINT     D3D12SDKVersion = GFX_AGILITY_VERSION;
@@ -103,6 +103,7 @@ class GfxInternal
     ID3D12GraphicsCommandList4 *dxr_command_list_ = nullptr;
     ID3D12GraphicsCommandList6 *mesh_command_list_ = nullptr;
     ID3D12CommandAllocator **command_allocators_ = nullptr;
+    ID3D12DebugCommandList *dbg_command_list_ = nullptr;
     std::vector<IAmdExtD3DDevice1 *> amd_ext_devices_;
 
     HANDLE fence_event_ = {};
@@ -117,7 +118,7 @@ class GfxInternal
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
 
-    IDXGISwapChain3 *swap_chain_ = nullptr;
+    IDXGISwapChain4 *swap_chain_ = nullptr;
     D3D12MA::Allocator *mem_allocator_ = nullptr;
     ID3D12CommandSignature *dispatch_signature_ = nullptr;
     ID3D12CommandSignature *multi_draw_signature_ = nullptr;
@@ -131,6 +132,7 @@ class GfxInternal
     DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
+    uint32_t back_buffer_index_ = 0;
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
@@ -402,6 +404,7 @@ class GfxInternal
 
         void *data_ = nullptr;
         uint64_t data_offset_ = 0;
+        bool *transitioned_ = nullptr;
         ID3D12Resource *resource_ = nullptr;
         uint32_t *reference_count_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
@@ -421,6 +424,7 @@ class GfxInternal
         inline bool isInterop() const { return (allocation_ == nullptr ? true : false); }
 
         uint32_t flags_ = 0;
+        bool transitioned_ = false;
         float clear_value_[4] = {};
         ID3D12Resource *resource_ = nullptr;
         D3D12MA::Allocation *allocation_ = nullptr;
@@ -733,6 +737,7 @@ class GfxInternal
             uint32_t descriptor_slot_ = 0xFFFFFFFFu;
             std::vector<ID3D12Resource *> bound_textures_;
             Program::Parameter const *parameter_ = nullptr;
+            bool raw_access_ = false;
 
             struct Variable
             {
@@ -974,7 +979,6 @@ public:
         window_height_ = window_rect.bottom - window_rect.top;
 
         IDXGIOutput *output = nullptr;
-        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         UINT output_i  = 0;
         LONG best_area = -1;
         IDXGIOutput *current_output;
@@ -995,6 +999,8 @@ public:
             if(current_output != output) current_output->Release();
             output_i++;
         }
+        back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
+        color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         if(output != nullptr)
         {
             IDXGIOutput6 *output6 = nullptr;
@@ -1005,6 +1011,22 @@ public:
                 output6->GetDesc1(&output_desc);
                 if(output_desc.BitsPerColor > 8)
                     back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
+                if((flags & kGfxCreateContextFlag_EnableHDRSwapChain) != 0)
+                {
+                    if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
+                    {
+                        if((flags & kGfxCreateContextFlag_EnableLinearSwapChain) == 0)
+                        {
+                            color_space_        = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
+                            back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
+                        }
+                        else
+                        {
+                            color_space_        = DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709;
+                            back_buffer_format_ = DXGI_FORMAT_R16G16B16A16_FLOAT;
+                        }
+                    }
+                }
                 output6->Release();
             }
             output->Release();
@@ -1027,7 +1049,7 @@ public:
         swap_chain->QueryInterface(IID_PPV_ARGS(&swap_chain_)); swap_chain->Release();
         if(!swap_chain_ || !SUCCEEDED(factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER)))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to initialize swap chain");
-        fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
         swap_chain_->SetColorSpace1(color_space_);
 
         back_buffers_ = (ID3D12Resource **)gfxMalloc(max_frames_in_flight_ * sizeof(ID3D12Resource *));
@@ -1037,7 +1059,7 @@ public:
 
         D3D12_RESOURCE_BARRIER resource_barrier = {};
         resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+        resource_barrier.Transition.pResource = back_buffers_[back_buffer_index_];
         resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
         resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -1066,6 +1088,7 @@ public:
         window_width_ = width;
         window_height_ = height;
         fence_index_ = 0;
+        back_buffer_index_ = 0;
 
         GFX_TRY(initializeCommon(context));
 
@@ -1074,6 +1097,8 @@ public:
         GFX_TRY(createBackBuffers());
         back_buffer_rtvs_ = (uint32_t *)gfxMalloc(max_frames_in_flight_ * sizeof(uint32_t));
         GFX_TRY(createBackBufferRTVs());
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            command_list_->DiscardResource(back_buffers_[i], nullptr);
 
         return kGfxResult_NoError;
     }
@@ -1249,6 +1274,8 @@ public:
         if(dxr_command_list_ == nullptr) { if(dxr_device_ != nullptr) dxr_device_->Release(); dxr_device_ = nullptr; }
         if(mesh_command_list_ == nullptr) { if(mesh_device_ != nullptr) mesh_device_->Release(); mesh_device_ = nullptr; }
         SetDebugName(command_list_, "gfx_CommandList");
+        if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
+            command_list_->QueryInterface(IID_PPV_ARGS(&dbg_command_list_));
 
         fence_event_ = CreateEvent(nullptr, false, false, nullptr);
         if(!fence_event_)
@@ -1313,7 +1340,8 @@ public:
 
         D3D12MA::ALLOCATOR_DESC
         allocator_desc          = {};
-        allocator_desc.Flags    = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
+        allocator_desc.Flags =
+            D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
         allocator_desc.pDevice  = device_;
         allocator_desc.pAdapter = adapter_;
         if(!SUCCEEDED(D3D12MA::CreateAllocator(&allocator_desc, &mem_allocator_)))
@@ -1330,7 +1358,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate dummy descriptors");
         {
             D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
-            rtv_desc.Format        = back_buffer_format_;
+            rtv_desc.Format        = getBackBufferFormat();
             rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
             device_->CreateRenderTargetView(nullptr, &rtv_desc, rtv_descriptors_.getCPUHandle(dummy_rtv_descriptor_));
         }
@@ -1402,7 +1430,7 @@ public:
         }
 
         GfxProgramDesc clear_buffer_program_desc = {};
-        clear_buffer_program_desc.cs = "RWBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
+        clear_buffer_program_desc.cs = "RWStructuredBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
@@ -1593,6 +1621,11 @@ public:
                     command_allocators_[i]->Release();
         gfxFree(command_allocators_);
         command_allocators_ = nullptr;
+        if(dbg_command_list_ != nullptr)
+        {
+            dbg_command_list_->Release();
+            dbg_command_list_ = nullptr;
+        }
 
         if(fence_event_)
         {
@@ -1624,11 +1657,6 @@ public:
             dxc_include_handler_ = nullptr;
         }
 
-        if(swap_chain_ != nullptr)
-        {
-            swap_chain_->Release();
-            swap_chain_ = nullptr;
-        }
         if(back_buffer_allocations_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
                 if(back_buffer_allocations_[i] != nullptr)
@@ -1643,7 +1671,11 @@ public:
         back_buffer_rtvs_ = nullptr;
         gfxFree(back_buffers_);
         back_buffers_ = nullptr;
-
+        if(swap_chain_ != nullptr) // Done after removal of attachments as they hold 1 ref
+        {
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+        }
         if(mem_allocator_ != nullptr)
         {
             mem_allocator_->Release();
@@ -1700,7 +1732,7 @@ public:
 
     inline uint32_t getBackBufferIndex() const
     {
-        return fence_index_;
+        return back_buffer_index_;
     }
 
     inline uint32_t getBackBufferCount() const
@@ -1710,7 +1742,7 @@ public:
 
     inline DXGI_FORMAT getBackBufferFormat() const
     {
-        return back_buffer_format_;
+        return back_buffer_format_ == DXGI_FORMAT_R8G8B8A8_UNORM ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : back_buffer_format_;
     }
 
     inline DXGI_COLOR_SPACE_TYPE getBackBufferColorSpace() const
@@ -1807,6 +1839,11 @@ public:
         return desc;
     }
 
+    inline HWND getWindowHandle() const
+    {
+        return window_;
+    }
+
     inline bool isRaytracingSupported() const
     {
         return (dxr_device_ != nullptr ? true : false);
@@ -1838,8 +1875,8 @@ public:
         switch(cpu_access)
         {
         case kGfxCpuAccess_Read:
-            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             allocation_desc.HeapType = D3D12_HEAP_TYPE_READBACK;
+            resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             break;
         case kGfxCpuAccess_Write:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
@@ -1876,8 +1913,11 @@ public:
         GFX_ASSERT(gfx_buffer.reference_count_ != nullptr);
         *gfx_buffer.reference_count_ = 1;   // retain
         gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
-        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr);
+        gfx_buffer.transitioned_ = (bool *)gfxMalloc(sizeof(bool));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
         *gfx_buffer.resource_state_ = resource_state;
+        *gfx_buffer.transitioned_ = false;
+        gfx_buffer.initial_resource_state_ = resource_state;
         if(data != nullptr && cpu_access != kGfxCpuAccess_Write)
         {
             GfxBuffer const upload_buffer = createBuffer(size, data, kGfxCpuAccess_Write);
@@ -1942,12 +1982,12 @@ public:
         return gfx_buffer.data_;
     }
 
-    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value)
+    GfxTexture createTexture2D(DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
     {
-        return createTexture2D(window_width_, window_height_, format, 1, clear_value, Texture::kFlag_AutoResize);
+        return createTexture2D(window_width_, window_height_, format, 1, clear_value, flags, Texture::kFlag_AutoResize);
     }
 
-    GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, uint32_t flags = 0)
+    GfxTexture createTexture2D(uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags, uint32_t flags = 0)
     {
         GfxTexture texture = {};
         if(isInterop() && (flags & Texture::kFlag_AutoResize) != 0)
@@ -1963,7 +2003,7 @@ public:
         width = GFX_MAX(width, 1u);
         height = GFX_MAX(height, 1u);
         mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(width, height));
-        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_DESC
         resource_desc                  = {};
         resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -1973,6 +2013,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -1996,11 +2037,41 @@ public:
         }
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
         gfx_texture.flags_ = flags;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
-    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+    GfxTexture createTexture2DArray(uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2017,7 +2088,7 @@ public:
         height = GFX_MAX(height, 1u);
         slice_count = GFX_MAX(slice_count, 1u);
         mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(width, height));
-        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_DESC
         resource_desc                  = {};
         resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -2027,6 +2098,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2047,10 +2119,40 @@ public:
         texture.depth = slice_count;
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
-    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+    GfxTexture createTexture3D(uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2067,7 +2169,7 @@ public:
         height = GFX_MAX(height, 1u);
         depth = GFX_MAX(depth, 1u);
         mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(width, height, depth));
-        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_DESC
         resource_desc                  = {};
         resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE3D;
@@ -2077,6 +2179,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2097,10 +2200,40 @@ public:
         texture.depth = depth;
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
-    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+    GfxTexture createTextureCube(uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS resource_flags)
     {
         GfxTexture texture = {};
         if(format == DXGI_FORMAT_UNKNOWN || format == DXGI_FORMAT_FORCE_UINT)
@@ -2110,7 +2243,7 @@ public:
         }
         size = GFX_MAX(size, 1u);
         mip_levels = GFX_MIN(GFX_MAX(mip_levels, 1u), gfxCalculateMipCount(size));
-        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
+        D3D12_RESOURCE_STATES const resource_state = D3D12_RESOURCE_STATE_COMMON;
         D3D12_RESOURCE_DESC
         resource_desc                  = {};
         resource_desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
@@ -2120,6 +2253,7 @@ public:
         resource_desc.MipLevels        = (uint16_t)mip_levels;
         resource_desc.Format           = format;
         resource_desc.SampleDesc.Count = 1;
+        resource_desc.Flags           |= resource_flags;
         texture.handle = texture_handles_.allocate_handle();
         Texture &gfx_texture = textures_.insert(texture);
         D3D12MA::ALLOCATION_DESC allocation_desc = {};
@@ -2140,6 +2274,36 @@ public:
         texture.depth = 6;
         memcpy(texture.clear_value, gfx_texture.clear_value_, sizeof(texture.clear_value));
         gfx_texture.resource_state_ = resource_state;
+        gfx_texture.initial_resource_state_ = resource_state;
+        gfx_texture.transitioned_ = false;
+        if(resource_flags != D3D12_RESOURCE_FLAG_NONE)
+        {
+            D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+            if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+            else if((resource_flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+            if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+            {
+                if(transitionResource(gfx_texture, transition_state, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
+                command_list_->DiscardResource(gfx_texture.resource_, nullptr);
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
         return texture;
     }
 
@@ -2318,8 +2482,8 @@ public:
         Buffer &gfx_buffer = buffers_[gfx_acceleration_structure.bvh_buffer_];
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
         SetObjectName(gfx_buffer, acceleration_structure.name);
-        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        submitPipelineBarriers();   // ensure scratch is not in use
+        if(transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+            submitPipelineBarriers();   // ensure scratch is not in use
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
         build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.Inputs = tlas_inputs;
@@ -2333,7 +2497,7 @@ public:
 
     uint64_t getAccelerationStructureDataSize(GfxAccelerationStructure const &acceleration_structure)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr || !acceleration_structure.handle) return 0;  // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid acceleration structure object");
@@ -2605,7 +2769,7 @@ public:
 
     uint64_t getRaytracingPrimitiveDataSize(GfxRaytracingPrimitive const &raytracing_primitive)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr || !raytracing_primitive.handle) return 0;    // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid raytracing primitive object");
@@ -3208,9 +3372,11 @@ public:
         SetObjectName(gfx_dst, dst.name); SetObjectName(gfx_src, src.name);
         if(gfx_dst.resource_ == gfx_src.resource_)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy between two buffer objects that are pointing at the same resource; use an intermediate buffer");
-        if(dst.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_dst, D3D12_RESOURCE_STATE_COPY_DEST);
-        if(src.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        submitPipelineBarriers();   // transition our resources if needed
+        bool transitions = false;
+        if(dst.cpu_access == kGfxCpuAccess_None) transitions = transitionResource(gfx_dst, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+        if(src.cpu_access == kGfxCpuAccess_None) transitions |= transitionResource(gfx_src, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+        if(transitions)
+            submitPipelineBarriers();   // transition our resources if needed
         command_list_->CopyBufferRegion(gfx_dst.resource_, gfx_dst.data_offset_,
                                         gfx_src.resource_, gfx_src.data_offset_,
                                         dst.size);
@@ -3236,9 +3402,11 @@ public:
         SetObjectName(gfx_dst, dst.name); SetObjectName(gfx_src, src.name);
         if(gfx_dst.resource_ == gfx_src.resource_)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy between two buffer objects that are pointing at the same resource; use an intermediate buffer");
-        if(dst.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_dst, D3D12_RESOURCE_STATE_COPY_DEST);
-        if(src.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_src, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        submitPipelineBarriers();   // transition our resources if needed
+        bool transitions = false;
+        if(dst.cpu_access == kGfxCpuAccess_None) transitions = transitionResource(gfx_dst, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+        if(src.cpu_access == kGfxCpuAccess_None) transitions |= transitionResource(gfx_src, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+        if(transitions)
+            submitPipelineBarriers();   // transition our resources if needed
         command_list_->CopyBufferRegion(gfx_dst.resource_, gfx_dst.data_offset_ + dst_offset,
                                         gfx_src.resource_, gfx_src.data_offset_ + src_offset,
                                         size);
@@ -3307,14 +3475,12 @@ public:
     {
         if(isInterop())
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using an interop context");
-        if(swap_chain_ == nullptr)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot clear backbuffer when using a headless context");
         float const clear_color[] = { 0.0f, 0.0f, 0.0f, 1.0f };
         D3D12_RECT
         rect        = {};
         rect.right  = window_width_;
         rect.bottom = window_height_;
-        command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[fence_index_]), clear_color, 1, &rect);
+        command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[back_buffer_index_]), clear_color, 1, &rect);
         return kGfxResult_NoError;
     }
 
@@ -3345,9 +3511,10 @@ public:
         Texture &src_texture = textures_[src]; SetObjectName(src_texture, src.name);
         if(dst_texture.resource_ == src_texture.resource_)
             return kGfxResult_NoError;  // nothing to be copied
-        transitionResource(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST);
-        transitionResource(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        submitPipelineBarriers();   // transition our resources if needed
+        bool transition = transitionResource(dst_texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+        transition |= transitionResource(src_texture, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+        if(transition)
+            submitPipelineBarriers();   // transition our resources if needed
         if(dst.mip_levels == src.mip_levels)
             command_list_->CopyResource(dst_texture.resource_, src_texture.resource_);
         else
@@ -3392,7 +3559,7 @@ public:
             rect.right  = (LONG)resource_desc.Width;
             rect.bottom = (LONG)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_DEPTH_WRITE);
-            submitPipelineBarriers();   // transition our resources if needed
+            submitPipelineBarriers();
             command_list_->ClearDepthStencilView(dsv_descriptors_.getCPUHandle(gfx_texture.dsv_descriptor_slots_[mip_level][slice]), clear_flags, gfx_texture.clear_value_[0], (UINT8)gfx_texture.clear_value_[1], 1, &rect);
         }
         else
@@ -3405,7 +3572,7 @@ public:
             rect.right  = (LONG)resource_desc.Width;
             rect.bottom = (LONG)resource_desc.Height;
             transitionResource(gfx_texture, D3D12_RESOURCE_STATE_RENDER_TARGET);
-            submitPipelineBarriers();   // transition our resources if needed
+            submitPipelineBarriers();
             command_list_->ClearRenderTargetView(rtv_descriptors_.getCPUHandle(gfx_texture.rtv_descriptor_slots_[mip_level][slice]), gfx_texture.clear_value_, 1, &rect);
         }
         return kGfxResult_NoError;
@@ -3452,7 +3619,8 @@ public:
         Texture &gfx_texture = textures_[dst]; SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -3460,8 +3628,10 @@ public:
         if(bytes_per_pixel == 0)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to texture object of unsupported format");
         Buffer &gfx_buffer = buffers_[src]; SetObjectName(gfx_buffer, src.name);
-        if(src.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST);
+        bool transition = transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+        if(src.cpu_access == kGfxCpuAccess_None) transition |= transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+        if(transition)
+            submitPipelineBarriers();
         D3D12_FEATURE_DATA_D3D12_OPTIONS13 features = {};   // feature check
         device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS13, &features, sizeof(features));
         bool unrestricted_pitch = features.UnrestrictedBufferTextureCopyPitchSupported;
@@ -3491,8 +3661,8 @@ public:
                 }
                 texture_upload_buffer = &buffers_[texture_upload_buffer_];
                 SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
-                transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
-                submitPipelineBarriers();   // transition our resources if needed
+                if(transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit))
+                    submitPipelineBarriers();   // transition our resources if needed
                 for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
                     command_list_->CopyBufferRegion(texture_upload_buffer->resource_, i * texture_row_pitch, gfx_buffer.resource_, i * buffer_row_pitch + buffer_offset, buffer_row_pitch);
                 transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
@@ -3533,7 +3703,8 @@ public:
         SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, face * dst.mip_levels, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -3542,9 +3713,11 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to texture object of unsupported format");
         Buffer &gfx_buffer = buffers_[src];
         SetObjectName(gfx_buffer, src.name);
+        bool transition = transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
         if(src.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST);
+            transition |= transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+        if(transition)
+            submitPipelineBarriers();
         for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
         {
             if(buffer_offset >= src.size)
@@ -3578,16 +3751,18 @@ public:
         Buffer &gfx_buffer = buffers_[dst]; SetObjectName(gfx_buffer, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, src.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
         uint32_t const bytes_per_pixel = GetBytesPerPixel(src.format);
         if(bytes_per_pixel == 0)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from texture object of unsupported format");
-        if(dst.cpu_access == kGfxCpuAccess_None) transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_DEST);
-        transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_SOURCE);
-        submitPipelineBarriers();   // transition our resources if needed
+        bool transition = transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+        if(dst.cpu_access == kGfxCpuAccess_None) transition |= transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+        if(transition)
+            submitPipelineBarriers();   // transition our resources if needed
         for(uint32_t mip_level = 0; mip_level < src.mip_levels; ++mip_level)
         {
             if(buffer_offset >= dst.size)
@@ -3825,7 +4000,7 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, kTransitionType_Implicit);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(multi_draw_signature_, args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -3853,7 +4028,7 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         GFX_TRY(installShaderState(kernel, true));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, kTransitionType_Implicit);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(multi_draw_indexed_signature_, args_count, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -3865,7 +4040,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(!num_groups_x || !num_groups_y || !num_groups_z)
             return kGfxResult_NoError;  // nothing to dispatch
-        uint32_t const max_num_groups = 65535;  // AMD doesn't allow to dispatch more than 65535 groups at once
+        uint32_t const max_num_groups = D3D12_CS_DISPATCH_MAX_THREAD_GROUPS_PER_DIMENSION;
         if(num_groups_x > max_num_groups || num_groups_y > max_num_groups || num_groups_z > max_num_groups)
         {
             GfxResult result;
@@ -3908,7 +4083,7 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, kTransitionType_Implicit);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(dispatch_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -3935,7 +4110,7 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, kTransitionType_Implicit);
         submitPipelineBarriers();   // transition our resources if needed
         uint32_t root_parameter_index = 0xFFFFFFFFu, destination_offset = 0;
         static uint64_t const dispatch_id_parameter = Hash("gfx_DispatchID");
@@ -3973,19 +4148,10 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch using an invalid sbt object");
         if(!width || !height || !depth)
             return kGfxResult_NoError;  // nothing to dispatch
-        uint32_t const max_num_groups = 65535; // AMD doesn't allow to dispatch more than 65535 groups at once
-        if(width > max_num_groups || height > max_num_groups || depth > max_num_groups)
+        uint32_t const max_size = 2UL << 30;
+        if(width * height * depth > max_size)
         {
-            GfxResult result;
-            GfxBuffer args_buffer = allocateConstantMemory(3 * sizeof(uint32_t));
-            uint32_t *args        = (uint32_t *)getBufferData(args_buffer);
-            GFX_ASSERT(args != nullptr);
-            args[0] = width;
-            args[1] = height;
-            args[2] = depth;
-            result  = encodeDispatchRaysIndirect(sbt, args_buffer); // use indirect dispatch to workaround group limit
-            destroyBuffer(args_buffer);
-            return result;
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot dispatch when total rays exceed 2^30");
         }
         if(!kernel_handles_.has_handle(bound_kernel_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot dispatch when bound kernel object is invalid");
@@ -4031,7 +4197,7 @@ public:
         Sbt &gfx_sbt = sbts_[sbt]; // get hold of sbt object
         GFX_TRY(installShaderState(kernel, false, &gfx_sbt));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, kTransitionType_Implicit);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(dispatch_rays_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -4079,7 +4245,7 @@ public:
         SetObjectName(gfx_buffer, args_buffer.name);
         GFX_TRY(installShaderState(kernel));
         if(args_buffer.cpu_access == kGfxCpuAccess_None)
-            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT);
+            transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDIRECT_ARGUMENT, kTransitionType_Implicit);
         submitPipelineBarriers();   // transition our resources if needed
         command_list_->ExecuteIndirect(draw_mesh_signature_, 1, gfx_buffer.resource_, gfx_buffer.data_offset_, nullptr, 0);
         return kGfxResult_NoError;
@@ -4546,11 +4712,49 @@ public:
         return kGfxResult_NoError;
     }
 
+    void decayResourceState()
+    {
+        for(uint32_t i = 0; i < buffers_.size(); ++i)
+        {
+            auto *buffer = buffers_.at(i);
+            if(buffer != nullptr && buffer->initial_resource_state_ == D3D12_RESOURCE_STATE_COMMON && !*buffer->transitioned_ && (*buffer->resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == *buffer->resource_state_)
+                *buffer->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+        }
+        for(uint32_t i = 0; i < textures_.size(); ++i)
+        {
+            auto *texture = textures_.at(i);
+            if(texture != nullptr && !texture->transitioned_ && (texture->resource_state_ & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) == texture->resource_state_)
+                texture->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+        }
+        if(dbg_command_list_ != nullptr)
+        {
+            for(uint32_t i = 0; i < buffers_.size(); ++i)
+            {
+                auto *buffer = buffers_.at(i);
+                if(buffer != nullptr)
+                {
+                    dbg_command_list_->AssertResourceState(buffer->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *buffer->resource_state_);
+                }
+            }
+            for(uint32_t i = 0; i < textures_.size(); ++i)
+            {
+                auto *texture = textures_.at(i);
+                if(texture != nullptr)
+                {
+                    dbg_command_list_->AssertResourceState(texture->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, texture->resource_state_);
+                }
+            }
+        }
+    }
+
     GfxResult frame(bool vsync)
     {
         GFX_ASSERT(max_frames_in_flight_ > 0);
         if(isInterop())
+        {
             fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+            back_buffer_index_ = fence_index_;
+        }
         else
         {
             if(!timestamp_query_heaps_[fence_index_].timestamp_queries_.empty())
@@ -4577,7 +4781,7 @@ public:
                 D3D12_RESOURCE_BARRIER resource_barrier = {};
                 resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
                 resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+                resource_barrier.Transition.pResource = back_buffers_[back_buffer_index_];
                 resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_PRESENT;
                 resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_RENDER_TARGET;
                 command_list_->ResourceBarrier(1, &resource_barrier);
@@ -4596,8 +4800,9 @@ public:
                 }
                 uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
                 uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
-                fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
-                if(window_width != window_width_ || window_height != window_height_)
+                back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
+                fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+                if(!IsIconic(window_) && (window_width != window_width_ || window_height != window_height_))
                 {
                     GFX_TRY(resizeCallback(window_width, window_height)); // reset fence index
                 }
@@ -4608,7 +4813,7 @@ public:
                 }
                 command_allocators_[fence_index_]->Reset();
                 command_list_->Reset(command_allocators_[fence_index_], nullptr);
-                resource_barrier.Transition.pResource = back_buffers_[fence_index_];
+                resource_barrier.Transition.pResource = back_buffers_[back_buffer_index_];
                 resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
                 resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_RENDER_TARGET;
                 command_list_->ResourceBarrier(1, &resource_barrier);
@@ -4620,6 +4825,7 @@ public:
                 command_queue_->ExecuteCommandLists(ARRAYSIZE(command_lists), command_lists);
                 command_queue_->Signal(fences_[fence_index_], ++fence_values_[fence_index_]);
                 fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
+                back_buffer_index_ = fence_index_;
                 if(fences_[fence_index_]->GetCompletedValue() != fence_values_[fence_index_])
                 {
                     fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
@@ -4649,6 +4855,7 @@ public:
                 }
                 timestamp_query_heaps_[fence_index_].timestamp_queries_.clear();
             }
+            decayResourceState();
         }
         constant_buffer_pool_cursors_[fence_index_] = 0;
         resetState();   // re-install state
@@ -4666,6 +4873,7 @@ public:
         command_allocators_[fence_index_]->Reset();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
         resetState();   // re-install state
+        decayResourceState();
         return kGfxResult_NoError;
     }
 
@@ -4756,8 +4964,11 @@ public:
         gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         *gfx_buffer.reference_count_ = 1;   // retain
         gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
-        gfx_buffer.initial_resource_state_ = resource_state;
+        gfx_buffer.transitioned_ = (bool *)gfxMalloc(sizeof(bool));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
         *gfx_buffer.resource_state_ = resource_state;
+        *gfx_buffer.transitioned_ = false;
+        gfx_buffer.initial_resource_state_ = resource_state;
         gfx_buffer.resource_ = resource;
         resource->AddRef(); // retain
         return buffer;
@@ -4845,8 +5056,11 @@ public:
         gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
         *gfx_buffer.reference_count_ = 1;   // retain
         gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
-        gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        gfx_buffer.transitioned_ = (bool *)gfxMalloc(sizeof(bool));
+        GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
         *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
+        *gfx_buffer.transitioned_ = false;
+        gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE;
         gfx_buffer.resource_ = resource;
         resource->AddRef(); // retain
         return acceleration_structure;
@@ -4895,6 +5109,50 @@ public:
         return gfx_texture.resource_state_;
     }
 
+    GfxResult setBufferResourceState(GfxBuffer const &buffer, D3D12_RESOURCE_STATES state)
+    {
+        if(!buffer_handles_.has_handle(buffer.handle))
+            return kGfxResult_InvalidParameter; // invalid buffer object
+        Buffer &gfx_buffer = buffers_[buffer];
+        if(transitionResource(gfx_buffer, state))
+            submitPipelineBarriers();
+        return kGfxResult_NoError;
+    }
+
+    GfxResult setTextureResourceState(GfxTexture const &texture, D3D12_RESOURCE_STATES state)
+    {
+        if(!texture_handles_.has_handle(texture.handle))
+            return kGfxResult_InvalidParameter; // invalid texture object
+        Texture &gfx_texture = textures_[texture];
+        if((state & D3D12_RESOURCE_STATE_UNORDERED_ACCESS) != 0)
+            ensureTextureHasUsageFlag(gfx_texture, D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS);
+        if((state & D3D12_RESOURCE_STATE_RENDER_TARGET) != 0)
+        {
+            uint32_t depth = texture.depth;
+            for(uint32_t i = 0; i < texture.mip_levels; ++i)
+            {
+                for(uint32_t j = 0; j < depth; ++j)
+                    ensureTextureHasRenderTargetView(texture, gfx_texture, i, j);
+                if(texture.is3D())
+                    depth = GFX_MAX(depth >> 1, 1u);
+            }
+        }
+        if((state & (D3D12_RESOURCE_STATE_DEPTH_WRITE | D3D12_RESOURCE_STATE_DEPTH_READ)) != 0)
+        {
+            uint32_t depth = texture.depth;
+            for(uint32_t i = 0; i < texture.mip_levels; ++i)
+            {
+                for(uint32_t j = 0; j < depth; ++j)
+                    ensureTextureHasDepthStencilView(texture, gfx_texture, i, j);
+                if(texture.is3D())
+                    depth = GFX_MAX(depth >> 1, 1u);
+            }
+        }
+        if(transitionResource(gfx_texture, state))
+            submitPipelineBarriers();
+        return kGfxResult_NoError;
+    }
+
     HANDLE createBufferSharedHandle(GfxBuffer const &buffer)
     {
         HANDLE handle = {};
@@ -4926,55 +5184,187 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InternalError, "Cannot query heap information from buffer object");
             return handle;  // internal error
         }
-        if(!((heap_flags & D3D12_HEAP_FLAG_SHARED) != 0))
+        if((heap_flags & D3D12_HEAP_FLAG_SHARED) == 0)
         {
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
-            D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
+            D3D12_RESOURCE_DESC resource_desc = gfx_buffer.resource_->GetDesc();
             D3D12MA::ALLOCATION_DESC
             allocation_desc                = {};
             allocation_desc.HeapType       = D3D12_HEAP_TYPE_DEFAULT;
             allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
+            resource_desc.Alignment        = 0; // default alignment
             if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared buffer object");
                 return handle;  // out of memory
             }
-            if(*gfx_buffer.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)
-            {
-                D3D12_RESOURCE_BARRIER resource_barrier = {};
-                resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                resource_barrier.Transition.pResource = gfx_buffer.resource_;
-                resource_barrier.Transition.StateBefore = *gfx_buffer.resource_state_;
-                resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                command_list_->ResourceBarrier(1, &resource_barrier);
-            }
-            {
-                D3D12_RESOURCE_BARRIER resource_barrier = {};
-                resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                resource_barrier.Transition.pResource   = resource;
-                resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_COMMON;
-                resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_COPY_DEST;
-                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                command_list_->ResourceBarrier(1, &resource_barrier);
-            }
+            bool transitioned = transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+            ID3D12Resource *previous_resource = gfx_buffer.resource_;
             collect(gfx_buffer);    // release previous buffer
-            command_list_->CopyResource(resource, gfx_buffer.resource_);
             gfx_buffer.resource_ = resource;
             gfx_buffer.allocation_ = allocation;
             gfx_buffer.flags_ &= ~Object::kFlag_Named;
-            gfx_buffer.reference_count_ = (uint32_t *)gfxMalloc(sizeof(uint32_t));
+            gfx_buffer.reference_count_  = (uint32_t *)gfxMalloc(sizeof(uint32_t));
             *gfx_buffer.reference_count_ = 1;   // retain
-            gfx_buffer.resource_state_ = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
-            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+            gfx_buffer.resource_state_   = (D3D12_RESOURCE_STATES *)gfxMalloc(sizeof(D3D12_RESOURCE_STATES));
+            gfx_buffer.transitioned_     = (bool *)gfxMalloc(sizeof(bool));
+            GFX_ASSERT(gfx_buffer.resource_state_ != nullptr && gfx_buffer.transitioned_ != nullptr);
+            *gfx_buffer.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            gfx_buffer.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            *gfx_buffer.transitioned_   = false;
+            transitioned |= transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+            if(transitioned) submitPipelineBarriers();
+            command_list_->CopyResource(gfx_buffer.resource_, previous_resource);
         }
-        WCHAR wname[ARRAYSIZE(buffer.name)] = {};
         WindowsSecurityAttributes security_attributes;
-        mbstowcs(wname, buffer.name, ARRAYSIZE(buffer.name));
-        if(!SUCCEEDED(device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, wname, &handle)))
-            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object");
+        if(HRESULT const status = device_->CreateSharedHandle(gfx_buffer.resource_, &security_attributes, GENERIC_ALL, nullptr, &handle); !SUCCEEDED(status))
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from buffer object: 0x%08X", status);
         return handle;
+    }
+
+    HANDLE createTextureSharedHandle(GfxTexture const &texture)
+    {
+        HANDLE handle = {};
+        if(!texture_handles_.has_handle(texture.handle))
+        {
+            if(!!texture)
+                GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create shared handle from invalid texture object");
+            return handle;  // invalid texture object
+        }
+        Texture &gfx_texture = textures_[texture];
+        if(gfx_texture.isInterop())
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create shared handle from interop texture object");
+            return handle;  // invalid texture object type
+        }
+        D3D12_HEAP_FLAGS heap_flags = D3D12_HEAP_FLAG_NONE;
+        if(!SUCCEEDED(gfx_texture.resource_->GetHeapProperties(nullptr, &heap_flags)))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Cannot query heap information from texture object");
+            return handle;  // internal error
+        }
+        if((heap_flags & D3D12_HEAP_FLAG_SHARED) == 0)
+        {
+            ID3D12Resource *resource = nullptr;
+            D3D12MA::Allocation *allocation = nullptr;
+            D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+            D3D12MA::ALLOCATION_DESC
+            allocation_desc                = {};
+            allocation_desc.HeapType       = D3D12_HEAP_TYPE_DEFAULT;
+            allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
+            resource_desc.Alignment        = 0;    // default alignment
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, gfx_texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            {
+                GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared texture object");
+                return handle;  // out of memory
+            }
+            bool transitioned = transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+            ID3D12Resource *previous_resource = gfx_texture.resource_;
+            collect(gfx_texture);    // release previous texture
+            gfx_texture.Object::flags_ &= ~Object::kFlag_Named;
+            gfx_texture.allocation_ = allocation;
+            gfx_texture.resource_ = resource;
+            gfx_texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            gfx_texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            gfx_texture.transitioned_ = false;
+            transitioned |= transitionResource(gfx_texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+            if(transitioned) submitPipelineBarriers();
+            command_list_->CopyResource(gfx_texture.resource_, previous_resource);
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.dsv_descriptor_slots_); ++i)
+            {
+                gfx_texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.dsv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.dsv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+            for(uint32_t i = 0; i < ARRAYSIZE(gfx_texture.rtv_descriptor_slots_); ++i)
+            {
+                gfx_texture.rtv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
+                for(size_t j = 0; j < gfx_texture.rtv_descriptor_slots_[i].size(); ++j)
+                    gfx_texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
+            }
+        }
+        WindowsSecurityAttributes security_attributes;
+        if(HRESULT const status = device_->CreateSharedHandle(gfx_texture.resource_, &security_attributes, GENERIC_ALL, nullptr, &handle); !SUCCEEDED(status))
+            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create shared handle from texture object: 0x%08X", status);
+        return handle;
+    }
+
+    inline ID3D12Resource *getBackBuffer()
+    {
+        return back_buffers_[back_buffer_index_];
+    }
+
+    ID3D12RootSignature *getRootSignature(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.root_signature_;
+    }
+
+    ID3D12PipelineState *getPipelineState(GfxKernel kernel)
+    {
+        if(!kernel_handles_.has_handle(kernel.handle))
+            return nullptr;
+        Kernel const &gfx_kernel = kernels_[kernel];
+        return gfx_kernel.pipeline_state_;
+    }
+
+    IDXGISwapChain4 *getSwapChain()
+    {
+        return swap_chain_;
+    }
+
+    GfxResult setSwapChain(IDXGISwapChain4 *swapchain)
+    {
+        if(!window_)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "The swapchain can only be set if a valid window is used.");
+        finish();
+        sync();
+        // clear old resources associated with the old swapchain
+        if(swap_chain_)
+        {
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                back_buffers_[i]->Release();
+                back_buffers_[i] = nullptr;
+                freeRTVDescriptor(back_buffer_rtvs_[i]);
+            }
+            swap_chain_->Release();
+            swap_chain_ = nullptr;
+            sync();
+        }
+        if(swapchain)
+        {
+            // Bind the new swap chain
+            swap_chain_ = swapchain;
+            // Redo window association and preferences setup
+            IDXGIFactory4 *factory = nullptr;
+            if(!SUCCEEDED(swap_chain_->GetParent(IID_PPV_ARGS(&factory))) || !IsWindow(window_))
+                GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+            factory->MakeWindowAssociation(window_, DXGI_MWA_NO_ALT_ENTER);
+            factory->Release();
+
+            back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
+            swap_chain_->SetColorSpace1(color_space_);
+
+            // these should be allocated at the beginning.
+            GFX_ASSERT(back_buffers_ && back_buffer_rtvs_);
+
+            // recreate swap chain buffers and RTVs
+            GFX_TRY(acquireSwapChainBuffers());
+            GFX_TRY(createBackBufferRTVs());
+
+            D3D12_RESOURCE_BARRIER resource_barrier = {};
+            resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+            resource_barrier.Transition.pResource   = back_buffers_[back_buffer_index_];
+            resource_barrier.Transition.StateBefore = D3D12_RESOURCE_STATE_PRESENT;
+            resource_barrier.Transition.StateAfter  = D3D12_RESOURCE_STATE_RENDER_TARGET;
+            resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+            command_list_->ResourceBarrier(1, &resource_barrier);
+        }
+        return kGfxResult_NoError;
     }
 
     GfxResult execute()
@@ -5588,6 +5978,7 @@ private:
         collect(buffer.allocation_);
         gfxFree(buffer.resource_state_);
         gfxFree(buffer.reference_count_);
+        gfxFree(buffer.transitioned_);
     }
 
     void collect(Texture const &texture)
@@ -6018,6 +6409,7 @@ private:
                     {
                     case D3D_SRV_DIMENSION_BUFFER:
                         kernel_parameter.type_ = Kernel::Parameter::kType_RWBuffer;
+                        kernel_parameter.raw_access_ = (resource_desc.Type == D3D_SIT_UAV_RWBYTEADDRESS);
                         break;
                     case D3D_SRV_DIMENSION_TEXTURE2D:
                         kernel_parameter.type_ = Kernel::Parameter::kType_RWTexture2D;
@@ -6275,7 +6667,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = back_buffer_format_;
+                pso_desc.RTVFormats.RTVFormats.RTFormats[0]     = getBackBufferFormat();
                 pso_desc.RTVFormats.RTVFormats.NumRenderTargets = 1;
             }
         }
@@ -6403,7 +6795,7 @@ private:
             {
                 if(isInterop())
                     return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to backbuffer when using an interop context");
-                pso_desc.RTVFormats[0]    = back_buffer_format_;
+                pso_desc.RTVFormats[0]    = getBackBufferFormat();
                 pso_desc.NumRenderTargets = 1;
             }
         }
@@ -6497,7 +6889,7 @@ private:
             for(uint32_t i = 0; i < ARRAYSIZE(kernel.draw_state_.color_formats_); ++i)
                 if(!bound_color_targets_[i].texture_)
                 {
-                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
+                    if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN && (i != 0 || kernel.draw_state_.color_formats_[i] != getBackBufferFormat()))
                         return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an missing texture object; found at color target %u", i);
                 }
                 else if(kernel.draw_state_.color_formats_[i] != DXGI_FORMAT_UNKNOWN)
@@ -6539,7 +6931,7 @@ private:
             if(color_target_count == 0 && depth_stencil_target.ptr == 0)    // special case - if no color target is supplied, draw to back buffer
             {
                 render_width = window_width_; render_height = window_height_;
-                color_targets[color_target_count++] = rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[fence_index_]);
+                color_targets[color_target_count++] = rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[back_buffer_index_]);
             }
             D3D12_VIEWPORT viewport = { 0.0f, 0.0f, (float)render_width, (float)render_height, D3D12_MIN_DEPTH, D3D12_MAX_DEPTH };
             if(viewport_.x_ != 0.0f || viewport_.y_ != 0.0f || viewport_.width_ != 0.0f || viewport_.height_ != 0.0f)
@@ -6567,7 +6959,15 @@ private:
                 bound_scissor_rect_ = scissor_rect;
                 command_list_->RSSetScissorRects(1, &scissor_rect);
             }
-            command_list_->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            D3D_PRIMITIVE_TOPOLOGY primitive_topology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
+            switch (kernel.draw_state_.primitive_topology_type_)
+            {
+            case D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST; break;
+            case D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_LINELIST; break;
+            case D3D12_PRIMITIVE_TOPOLOGY_TYPE_POINT: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_POINTLIST; break;
+            default: return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Invalid primitive topology.");
+            };
+            command_list_->IASetPrimitiveTopology(primitive_topology);
             command_list_->OMSetRenderTargets(color_target_count, color_targets, false, depth_stencil_target.ptr != 0 ? &depth_stencil_target : nullptr);
         }
         uint64_t const previous_descriptor_heap_id = getDescriptorHeapId();
@@ -6765,6 +7165,25 @@ private:
             bool const invalidate_sbt_parameters = sbt->kernel_ != bound_kernel_;
             sbt->descriptor_heap_id_ = descriptor_heap_id; // update descriptor heap id
             sbt->kernel_ = bound_kernel_; // update bound kernel
+            bool transitioned = false;
+            for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
+            {
+                Buffer &sbt_buffer = buffers_[sbt->sbt_buffers_[i]];
+                bool    transition = false;
+                for(auto &shader_record : sbt->shader_records_[i])
+                {
+                    Sbt::ShaderRecord &sbt_record = shader_record.second;
+                    if(sbt_record.id_ == sbt_record.commited_id_ && !invalidate_sbt_descriptors && !invalidate_sbt_parameters) continue;
+                    transition = true;
+                }
+                if(transition)
+                {
+                    transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+                    transitioned = true;
+                }
+            }
+            if(transitioned)
+                submitPipelineBarriers();
             for(uint32_t i = 0; i < kGfxShaderGroupType_Count; ++i)
             {
                 auto last_record_it = sbt->shader_records_[i].rbegin();
@@ -6823,6 +7242,7 @@ private:
                     sbt_record.commited_id_ = sbt_record.id_;
                 }
                 destroyBuffer(upload_gfx_buffer);
+                transitionResource(sbt_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
             }
             state_object_properties->Release();
         }
@@ -6845,7 +7265,7 @@ private:
                     ibv_desc.SizeInBytes = (uint32_t)bound_index_buffer_.size;
                     ibv_desc.Format = (bound_index_buffer_.stride == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT);
                     if(bound_index_buffer_.cpu_access == kGfxCpuAccess_None)
-                        transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDEX_BUFFER);
+                        transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_INDEX_BUFFER, kTransitionType_Implicit);
                 }
                 command_list_->IASetIndexBuffer(&ibv_desc);
                 installed_index_buffer_ = bound_index_buffer_;
@@ -6868,7 +7288,7 @@ private:
                     vbv_desc.SizeInBytes = (uint32_t)bound_vertex_buffer_.size;
                     vbv_desc.StrideInBytes = GFX_MAX(bound_vertex_buffer_.stride, kernel.vertex_stride_);
                     if(bound_vertex_buffer_.cpu_access == kGfxCpuAccess_None)
-                        transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+                        transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER, kTransitionType_Implicit);
                 }
                 command_list_->IASetVertexBuffers(0, 1, &vbv_desc);
                 installed_vertex_buffer_ = bound_vertex_buffer_;
@@ -6891,20 +7311,19 @@ private:
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
             resource_desc.Alignment = 0;    // default alignment
             resource_desc.Flags |= usage_flag;  // add usage flag
-            GFX_TRY(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)));
-            if(texture.resource_state_ != D3D12_RESOURCE_STATE_COPY_SOURCE)
-            {
-                D3D12_RESOURCE_BARRIER resource_barrier = {};
-                resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                resource_barrier.Transition.pResource = texture.resource_;
-                resource_barrier.Transition.StateBefore = texture.resource_state_;
-                resource_barrier.Transition.StateAfter = D3D12_RESOURCE_STATE_COPY_SOURCE;
-                resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                command_list_->ResourceBarrier(1, &resource_barrier);
-            }
+            GFX_TRY(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)));
+            bool transition = transitionResource(texture, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+            ID3D12Resource *previous_resource = texture.resource_;
             collect(texture);   // release previous texture
-            command_list_->CopyResource(resource, texture.resource_);
-            texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
+            texture.Object::flags_ &= ~Object::kFlag_Named;
+            texture.allocation_ = allocation;
+            texture.resource_ = resource;
+            texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.transitioned_ = false;
+            transition |= transitionResource(texture, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit);
+            if(transition) submitPipelineBarriers();
+            command_list_->CopyResource(resource, previous_resource);
             for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
             {
                 texture.dsv_descriptor_slots_[i].resize(resource_desc.DepthOrArraySize);
@@ -6917,9 +7336,6 @@ private:
                 for(size_t j = 0; j < texture.rtv_descriptor_slots_[i].size(); ++j)
                     texture.rtv_descriptor_slots_[i][j] = 0xFFFFFFFFu;
             }
-            texture.Object::flags_ &= ~Object::kFlag_Named;
-            texture.allocation_ = allocation;
-            texture.resource_ = resource;
         }
         return kGfxResult_NoError;
     }
@@ -7152,11 +7568,12 @@ private:
         Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.data_.triangles_.bvh_buffer_];
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
         SetObjectName(gfx_buffer, raytracing_primitive.name);
+        bool transition = transitionResource(buffers_[gfx_raytracing_primitive.data_.triangles_.vertex_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
         if(gfx_raytracing_primitive.data_.triangles_.index_stride_ != 0)
-            transitionResource(buffers_[gfx_raytracing_primitive.data_.triangles_.index_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        transitionResource(buffers_[gfx_raytracing_primitive.data_.triangles_.vertex_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        submitPipelineBarriers();   // ensure scratch is not in use
+            transition |= transitionResource(buffers_[gfx_raytracing_primitive.data_.triangles_.index_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+        transition |= transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if(transition)
+            submitPipelineBarriers();   // ensure scratch is not in use
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
         build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.Inputs = blas_inputs;
@@ -7229,9 +7646,10 @@ private:
         Buffer &gfx_buffer = buffers_[gfx_raytracing_primitive.data_.procedural_.bvh_buffer_];
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
         SetObjectName(gfx_buffer, raytracing_primitive.name);
-        transitionResource(buffers_[gfx_raytracing_primitive.data_.procedural_.procedural_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
-        transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
-        submitPipelineBarriers();   // ensure scratch is not in use
+        bool transition = transitionResource(buffers_[gfx_raytracing_primitive.data_.procedural_.procedural_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+        transition |= transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if(transition)
+            submitPipelineBarriers();   // ensure scratch is not in use
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
         build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.Inputs = blas_inputs;
@@ -8031,7 +8449,7 @@ private:
                         Buffer &gfx_buffer = buffers_[buffer];
                         SetObjectName(gfx_buffer, buffer.name);
                         if(buffer.cpu_access == kGfxCpuAccess_None)
-                            transitionResource(gfx_buffer, GetShaderVisibleResourceState(kernel));
+                            transitionResource(gfx_buffer, GetShaderVisibleResourceState(kernel), kTransitionType_Implicit);
                         if(!invalidate_descriptor) continue;    // already up to date
                         if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
                             GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
@@ -8106,9 +8524,21 @@ private:
                             GFX_PRINTLN("Warning: Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                         uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-                        uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
-                        uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
-                        uav_desc.Buffer.StructureByteStride = buffer.stride;
+                        if(parameter.raw_access_)
+                        {
+                            // https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ne-d3d12-d3d12_buffer_uav_flags
+                            uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / 4;
+                            uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / 4);
+                            uav_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+                            uav_desc.Buffer.StructureByteStride = 0;
+                            uav_desc.Buffer.Flags = D3D12_BUFFER_UAV_FLAG_RAW;
+                        }
+                        else
+                        {
+                            uav_desc.Buffer.FirstElement = gfx_buffer.data_offset_ / buffer.stride;
+                            uav_desc.Buffer.NumElements = (uint32_t)(buffer.size / buffer.stride);
+                            uav_desc.Buffer.StructureByteStride = buffer.stride;
+                        }
                         device_->CreateUnorderedAccessView(gfx_buffer.resource_, nullptr, &uav_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                     }
             }
@@ -8159,7 +8589,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel), kTransitionType_Implicit);
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -8282,7 +8712,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel), kTransitionType_Implicit);
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -8407,7 +8837,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel), kTransitionType_Implicit);
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -8531,7 +8961,7 @@ private:
                             device_->CreateShaderResourceView(nullptr, &dummy_srv_desc, descriptors_.getCPUHandle(parameter.descriptor_slot_ + j));
                             continue;   // out of bounds mip level
                         }
-                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel));
+                        transitionResource(gfx_texture, GetShaderVisibleResourceState(kernel), kTransitionType_Implicit);
                         if(!invalidate_descriptor && gfx_texture.resource_ == parameter.bound_textures_[j])
                             continue;    // already up to date
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -8578,7 +9008,7 @@ private:
                 Buffer &buffer = buffers_[gfx_acceleration_structure.bvh_buffer_];
                 SetObjectName(buffer, acceleration_structure.name);
                 if(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle))
-                    transitionResource(buffers_[raytracing_scratch_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE);
+                    transitionResource(buffers_[raytracing_scratch_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                 GFX_ASSERT(*buffer.resource_state_ == D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
                 if(!invalidate_descriptor) break;   // already up to date
                 D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -9029,11 +9459,10 @@ private:
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
         shader_args.push_back(L"-T"); shader_args.push_back(wshader_profile.data());
         shader_args.push_back(L"-HV 2021");
-        shader_args.push_back(L"-Wno-parameter-usage");
-        shader_args.push_back(L"-Wno-uninitialized");
-        shader_args.push_back(L"-Wno-conditional-uninitialized");
-        shader_args.push_back(L"-Wno-sometimes-uninitialized");
+        shader_args.push_back(L"-Wno-parameter-usage"); // seems broken with current dxc
         shader_args.push_back(L"-fdiagnostics-format=msvc");
+        shader_args.push_back(DXC_ARG_ALL_RESOURCES_BOUND);
+        shader_args.push_back(DXC_ARG_RESOURCES_MAY_ALIAS);
         if(experimental_shaders_)
         {
             shader_args.push_back(DXC_ARG_SKIP_VALIDATION);
@@ -9075,6 +9504,7 @@ private:
             shader_args.push_back(DXC_ARG_DEBUG);
             shader_args.push_back(DXC_ARG_SKIP_OPTIMIZATIONS);
             shader_args.push_back(DXC_ARG_DEBUG_NAME_FOR_SOURCE);
+            shader_args.push_back(DXC_ARG_WARNINGS_ARE_ERRORS);
         }
 
         std::vector<std::wstring> user_defines;
@@ -9119,8 +9549,12 @@ private:
         }
 
         uint64_t shader_key = 0;
-        std::string shader_key_bytecode;
-        std::string shader_key_reflection;
+        std::wstring shader_key_dir;
+        std::wstring shader_key_bytecode;
+        std::wstring shader_key_reflection;
+        std::wstring const shader_cache_dir = L"./shader_cache/";
+        std::wstring const shader_pdb_dir = L"./shader_pdb/";
+        constexpr uint32_t max_cached_files = 5;
         if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
         {
             IDxcResult *dxc_preprocess = nullptr;
@@ -9137,7 +9571,8 @@ private:
                     for(size_t i = 1; i < shader_args.size(); ++i)
                     {
                         char buffer[64] = {};
-                        wcstombs(buffer, shader_args[i], sizeof(buffer));
+                        std::size_t ret = wcstombs(buffer, shader_args[i], sizeof(buffer));
+                        buffer[GFX_MIN(ret, std::size(buffer) - 1)] = '\0'; // make sure we have a null terminator since Hash function expects it
                         HashCombine(shader_key, Hash(buffer));
                     }
                     for(String const &define : kernel.defines_)
@@ -9160,29 +9595,51 @@ private:
                     if(dxc_source) dxc_source->Release();
                     return; // done
                 }
+                std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
+                if(is_directory(file_path))
+                    shader_key_dir = relative(file_path).generic_wstring();
+                else
+                {
+                    shader_key_dir.resize(mbstowcs(nullptr, program.file_path_.c_str(), 0));
+                    mbstowcs(shader_key_dir.data(), program.file_path_.c_str(), program.file_path_.size());
+                }
+                shader_key_dir += L'_';
+                if(program.file_name_)
+                {
+                    size_t size = shader_key_dir.size();
+                    shader_key_dir.resize(size + mbstowcs(nullptr, program.file_name_.c_str(), 0));
+                    mbstowcs(shader_key_dir.data() + size, program.file_name_.c_str(), program.file_name_.size());
+                    shader_key_dir += L'_';
+                }
+                size_t size = shader_key_dir.size();
+                shader_key_dir.resize(shader_key_dir.size() + mbstowcs(nullptr, kernel.entry_point_.c_str(), 0));
+                mbstowcs(shader_key_dir.data() + size, kernel.entry_point_.c_str(), kernel.entry_point_.size());
+                size = shader_key_dir.size();
+                shader_key_dir.resize(shader_key_dir.size() + mbstowcs(nullptr, shader_extensions_[shader_type], 0));
+                mbstowcs(shader_key_dir.data() + size, shader_extensions_[shader_type], strlen(shader_extensions_[shader_type]));
+                std::transform(shader_key_dir.begin(), shader_key_dir.end(), shader_key_dir.begin(),
+                    [](wchar_t const c) { return (c != L'\\' && c != L'/' && c != L'.') ? c : L'_'; });
+                shader_key_dir += '/';
                 if(cache_shaders_)
                 {
-                    std::string shader_key_file = "./shader_cache/";
                     static bool created_shader_cache_directory;
                     if(!created_shader_cache_directory)
                     {
-                        int32_t const result = _mkdir(shader_key_file.c_str());
+                        int32_t const result = _wmkdir(shader_cache_dir.c_str());
                         if(result < 0 && errno != EEXIST)
-                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                            GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_cache_dir.c_str());
                         created_shader_cache_directory = true;  // do not attempt creating the shader cache directory again
                     }
-                    shader_key_file += std::to_string(shader_key);
-                    shader_key_bytecode = shader_key_file + ".bytecode";
-                    shader_key_reflection = shader_key_file + ".reflection";
-                    std::vector<WCHAR> wshader_key_bytecode(shader_key_bytecode.size() + 1);
-                    std::vector<WCHAR> wshader_key_reflection(shader_key_reflection.size() + 1);
-                    memset(wshader_key_bytecode.data(), 0, wshader_key_bytecode.size() * sizeof(WCHAR));
-                    memset(wshader_key_reflection.data(), 0, wshader_key_reflection.size() * sizeof(WCHAR));
-                    mbstowcs(wshader_key_bytecode.data(), shader_key_bytecode.data(), shader_key_bytecode.size());
-                    mbstowcs(wshader_key_reflection.data(), shader_key_reflection.data(), shader_key_reflection.size());
+                    std::wstring  shader_key_file = shader_cache_dir + shader_key_dir;
+                    int32_t const result = _wmkdir(shader_key_file.c_str());
+                    if(result < 0 && errno != EEXIST)
+                        GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader cache", shader_key_file.c_str());
+                    shader_key_file += std::format(L"{:x}", shader_key);
+                    shader_key_bytecode = shader_key_file + L".bytecode";
+                    shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
-                    dxc_utils_->LoadFile(wshader_key_bytecode.data(), nullptr, &bytecode_blob);
-                    dxc_utils_->LoadFile(wshader_key_reflection.data(), nullptr, &reflection_blob);
+                    dxc_utils_->LoadFile(shader_key_bytecode.data(), nullptr, &bytecode_blob);
+                    dxc_utils_->LoadFile(shader_key_reflection.data(), nullptr, &reflection_blob);
                     if(bytecode_blob != nullptr && reflection_blob != nullptr)
                     {
                         DxcBuffer reflection_data = {};
@@ -9249,24 +9706,37 @@ private:
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
             static bool created_shader_pdb_directory;
-            std::string_view const shader_pdb_directory = "./shader_pdb";
-            std::wstring const wpdb_name(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
-            std::vector<char> pdb_name(wcstombs(nullptr, wpdb_name.c_str(), 0) + 1);
-            wcstombs(pdb_name.data(), wpdb_name.c_str(), pdb_name.size());
-            shader_file.resize(shader_pdb_directory.size() + pdb_name.size() + 1);
-            GFX_SNPRINTF(shader_file.data(), shader_file.size(), "%s/%s", shader_pdb_directory.data(), pdb_name.data());
             if(!created_shader_pdb_directory)
             {
-                int32_t const result = _mkdir(shader_pdb_directory.data());
+                int32_t const result = _wmkdir(shader_pdb_dir.c_str());
                 if(result < 0 && errno != EEXIST)
-                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_directory.data());
+                    GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", shader_pdb_dir.data());
                 created_shader_pdb_directory = true;    // do not attempt creating the shader PDB directory again
             }
-            FILE *fd = fopen(shader_file.data(), "wb");
+            std::wstring wpdb_name = shader_pdb_dir + shader_key_dir;
+            int32_t const result = _wmkdir(wpdb_name.c_str());
+            if(result < 0 && errno != EEXIST)
+                GFX_PRINT_ERROR(kGfxResult_InternalError, "Failed to create `%s' directory; cannot write shader PDBs", wpdb_name.data());
+            wpdb_name += std::wstring(dxc_pdb_name->GetStringPointer(), dxc_pdb_name->GetStringLength());
+            FILE *fd = _wfopen(wpdb_name.data(), L"wb");
             if(fd != nullptr)
             {
                 fwrite(dxc_pdb->GetBufferPointer(), dxc_pdb->GetBufferSize(), 1, fd);
                 fclose(fd); // write out PDB for shader debugging
+            }
+            // Delete older pdb files
+            std::filesystem::directory_iterator const end;
+            std::vector<std::filesystem::path>        pdb_files;
+            for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_pdb_dir + shader_key_dir)}; iter != end; ++iter)
+                if(is_regular_file(*iter))
+                    if(iter->path().extension() == ".pdb")
+                        pdb_files.emplace_back(*iter);
+            if(pdb_files.size() > max_cached_files)
+            {
+                std::sort(pdb_files.begin(), pdb_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
+                    return last_write_time(a) > last_write_time(b); });
+                for(size_t i = max_cached_files; i < pdb_files.size(); ++i)
+                    std::filesystem::remove(pdb_files[i]);
             }
         }
 
@@ -9285,17 +9755,44 @@ private:
                 shader.shader_reflection_ = reflection;
                 if(cache_shaders_)
                 {
-                    FILE *fd = fopen(shader_key_bytecode.c_str(), "wb");
+                    FILE *fd = _wfopen(shader_key_bytecode.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
                         fclose(fd); // write out bytecode for shader caching
                     }
-                    fd = fopen(shader_key_reflection.c_str(), "wb");
+                    fd = _wfopen(shader_key_reflection.c_str(), L"wb");
                     if(fd)
                     {
                         fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
                         fclose(fd); // write out reflection for shader caching
+                    }
+                    // Delete older cached files
+                    std::filesystem::directory_iterator const end;
+                    std::vector<std::filesystem::path>        bytecode_files;
+                    std::vector<std::filesystem::path>        reflection_files;
+                    for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_cache_dir + shader_key_dir)}; iter != end; ++iter)
+                        if(is_regular_file(*iter))
+                        {
+                            if(iter->path().extension() == ".bytecode")
+                                bytecode_files.emplace_back(*iter);
+                            else if(iter->path().extension() == ".reflection")
+                                reflection_files.emplace_back(*iter);
+                        }
+                    if(bytecode_files.size() > max_cached_files)
+                    {
+                        std::sort(bytecode_files.begin(), bytecode_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
+                            return last_write_time(a) > last_write_time(b); });
+                        for(size_t i = max_cached_files; i < bytecode_files.size(); ++i)
+                            std::filesystem::remove(bytecode_files[i]);
+                    }
+                    if (reflection_files.size() > max_cached_files)
+                    {
+                        std::sort(reflection_files.begin(), reflection_files.end(),
+                            [](std::filesystem::path const &a, std::filesystem::path const &b) {
+                                return last_write_time(a) > last_write_time(b); });
+                        for(size_t i = max_cached_files; i < reflection_files.size(); ++i)
+                            std::filesystem::remove(reflection_files[i]);
                     }
                 }
             }
@@ -9340,12 +9837,20 @@ private:
         return kGfxResult_NoError;
     }
 
-    void transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state)
+    enum TransitionType
     {
-        GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return;
-        if(*buffer.resource_state_ == resource_state)
+        kTransitionType_Implicit = 0,
+        kTransitionType_Explicit,
+
+        kTransitionType_Count
+    };
+
+    bool transitionResource(Buffer &buffer, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
+    {
+        GFX_ASSERT(buffer.data_ == nullptr); if(buffer.data_ != nullptr) return false;
+        if((*buffer.resource_state_ & resource_state) == resource_state && (resource_state != 0 || *buffer.resource_state_ == resource_state))
         {
-            if(resource_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+            if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
                 bool already_has_uav_barrier = false;
                 for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
@@ -9362,43 +9867,59 @@ private:
                     resource_barrier.UAV.pResource = buffer.resource_;
                     resource_barriers_.push_back(resource_barrier);
                 }
+                return !already_has_uav_barrier;
             }
-            return; // no need to transition
+            return false;
+        }
+        if(transition_type == kTransitionType_Implicit && !*buffer.transitioned_)
+        {
+            if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_COMMON)
+            {
+                *buffer.resource_state_ = resource_state;
+                return false;
+            }
+            else if(((*buffer.resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == *buffer.resource_state_) && ((resource_state & D3D12_RESOURCE_STATE_GENERIC_READ) == resource_state))
+            {
+                *buffer.resource_state_ |= resource_state;
+                return false;
+            }
         }
         for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
             if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == buffer.resource_) ||
-               ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == buffer.resource_))
+                ((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_TRANSITION && (*it).Transition.pResource == buffer.resource_))
             {
                 submitPipelineBarriers();
                 break;  // break barrier batches to avoid debug layer warnings
             }
         if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_INDEX_BUFFER &&  // unbind if active index buffer to prevent debug layer errors
-           buffer_handles_.has_handle(bound_index_buffer_.handle) && buffers_[bound_index_buffer_].resource_ == buffer.resource_)
+            buffer_handles_.has_handle(bound_index_buffer_.handle) && buffers_[bound_index_buffer_].resource_ == buffer.resource_)
         {
             command_list_->IASetIndexBuffer(nullptr);
             force_install_index_buffer_ = true;
         }
         if(*buffer.resource_state_ == D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER &&    // unbind if active vertex buffer to prevent debug layer errors
-           buffer_handles_.has_handle(bound_vertex_buffer_.handle) && buffers_[bound_vertex_buffer_].resource_ == buffer.resource_)
+            buffer_handles_.has_handle(bound_vertex_buffer_.handle) && buffers_[bound_vertex_buffer_].resource_ == buffer.resource_)
         {
             command_list_->IASetVertexBuffers(0, 1, nullptr);
             force_install_vertex_buffer_ = true;
         }
         D3D12_RESOURCE_BARRIER resource_barrier = {};
-        resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-        resource_barrier.Transition.pResource = buffer.resource_;
+        resource_barrier.Type                   = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+        resource_barrier.Transition.pResource   = buffer.resource_;
         resource_barrier.Transition.StateBefore = *buffer.resource_state_;
-        resource_barrier.Transition.StateAfter = resource_state;
+        resource_barrier.Transition.StateAfter  = resource_state;
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         resource_barriers_.push_back(resource_barrier);
         *buffer.resource_state_ = resource_state;
+        *buffer.transitioned_ = true;
+        return true;
     }
 
-    void transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state)
+    bool transitionResource(Texture &texture, D3D12_RESOURCE_STATES resource_state, TransitionType transition_type = kTransitionType_Explicit)
     {
-        if(texture.resource_state_ == resource_state)
+        if((texture.resource_state_ & resource_state) == resource_state && (resource_state != 0 || texture.resource_state_ == resource_state))
         {
-            if(resource_state == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
+            if(texture.resource_state_ == D3D12_RESOURCE_STATE_UNORDERED_ACCESS)
             {
                 bool already_has_uav_barrier = false;
                 for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
@@ -9415,8 +9936,22 @@ private:
                     resource_barrier.UAV.pResource = texture.resource_;
                     resource_barriers_.push_back(resource_barrier);
                 }
+                return !already_has_uav_barrier;
             }
-            return; // no need to transition
+            return false;
+        }
+        if(transition_type == kTransitionType_Implicit && !texture.transitioned_)
+        {
+            if(texture.resource_state_ == D3D12_RESOURCE_STATE_COMMON && (((resource_state & (D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE | D3D12_RESOURCE_STATE_COPY_DEST | D3D12_RESOURCE_STATE_COPY_SOURCE)) == resource_state)))
+            {
+                texture.resource_state_ = resource_state;
+                return false;
+            }
+            else if(((texture.resource_state_ & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) == texture.resource_state_) && (resource_state & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) != 0)
+            {
+                texture.resource_state_ |= resource_state;
+                return false;
+            }
         }
         for(std::vector<D3D12_RESOURCE_BARRIER>::const_iterator it = resource_barriers_.begin(); it != resource_barriers_.end(); ++it)
             if(((*it).Type == D3D12_RESOURCE_BARRIER_TYPE_UAV        && (*it).UAV.pResource        == texture.resource_) ||
@@ -9433,6 +9968,8 @@ private:
         resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
         resource_barriers_.push_back(resource_barrier);
         texture.resource_state_ = resource_state;
+        texture.transitioned_ = true;
+        return true;
     }
 
     void submitPipelineBarriers()
@@ -9472,12 +10009,12 @@ private:
             resource_desc.Height           = window_height_;
             resource_desc.DepthOrArraySize = 1;
             resource_desc.MipLevels        = 1;
-            resource_desc.Format           = back_buffer_format_;
+            resource_desc.Format           = getBackBufferFormat();
             resource_desc.SampleDesc.Count = 1;
             resource_desc.Flags            = D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-            float const clear_value[4] = {};
+            float const clear_value[] = { 0.0f, 0.0f, 0.0f, 1.0f };
 
             GFX_TRY(createResource(allocation_desc, resource_desc, resource_state, clear_value,
                 &back_buffer_allocations_[i], IID_PPV_ARGS(&back_buffers_[i])));
@@ -9496,7 +10033,10 @@ private:
             if(back_buffer_rtvs_[i] == 0xFFFFFFFFu)
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to allocate RTV descriptors");
             GFX_ASSERT(back_buffers_[i] != nullptr);
-            device_->CreateRenderTargetView(back_buffers_[i], nullptr, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
+            D3D12_RENDER_TARGET_VIEW_DESC rtv_desc = {};
+            rtv_desc.Format        = getBackBufferFormat();
+            rtv_desc.ViewDimension = D3D12_RTV_DIMENSION_TEXTURE2D;
+            device_->CreateRenderTargetView(back_buffers_[i], &rtv_desc, rtv_descriptors_.getCPUHandle(back_buffer_rtvs_[i]));
         }
 
         return kGfxResult_NoError;
@@ -9529,11 +10069,12 @@ private:
             D3D12MA::Allocation *allocation = nullptr;
             D3D12_RESOURCE_DESC
             resource_desc        = texture.resource_->GetDesc();
+            resource_desc.Alignment = 0;
             resource_desc.Width  = window_width;
             resource_desc.Height = window_height;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
             allocation_desc.HeapType = D3D12_HEAP_TYPE_DEFAULT;
-            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COPY_DEST, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
+            if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, texture.clear_value_, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to auto-resize texture object(s) to %ux%u", window_width, window_height);
                 break;  // out of memory
@@ -9542,6 +10083,9 @@ private:
             texture.resource_ = resource;
             texture.allocation_ = allocation;
             texture.Object::flags_ &= ~Object::kFlag_Named;
+            texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            texture.transitioned_ = false;
             for(uint32_t j = 0; j < ARRAYSIZE(texture.dsv_descriptor_slots_); ++j)
             {
                 texture.dsv_descriptor_slots_[j].resize(resource_desc.DepthOrArraySize);
@@ -9554,7 +10098,6 @@ private:
                 for(size_t k = 0; k < texture.rtv_descriptor_slots_[j].size(); ++k)
                     texture.rtv_descriptor_slots_[j][k] = 0xFFFFFFFFu;
             }
-            texture.resource_state_ = D3D12_RESOURCE_STATE_COPY_DEST;
         }
         for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
         {
@@ -9574,7 +10117,7 @@ private:
         {
             return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during resizeBuffers: %s", hr);
         }
-        fence_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
         GFX_TRY(acquireSwapChainBuffers());
         GFX_TRY(createBackBufferRTVs());
         return kGfxResult_NoError;
@@ -9720,6 +10263,13 @@ GfxDisplayDesc gfxGetDisplayDescription(GfxContext context)
     return gfx->getDisplayDescription();
 }
 
+HWND gfxGetWindowHandle(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;    // invalid context
+    return gfx->getWindowHandle();
+}
+
 bool gfxIsRaytracingSupported(GfxContext context)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
@@ -9771,44 +10321,44 @@ void *gfxBufferGetData(GfxContext context, GfxBuffer buffer)
     return gfx->getBufferData(buffer);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(format, clear_value);
+    return gfx->createTexture2D(format, clear_value, flags);
 }
 
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2D(width, height, format, mip_levels, clear_value);
+    return gfx->createTexture2D(width, height, format, mip_levels, clear_value, flags);
 }
 
-GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels, clear_value);
+    return gfx->createTexture2DArray(width, height, slice_count, format, mip_levels, clear_value, flags);
 }
 
-GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTexture3D(width, height, depth, format, mip_levels, clear_value);
+    return gfx->createTexture3D(width, height, depth, format, mip_levels, clear_value, flags);
 }
 
-GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value)
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels, float const *clear_value, D3D12_RESOURCE_FLAGS flags)
 {
     GfxTexture const texture = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return texture;    // invalid context
-    return gfx->createTextureCube(size, format, mip_levels, clear_value);
+    return gfx->createTextureCube(size, format, mip_levels, clear_value, flags);
 }
 
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture)
@@ -10713,11 +11263,68 @@ D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture 
     return gfx->getTextureResourceState(texture);
 }
 
+
+GfxResult gfxBufferSetResourceState(GfxContext context, GfxBuffer buffer, D3D12_RESOURCE_STATES state)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;    // invalid context
+    return gfx->setBufferResourceState(buffer, state);
+}
+
+GfxResult gfxTextureSetResourceState(GfxContext context, GfxTexture texture, D3D12_RESOURCE_STATES state)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;    // invalid context
+    return gfx->setTextureResourceState(texture, state);
+}
+
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;    // invalid context
     return gfx->createBufferSharedHandle(buffer);
+}
+
+HANDLE gfxTextureCreateSharedHandle(GfxContext context, GfxTexture texture)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;    // invalid context
+    return gfx->createTextureSharedHandle(texture);
+}
+
+ID3D12Resource *gfxGetBackBuffer(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getBackBuffer();
+}
+
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getRootSignature(kernel);
+}
+
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getPipelineState(kernel);
+}
+
+IDXGISwapChain4 *gfxGetSwapChain(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr;
+    return gfx->getSwapChain();
+}
+
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->setSwapChain(swapchain);
 }
 
 GfxResult gfxExecute(GfxContext context)

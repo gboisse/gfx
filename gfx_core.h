@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -51,7 +51,7 @@ enum GfxConstant
     kGfxConstant_MaxRenderTarget  = 8,
     kGfxConstant_MaxAnisotropy    = 8,
     kGfxConstant_MaxNameLength    = 64,
-    kGfxConstant_NumBindlessSlots = 1024
+    kGfxConstant_NumBindlessSlots = 2048
 };
 
 //!

@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -37,10 +37,11 @@ SOFTWARE.
 //! ImGui initialization/termination.
 //!
 
-GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames = nullptr, uint32_t font_count = 0,
-    ImFontConfig const *font_configs = nullptr, ImGuiConfigFlags flags = 0);
+GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames = nullptr, uint32_t font_count = 0, ImFontConfig const *font_configs = nullptr, ImGuiConfigFlags flags = 0);
 GfxResult gfxImGuiTerminate();
-GfxResult gfxImGuiRender();
+GfxResult gfxImGuiRender(GfxTexture output_texture = {});
+GfxResult gfxImGuiComposite(GfxTexture color_texture, GfxTexture imgui_texture);
+GfxResult gfxImGuiSetDPIScale(float scale);
 
 bool gfxImGuiIsInitialized();
 

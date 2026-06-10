@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,31 @@ SOFTWARE.
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 #   endif
 
+namespace
+{
+struct MonitorEnumData
+{
+    size_t      targetIndex;
+    size_t      currentIndex;
+    HMONITOR    result;
+};
+
+BOOL CALLBACK EnumMonitorProc(HMONITOR hMon, HDC, LPRECT, LPARAM lParam)
+{
+    auto *data = reinterpret_cast<MonitorEnumData *>(lParam);
+
+    if(data->currentIndex == data->targetIndex)
+    {
+        data->result = hMon;
+        return FALSE;   // stop once the target monitor has been found
+    }
+    ++data->currentIndex;
+
+    return TRUE;
+}
+} // namespace
+
+
 class GfxWindowInternal
 {
     GFX_NON_COPYABLE(GfxWindowInternal);
@@ -42,17 +67,38 @@ class GfxWindowInternal
     bool is_minimized_ = false;
     bool is_maximized_ = false;
     bool is_close_requested_ = false;
+    bool is_full_screen_ = false;
     bool is_key_down_[VK_OEM_CLEAR] = {};
     bool is_previous_key_down_[VK_OEM_CLEAR] = {};
     void (*drop_callback_)(char const *, uint32_t, void *) = nullptr;
     void *callback_data_ = nullptr;
+    GfxCreateWindowFlags flags_;
+    uint32_t window_width_;
+    uint32_t window_height_;
+    uint32_t original_window_width_;
+    uint32_t original_window_height_;
+    uint8_t monitor_index_;
 
 public:
     GfxWindowInternal(GfxWindow &window) { window.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxWindowInternal() { terminate(); }
 
-    GfxResult initialize(GfxWindow &window, uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags)
+    GfxResult initialize(GfxWindow &window,
+                        uint32_t window_width,
+                        uint32_t window_height,
+                        char const *window_title,
+                        GfxCreateWindowFlags flags,
+                        uint8_t monitor_index)
     {
+        flags_ = flags;
+        window_width_ = window_width;
+        window_height_ = window_height;
+        original_window_width_ = window_width_;
+        original_window_height_ = window_height_;
+        monitor_index_ = monitor_index;
+
+        SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
         window_title = (!window_title ? "gfx" : window_title);
 
         WNDCLASSEX
@@ -66,61 +112,38 @@ public:
 
         RegisterClassEx(&window_class);
 
-        RECT window_rect = { 0, 0, (LONG)window_width, (LONG)window_height };
+        DWORD window_style_ex;
+        DWORD const window_style = getWindowStyle(window_style_ex, flags_);
 
-        DWORD const window_style = WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
-            WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0);
-
-        AdjustWindowRect(&window_rect, window_style, FALSE);
-
-        window_ = CreateWindowEx((flags & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0,
+        window_ = CreateWindowEx(window_style_ex,
                                  window_title,
                                  window_title,
                                  window_style,
                                  CW_USEDEFAULT,
                                  CW_USEDEFAULT,
-                                 window_rect.right - window_rect.left,
-                                 window_rect.bottom - window_rect.top,
+                                 0,
+                                 0,
                                  nullptr,
                                  nullptr,
                                  GetModuleHandle(nullptr),
                                  nullptr);
 
-        if((flags & kGfxCreateWindowFlag_FullscreenWindow) != 0)
+        if((flags_ & kGfxCreateWindowFlag_FullscreenWindow) != 0)
         {
-            WINDOWPLACEMENT g_wpPrev;
-            memset(&g_wpPrev, 0, sizeof(g_wpPrev));
-            g_wpPrev.length = sizeof(g_wpPrev);
-            DWORD           dwStyle  = GetWindowLong(window_, GWL_STYLE);
-
-            if((dwStyle & WS_OVERLAPPEDWINDOW) != 0)
-            {
-                MONITORINFO mi;
-                memset(&mi, 0, sizeof(mi));
-                mi.cbSize = sizeof(mi);
-                if(GetWindowPlacement(window_, &g_wpPrev) &&
-                    GetMonitorInfo(MonitorFromWindow(window_, MONITOR_DEFAULTTOPRIMARY), &mi))
-                {
-                    SetWindowLong(window_, GWL_STYLE, dwStyle & ~WS_OVERLAPPEDWINDOW);
-                    SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
-                                 mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
-                                 SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-                }
-            }
-            else
-            {
-                SetWindowLong(window_, GWL_STYLE, dwStyle | WS_OVERLAPPEDWINDOW);
-                SetWindowPlacement(window_, &g_wpPrev);
-                SetWindowPos(window_, NULL, 0, 0, 0, 0,
-                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-            }
+            setFullscreen();
+            is_full_screen_ = true;
+        }
+        else
+        {
+            setWindowed(window_style, window_style_ex);
+            is_full_screen_ = false;
         }
 
         SetWindowLongPtrA(window_, GWLP_USERDATA, (LONG_PTR)this);
 
-        ShowWindow(window_, (flags & kGfxCreateWindowFlag_MaximizeWindow) != 0 ? SW_SHOWMAXIMIZED :
-                            (flags & kGfxCreateWindowFlag_HideWindow    ) != 0 ? SW_HIDE          :
-                                                                                 SW_SHOWDEFAULT);
+        ShowWindow(window_, (flags_ & kGfxCreateWindowFlag_MaximizeWindow) != 0 ? SW_SHOWMAXIMIZED :
+                            (flags_ & kGfxCreateWindowFlag_HideWindow    ) != 0 ? SW_HIDE          :
+                                                                                  SW_SHOWDEFAULT);
 
         window.hwnd = window_;
 
@@ -131,7 +154,7 @@ public:
     {
         if(window_)
             DestroyWindow(window_);
-#    ifdef GFX_ENABLE_GUI
+#   ifdef GFX_ENABLE_GUI
         if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr)
             ImGui_ImplWin32_Shutdown();
 #   endif
@@ -193,9 +216,135 @@ public:
         callback_data_ = nullptr;
     }
 
+    inline float getDPIScale() const
+    {
+        UINT dpi = GetDpiForWindow(window_);
+        return (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
+    }
+
+    inline HMONITOR selectMonitor() const
+    {
+        MonitorEnumData enumData{};
+        enumData.targetIndex  = monitor_index_; // target monitor
+        enumData.currentIndex = 0;
+        enumData.result       = nullptr;
+
+        EnumDisplayMonitors(nullptr, nullptr, EnumMonitorProc,
+                            reinterpret_cast<LPARAM>(&enumData));
+
+        HMONITOR targetMonitor = enumData.result;
+
+        // Fallback if target monitor wasn't found
+        if(!targetMonitor)
+            targetMonitor = MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST);
+
+        return targetMonitor;
+    }
+
+
+    inline void setFullscreen(bool creation = true) const
+    {
+        MONITORINFO mi;
+        memset(&mi, 0, sizeof(mi));
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(selectMonitor(), &mi);
+        SetWindowPos(window_, HWND_TOP, mi.rcMonitor.left, mi.rcMonitor.top,
+                     mi.rcMonitor.right - mi.rcMonitor.left, mi.rcMonitor.bottom - mi.rcMonitor.top,
+                     SWP_NOZORDER | (creation ? 0 : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
+    }
+
+    inline void setWindowed(DWORD window_style, DWORD window_style_ex, bool creation = true) const
+    {
+        MONITORINFO mi = {};
+        mi.cbSize = sizeof(mi);
+        GetMonitorInfo(selectMonitor(), &mi);
+        RECT window_rect = { 0, 0, (LONG)original_window_width_, (LONG)original_window_height_ };
+        UINT dpi = GetDpiForWindow(window_);
+        AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
+
+        // Normalize to width/height
+        LONG width  = window_rect.right  - window_rect.left;
+        LONG height = window_rect.bottom - window_rect.top;
+
+        const RECT& work_area = mi.rcWork;
+        LONG work_area_width  = work_area.right  - work_area.left;
+        LONG work_area_height = work_area.bottom - work_area.top;
+
+        if(work_area_width > width)
+        {
+            window_rect.left  = work_area.left + (work_area_width - width) / 2;
+            window_rect.right = window_rect.left + width;
+        }
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
+        {
+            width = work_area_width;
+            window_rect.left  = work_area.left;
+            window_rect.right = window_rect.left + width;
+        }
+        else
+        {
+            window_rect.left  = work_area.left;
+            window_rect.right = window_rect.left + width;
+        }
+
+        if(work_area_height > height)
+        {
+            window_rect.top    = work_area.top + (work_area_height - height) / 2;
+            window_rect.bottom = window_rect.top + height;
+        }
+        else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
+        {
+            height = work_area_height;
+            window_rect.top    = work_area.top;
+            window_rect.bottom = window_rect.top + height;
+        }
+        else
+        {
+            // Align to top of the work area
+            window_rect.top    = work_area.top;
+            window_rect.bottom = window_rect.top + height;
+        }
+
+        SetWindowPos(window_, NULL, window_rect.left, window_rect.top, window_rect.right - window_rect.left,
+                     window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
+    }
+
+    inline void toggleFullscreen()
+    {
+        if(!is_full_screen_)
+        {
+            DWORD       window_style_ex;
+            DWORD const window_style = getWindowStyle(window_style_ex, flags_ | kGfxCreateWindowFlag_FullscreenWindow);
+            SetWindowLong(window_, GWL_STYLE, window_style);
+            SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
+            setFullscreen(false);
+            is_full_screen_ = true;
+        }
+        else
+        {
+            DWORD       window_style_ex;
+            DWORD const window_style = getWindowStyle(window_style_ex, flags_ & ~kGfxCreateWindowFlag_FullscreenWindow);
+            SetWindowLong(window_, GWL_STYLE, window_style);
+            SetWindowLong(window_, GWL_EXSTYLE, window_style_ex);
+            setWindowed(window_style, window_style_ex, false);
+            is_full_screen_ = false;
+        }
+    }
+
     static inline GfxWindowInternal *GetGfxWindow(GfxWindow window) { return reinterpret_cast<GfxWindowInternal *>(window.handle); }
 
 private:
+    static inline DWORD getWindowStyle(DWORD &window_style_ex, GfxCreateWindowFlags flags)
+    {
+        bool const isPopup = (flags & (kGfxCreateWindowFlag_FullscreenWindow | kGfxCreateWindowFlag_BorderlessWindow)) != 0;
+        DWORD const window_style = isPopup ? WS_POPUP :
+                                       (WS_OVERLAPPEDWINDOW & ~((flags & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
+                                                                    WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0));
+        window_style_ex = (isPopup ? 0 : WS_EX_OVERLAPPEDWINDOW) |
+                                      ((flags & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
+        return window_style;
+    }
+
     inline void updateKeyBinding(uint32_t message, uint32_t key_code)
     {
         bool is_down;
@@ -224,16 +373,19 @@ private:
         GfxWindowInternal *gfx_window = (GfxWindowInternal *)GetWindowLongPtrA(window, GWLP_USERDATA);
         if(gfx_window != nullptr)
         {
-#    ifdef GFX_ENABLE_GUI
+#   ifdef GFX_ENABLE_GUI
             if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData == nullptr && gfxImGuiIsInitialized())
                 ImGui_ImplWin32_Init(gfx_window->window_);
 #   endif
+            SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
             switch(message)
             {
             case WM_SIZE:
                 {
-                    gfx_window->is_minimized_ = IsIconic(gfx_window->window_);
-                    gfx_window->is_maximized_ = IsZoomed(gfx_window->window_);
+                    gfx_window->is_minimized_  = IsIconic(gfx_window->window_);
+                    gfx_window->is_maximized_  = IsZoomed(gfx_window->window_);
+                    gfx_window->window_width_  = LOWORD(l_param);
+                    gfx_window->window_height_ = HIWORD(l_param);
                 }
                 break;
             case WM_DESTROY:
@@ -266,6 +418,28 @@ private:
                     DragFinish(hdrop);
                 }
                 break;
+            case WM_GETDPISCALEDSIZE:
+                {
+                    DWORD const dpi = (WORD)w_param;
+                    RECT window_rect = { 0, 0, (LONG)gfx_window->window_width_, (LONG)gfx_window->window_height_ };
+                    DWORD const window_style = WS_OVERLAPPEDWINDOW & ~((gfx_window->flags_ & kGfxCreateWindowFlag_NoResizeWindow) != 0 ?
+                                                                           WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX : 0);
+                    DWORD const window_style_ex = WS_EX_OVERLAPPEDWINDOW & ((gfx_window->flags_ & kGfxCreateWindowFlag_AcceptDrop) != 0 ? WS_EX_ACCEPTFILES : 0);
+                    AdjustWindowRectExForDpi(&window_rect, window_style, FALSE, window_style_ex, dpi);
+                    SIZE* const out = (SIZE*)l_param;
+                    out->cx = window_rect.right - window_rect.left;
+                    out->cy = window_rect.bottom - window_rect.top;
+                    return TRUE;
+                }
+#   ifdef GFX_ENABLE_GUI
+            case WM_DPICHANGED:
+                {
+                    UINT  dpi              = HIWORD(w_param);
+                    float dpi_scale_factor = (float)dpi / (float)USER_DEFAULT_SCREEN_DPI;
+                    gfxImGuiSetDPIScale(dpi_scale_factor);
+                }
+                break;
+#   endif
             case WM_CHAR:
             case WM_SETCURSOR:
             case WM_DEVICECHANGE:
@@ -280,7 +454,7 @@ private:
             case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
                 if(w_param < ARRAYSIZE(is_key_down_))
                     gfx_window->updateKeyBinding(message, (uint32_t)w_param);
-#    ifdef GFX_ENABLE_GUI
+#   ifdef GFX_ENABLE_GUI
                 if(ImGui::GetCurrentContext() != nullptr && ImGui::GetIO().BackendPlatformUserData != nullptr)
                     ImGui_ImplWin32_WndProcHandler(gfx_window->window_, message, w_param, l_param);
 #   endif
@@ -293,13 +467,13 @@ private:
     }
 };
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags)
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title, GfxCreateWindowFlags flags, uint8_t monitor_index)
 {
     GfxResult result;
     GfxWindow window = {};
     GfxWindowInternal *gfx_window = new GfxWindowInternal(window);
     if(!gfx_window) return window;  // out of memory
-    result = gfx_window->initialize(window, window_width, window_height, window_title, flags);
+    result = gfx_window->initialize(window, window_width, window_height, window_title, flags, monitor_index);
     if(result != kGfxResult_NoError)
     {
         window = {};
@@ -378,4 +552,18 @@ bool gfxWindowUnregisterDropCallback(GfxWindow window)
     if(!gfx_window) return false; // invalid window handle
     gfx_window->unregisterDropCallback();
     return true;
+}
+
+float gfxWindowGetDPIScale(GfxWindow window)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return 1.0f; // invalid window handle
+    return gfx_window->getDPIScale();
+}
+
+void gfxWindowToggleFullscreen(GfxWindow window)
+{
+    GfxWindowInternal *gfx_window = GfxWindowInternal::GetGfxWindow(window);
+    if(!gfx_window) return; // invalid window handle
+    gfx_window->toggleFullscreen();
 }

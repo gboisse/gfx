@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -40,15 +40,17 @@ class GfxWindow { friend class GfxWindowInternal; uint64_t handle; HWND hwnd; pu
 
 enum GfxCreateWindowFlag
 {
-    kGfxCreateWindowFlag_MaximizeWindow   = 1 << 0,
-    kGfxCreateWindowFlag_NoResizeWindow   = 1 << 1,
-    kGfxCreateWindowFlag_HideWindow       = 1 << 2,
-    kGfxCreateWindowFlag_FullscreenWindow = 1 << 3,
-    kGfxCreateWindowFlag_AcceptDrop       = 1 << 4
+    kGfxCreateWindowFlag_MaximizeWindow    = 1 << 0,
+    kGfxCreateWindowFlag_NoResizeWindow    = 1 << 1,
+    kGfxCreateWindowFlag_HideWindow        = 1 << 2,
+    kGfxCreateWindowFlag_FullscreenWindow  = 1 << 3,
+    kGfxCreateWindowFlag_AcceptDrop        = 1 << 4,
+    kGfxCreateWindowFlag_ShrinkToScreen    = 1 << 5,
+    kGfxCreateWindowFlag_BorderlessWindow  = 1 << 6
 };
 typedef uint32_t GfxCreateWindowFlags;
 
-GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0);
+GfxWindow gfxCreateWindow(uint32_t window_width, uint32_t window_height, char const *window_title = nullptr, GfxCreateWindowFlags flags = 0, uint8_t monitor_index = 0xFF);
 GfxResult gfxDestroyWindow(GfxWindow window);
 
 GfxResult gfxWindowPumpEvents(GfxWindow window);
@@ -61,6 +63,8 @@ bool gfxWindowIsMinimized(GfxWindow window);
 bool gfxWindowIsMaximized(GfxWindow window);
 bool gfxWindowRegisterDropCallback(GfxWindow window, void (*callback)(char const *, uint32_t, void *), void *data = nullptr);
 bool gfxWindowUnregisterDropCallback(GfxWindow window);
+float gfxWindowGetDPIScale(GfxWindow window);
+void gfxWindowToggleFullscreen(GfxWindow window);
 
 #endif //! GFX_INCLUDE_GFX_WINDOW_H
 

@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -45,7 +45,6 @@ float4 main(in float4 pos : SV_Position) : SV_Target
     color *= 0.75f;
     color /= 1.0f + color;
     color  = saturate(color);
-    color  = sqrt(color);
     color  = color * color * (3.0f - 2.0f * color);
 
     return float4(color, 1.0f);

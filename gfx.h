@@ -1,7 +1,7 @@
 /****************************************************************************
 MIT License
 
-Copyright (c) 2024 Guillaume Boissé
+Copyright (c) 2026 Guillaume Boissé
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -24,8 +24,11 @@ SOFTWARE.
 #ifndef GFX_INCLUDE_GFX_H
 #define GFX_INCLUDE_GFX_H
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <d3d12.h>
-#include <dxgi1_4.h>
+#include <dxgi1_6.h>
 #include "gfx_core.h"
 
 
@@ -47,7 +50,9 @@ enum GfxCreateContextFlag
     kGfxCreateContextFlag_EnableShaderCache         = 1 << 1,
     kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 2,
     kGfxCreateContextFlag_EnableStablePowerState    = 1 << 3,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 4
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 4,
+    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 5,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
+    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 6    // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -75,6 +80,7 @@ class GfxDisplayDesc { public: inline GfxDisplayDesc() {}
 };
 
 GfxDisplayDesc gfxGetDisplayDescription(GfxContext context);
+HWND           gfxGetWindowHandle(GfxContext context);
 
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
@@ -148,11 +154,11 @@ class GfxTexture { GFX_INTERNAL_NAMED_HANDLE(GfxTexture); uint32_t width; uint32
                    inline uint32_t getMipLevels() const { return mip_levels; }
                    inline float const *getClearValue() const { return clear_value; } };
 
-GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr);  // creates auto-resize window-sized texture
-GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
-GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
-GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
-GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr);
+GfxTexture gfxCreateTexture2D(GfxContext context, DXGI_FORMAT format, float const *clear_value = nullptr, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);  // creates auto-resize window-sized texture
+GfxTexture gfxCreateTexture2D(GfxContext context, uint32_t width, uint32_t height, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
+GfxTexture gfxCreateTexture2DArray(GfxContext context, uint32_t width, uint32_t height, uint32_t slice_count, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
+GfxTexture gfxCreateTexture3D(GfxContext context, uint32_t width, uint32_t height, uint32_t depth, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
+GfxTexture gfxCreateTextureCube(GfxContext context, uint32_t size, DXGI_FORMAT format, uint32_t mip_levels = 1, float const *clear_value = nullptr, D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
 GfxResult gfxDestroyTexture(GfxContext context, GfxTexture texture);
 
 //!
@@ -492,7 +498,19 @@ ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext context, GfxAccel
 D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer buffer);
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
 
+GfxResult gfxBufferSetResourceState(GfxContext context, GfxBuffer buffer, D3D12_RESOURCE_STATES state);
+GfxResult gfxTextureSetResourceState(GfxContext context, GfxTexture texture, D3D12_RESOURCE_STATES state);
+
 HANDLE gfxBufferCreateSharedHandle(GfxContext context, GfxBuffer buffer);
+HANDLE gfxTextureCreateSharedHandle(GfxContext context, GfxTexture texture);
+
+ID3D12Resource *gfxGetBackBuffer(GfxContext context);
+
+ID3D12RootSignature *gfxKernelGetRootSignature(GfxContext context, GfxKernel kernel);
+ID3D12PipelineState *gfxKernelGetPipelineState(GfxContext context, GfxKernel kernel);
+
+IDXGISwapChain4 *gfxGetSwapChain(GfxContext context);
+GfxResult gfxSetSwapChain(GfxContext context, IDXGISwapChain4 *swapchain);
 
 GfxResult gfxExecute(GfxContext context);
 GfxResult gfxResetCommandList(GfxContext context);
