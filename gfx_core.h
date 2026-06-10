@@ -54,6 +54,13 @@ enum GfxConstant
     kGfxConstant_NumBindlessSlots = 2048
 };
 
+enum GfxVerbosity
+{
+    kGfxVerbosity_Error = 0,
+    kGfxVerbosity_Warning,
+    kGfxVerbosity_Info,
+};
+
 //!
 //! Public macros.
 //!
@@ -171,6 +178,9 @@ enum GfxConstant
                                                                                  name[i] = n[i]; name[i] = '\0'; }                  \
                                         inline operator bool() const { return !!handle; }                                           \
                                         private: uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]
+
+typedef void(*gfxMessageCallback)(char const* message, GfxVerbosity verbosity);
+void gfxSetMessageCallback(gfxMessageCallback callback);
 
 char const *gfxResultGetString(GfxResult result);
 
