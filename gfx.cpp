@@ -7499,6 +7499,8 @@ private:
     {
         constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles); // should never happen
+        if (update && (gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable raytracing primitive object");
         if(gfx_raytracing_primitive.triangles_.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.index_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid index buffer object");
         if(!buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.vertex_buffer_.handle))
@@ -7535,13 +7537,21 @@ private:
         bool const allow_compaction = (gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Compact) != 0;
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
         blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
         blas_inputs.NumDescs = 1;
         blas_inputs.pGeometryDescs = &geometry_desc;
         if(update)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
         if (allow_compaction)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+        if ((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        if ((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastTrace) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        else if ((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastBuild) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+        if ((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_MinMemory) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
         dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
         uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
@@ -7646,6 +7656,8 @@ private:
     {
         constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural); // should never happen
+        if (update && (gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable raytracing primitive object");
         if(!buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.procedural_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid procedural buffer object");
         GFX_ASSERT(gfx_raytracing_primitive.procedural_.procedural_stride_ > 0 && gfx_raytracing_primitive.procedural_.procedural_buffer_.size / gfx_raytracing_primitive.procedural_.procedural_stride_ <= 0xFFFFFFFFull);
@@ -7669,13 +7681,21 @@ private:
         bool const allow_compaction = (gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Compact) != 0;
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
         blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
         blas_inputs.NumDescs = 1;
         blas_inputs.pGeometryDescs = &geometry_desc;
         if(update)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
         if (allow_compaction)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+        if ((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        if ((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastTrace) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        else if ((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastBuild) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+        if ((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_MinMemory) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
         dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
         uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
