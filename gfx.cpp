@@ -475,6 +475,8 @@ class GfxInternal
         {
             uint32_t build_flags_ = 0;
             GfxBuffer bvh_buffer_ = {};
+            GfxBuffer bvh_compact_size_buffer_ = {};
+            GfxBuffer bvh_compact_size_readback_buffer_ = {};
             uint64_t bvh_data_size_ = 0;
             uint32_t index_stride_ = 0;
             GfxBuffer index_buffer_ = {};
@@ -492,6 +494,8 @@ class GfxInternal
         {
             uint32_t build_flags_ = 0;
             GfxBuffer bvh_buffer_ = {};
+            GfxBuffer bvh_compact_size_buffer_ = {};
+            GfxBuffer bvh_compact_size_readback_buffer_ = {};
             uint64_t bvh_data_size_ = 0;
             uint32_t procedural_stride_ = 0;
             GfxBuffer procedural_buffer_ = {};
@@ -6013,6 +6017,8 @@ private:
         {
         case RaytracingPrimitive::kType_Triangles:
             destroyBuffer(raytracing_primitive.triangles_.bvh_buffer_);
+            destroyBuffer(raytracing_primitive.triangles_.bvh_compact_size_buffer_);
+            destroyBuffer(raytracing_primitive.triangles_.bvh_compact_size_readback_buffer_);
             destroyBuffer(raytracing_primitive.triangles_.index_buffer_);
             destroyBuffer(raytracing_primitive.triangles_.vertex_buffer_);
             break;
@@ -6020,6 +6026,8 @@ private:
             break;  // nothing to collect on instanced primitives
         case RaytracingPrimitive::kType_Procedural:
             destroyBuffer(raytracing_primitive.procedural_.bvh_buffer_);
+            destroyBuffer(raytracing_primitive.procedural_.bvh_compact_size_buffer_);
+            destroyBuffer(raytracing_primitive.procedural_.bvh_compact_size_readback_buffer_);
             destroyBuffer(raytracing_primitive.procedural_.procedural_buffer_);
             break;
         default:
@@ -7490,7 +7498,10 @@ private:
 
     GfxResult buildRaytracingPrimitiveTriangles(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
+        constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles); // should never happen
+        if(update && (gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable raytracing primitive object");
         if(gfx_raytracing_primitive.triangles_.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.index_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid index buffer object");
         if(!buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.vertex_buffer_.handle))
@@ -7524,13 +7535,24 @@ private:
         geometry_desc.Triangles.VertexCount = (uint32_t)(gfx_raytracing_primitive.triangles_.vertex_buffer_.size / gfx_raytracing_primitive.triangles_.vertex_stride_);
         geometry_desc.Triangles.VertexBuffer.StartAddress = gfx_vertex_buffer.resource_->GetGPUVirtualAddress() + gfx_vertex_buffer.data_offset_;
         geometry_desc.Triangles.VertexBuffer.StrideInBytes = gfx_raytracing_primitive.triangles_.vertex_stride_;
+        bool const allow_compaction = (gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Compact) != 0;
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
         blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
         blas_inputs.NumDescs = 1;
         blas_inputs.pGeometryDescs = &geometry_desc;
         if(update)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+        if(allow_compaction)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+        if((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        if((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastTrace) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        else if((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastBuild) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+        if((gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_MinMemory) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
         dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
         uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
@@ -7551,6 +7573,29 @@ private:
             if(!gfx_raytracing_primitive.triangles_.bvh_buffer_)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create raytracing primitive buffer");
         }
+        if(allow_compaction)
+        {
+            if(!gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_)
+            {
+                gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_ = createBuffer(compact_size, nullptr, kGfxCpuAccess_None);
+                gfx_raytracing_primitive.triangles_.bvh_compact_size_readback_buffer_ = createBuffer(compact_size, nullptr, kGfxCpuAccess_Read);
+                // We could pass `D3D12_RESOURCE_STATE_UNORDERED_ACCESS` to `createBuffer` directly,
+                // but then DX12 spams warnings about "Ignoring InitialState D3D12_RESOURCE_STATE_UNORDERED_ACCESS".
+                // So, in order to suppress them, we do this.
+                Buffer& buffer = buffers_[gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_];
+                transitionResource(buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, kTransitionType_Implicit);
+            }
+        }
+        else
+        {
+            if(gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_)
+            {
+                destroyBuffer(gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_);
+                destroyBuffer(gfx_raytracing_primitive.triangles_.bvh_compact_size_readback_buffer_);
+                gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_ = {};
+                gfx_raytracing_primitive.triangles_.bvh_compact_size_readback_buffer_ = {};
+            }
+        }
         gfx_raytracing_primitive.triangles_.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
         GFX_ASSERT(buffer_handles_.has_handle(gfx_raytracing_primitive.triangles_.bvh_buffer_.handle));
         GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
@@ -7570,13 +7615,50 @@ private:
             build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
         GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
-        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC postbuild_info = {};
+        if(allow_compaction)
+        {
+            Buffer& compact_size_buffer = buffers_[gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_];
+            postbuild_info.DestBuffer = compact_size_buffer.resource_->GetGPUVirtualAddress();
+            postbuild_info.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
+        }
+        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, allow_compaction ? 1 : 0, allow_compaction ? &postbuild_info : nullptr);
+        if(allow_compaction)
+        {
+            Buffer& dst = buffers_[gfx_raytracing_primitive.triangles_.bvh_compact_size_readback_buffer_];
+            Buffer& src = buffers_[gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_];
+            transitionResource(src, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+            submitPipelineBarriers();
+            dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
+            finish();
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compact_size_desc{};
+            memcpy(&compact_size_desc, dst.data_, compact_size);
+            const size_t old_size = gfx_raytracing_primitive.triangles_.bvh_buffer_.getSize();
+            if(compact_size_desc.CompactedSizeInBytes == 0 || compact_size_desc.CompactedSizeInBytes > old_size)
+            {
+                GFX_SET_ERROR(kGfxResult_DeviceError, "Can't readback AS size. Possible sync issue.");
+                return kGfxResult_NoError; // Should we return an error here? Or do we just continue normally?
+            }
+            GfxBuffer gfx_compacted_bvh_buffer = createBuffer(compact_size_desc.CompactedSizeInBytes, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+            Buffer& compacted_bvh_buffer = buffers_[gfx_compacted_bvh_buffer];
+            Buffer& orig_bvh = buffers_[gfx_raytracing_primitive.triangles_.bvh_buffer_];
+            gfx_compacted_bvh_buffer.setName(gfx_raytracing_primitive.triangles_.bvh_buffer_.getName());
+            SetObjectName(compacted_bvh_buffer, gfx_compacted_bvh_buffer.getName());
+            D3D12_GPU_VIRTUAL_ADDRESS src_address = orig_bvh.resource_->GetGPUVirtualAddress() + orig_bvh.data_offset_;
+            D3D12_GPU_VIRTUAL_ADDRESS dst_address = compacted_bvh_buffer.resource_->GetGPUVirtualAddress() + compacted_bvh_buffer.data_offset_;
+            dxr_command_list_->CopyRaytracingAccelerationStructure(dst_address, src_address, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_COMPACT);
+            destroyBuffer(gfx_raytracing_primitive.triangles_.bvh_buffer_);
+            gfx_raytracing_primitive.triangles_.bvh_buffer_ = gfx_compacted_bvh_buffer;
+        }
         return kGfxResult_NoError;
     }
 
     GfxResult buildRaytracingPrimitiveProcedural(GfxRaytracingPrimitive const &raytracing_primitive, RaytracingPrimitive &gfx_raytracing_primitive, bool update)
     {
+        constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         GFX_ASSERT(gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural); // should never happen
+        if(update && (gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable raytracing primitive object");
         if(!buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.procedural_buffer_.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a raytracing primitive that's pointing to an invalid procedural buffer object");
         GFX_ASSERT(gfx_raytracing_primitive.procedural_.procedural_stride_ > 0 && gfx_raytracing_primitive.procedural_.procedural_buffer_.size / gfx_raytracing_primitive.procedural_.procedural_stride_ <= 0xFFFFFFFFull);
@@ -7597,13 +7679,24 @@ private:
         geometry_desc.AABBs.AABBCount = 1;
         geometry_desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
         geometry_desc.AABBs.AABBs.StartAddress = gfx_aabb_buffer.resource_->GetGPUVirtualAddress() + gfx_aabb_buffer.data_offset_;
+        bool const allow_compaction = (gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Compact) != 0;
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
         blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
-        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
         blas_inputs.NumDescs = 1;
         blas_inputs.pGeometryDescs = &geometry_desc;
         if(update)
             blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
+        if(allow_compaction)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
+        if((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Updateable) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
+        if((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastTrace) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+        else if((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_FastBuild) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
+        if((gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_MinMemory) != 0)
+            blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
         dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
         uint64_t const scratch_data_size = GFX_MAX(blas_info.ScratchDataSizeInBytes, blas_info.UpdateScratchDataSizeInBytes);
@@ -7624,6 +7717,29 @@ private:
             if(!gfx_raytracing_primitive.procedural_.bvh_buffer_)
                 return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create raytracing primitive buffer");
         }
+        if(allow_compaction)
+        {
+            if(!gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_)
+            {
+                gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_ = createBuffer(compact_size, nullptr, kGfxCpuAccess_None);
+                gfx_raytracing_primitive.procedural_.bvh_compact_size_readback_buffer_ = createBuffer(compact_size, nullptr, kGfxCpuAccess_Read);
+                // We could pass `D3D12_RESOURCE_STATE_UNORDERED_ACCESS` to `createBuffer` directly,
+                // but then DX12 spams warnings about "Ignoring InitialState D3D12_RESOURCE_STATE_UNORDERED_ACCESS".
+                // So, in order to suppress them, we do this.
+                Buffer& buffer = buffers_[gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_];
+                transitionResource(buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, kTransitionType_Implicit);
+            }
+        }
+        else
+        {
+            if(gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_)
+            {
+                destroyBuffer(gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_);
+                destroyBuffer(gfx_raytracing_primitive.procedural_.bvh_compact_size_readback_buffer_);
+                gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_ = {};
+                gfx_raytracing_primitive.procedural_.bvh_compact_size_readback_buffer_ = {};
+            }
+        }
         gfx_raytracing_primitive.procedural_.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
         GFX_ASSERT(buffer_handles_.has_handle(gfx_raytracing_primitive.procedural_.bvh_buffer_.handle));
         GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
@@ -7641,7 +7757,41 @@ private:
             build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
         GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
-        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC postbuild_info = {};
+        if(allow_compaction)
+        {
+            Buffer& compact_size_buffer = buffers_[gfx_raytracing_primitive.triangles_.bvh_compact_size_buffer_];
+            postbuild_info.DestBuffer = compact_size_buffer.resource_->GetGPUVirtualAddress();
+            postbuild_info.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
+        }
+        dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, allow_compaction ? 1 : 0, allow_compaction ? &postbuild_info : nullptr);
+        if(allow_compaction)
+        {
+            Buffer& dst = buffers_[gfx_raytracing_primitive.procedural_.bvh_compact_size_readback_buffer_];
+            Buffer& src = buffers_[gfx_raytracing_primitive.procedural_.bvh_compact_size_buffer_];
+            transitionResource(src, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+            submitPipelineBarriers();
+            dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
+            finish();
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compact_size_desc{};
+            memcpy(&compact_size_desc, dst.data_, compact_size);
+            const size_t old_size = gfx_raytracing_primitive.procedural_.bvh_buffer_.getSize();
+            if(compact_size_desc.CompactedSizeInBytes == 0 || compact_size_desc.CompactedSizeInBytes > old_size)
+            {
+                GFX_SET_ERROR(kGfxResult_DeviceError, "Can't readback AS size. Possible sync issue.");
+                return kGfxResult_NoError; // Should we return an error here? Or do we just continue normally?
+            }
+            GfxBuffer gfx_compacted_bvh_buffer = createBuffer(compact_size_desc.CompactedSizeInBytes, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+            Buffer& compacted_bvh_buffer = buffers_[gfx_compacted_bvh_buffer];
+            Buffer& orig_bvh = buffers_[gfx_raytracing_primitive.procedural_.bvh_buffer_];
+            gfx_compacted_bvh_buffer.setName(gfx_raytracing_primitive.procedural_.bvh_buffer_.getName());
+            SetObjectName(compacted_bvh_buffer, gfx_compacted_bvh_buffer.getName());
+            D3D12_GPU_VIRTUAL_ADDRESS src_address = orig_bvh.resource_->GetGPUVirtualAddress() + orig_bvh.data_offset_;
+            D3D12_GPU_VIRTUAL_ADDRESS dst_address = compacted_bvh_buffer.resource_->GetGPUVirtualAddress() + compacted_bvh_buffer.data_offset_;
+            dxr_command_list_->CopyRaytracingAccelerationStructure(dst_address, src_address, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_COMPACT);
+            destroyBuffer(gfx_raytracing_primitive.procedural_.bvh_buffer_);
+            gfx_raytracing_primitive.procedural_.bvh_buffer_ = gfx_compacted_bvh_buffer;
+        }
         return kGfxResult_NoError;
     }
 
