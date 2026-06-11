@@ -1533,18 +1533,18 @@ public:
         sampler_descriptors_.descriptor_heap_        = nullptr;
         sampler_descriptors_.descriptor_handle_size_ = 0;
 
-        for(uint32_t i = 0; i < buffers_.size(); ++i)
-            collect(buffers_.data()[i]);
-        for(uint32_t i = 0; i < textures_.size(); ++i)
-            collect(textures_.data()[i]);
-        for(uint32_t i = 0; i < sampler_states_.size(); ++i)
-            collect(sampler_states_.data()[i]);
         for(uint32_t i = 0; i < acceleration_structures_.size(); ++i)
             collect(acceleration_structures_.data()[i]);
         for(uint32_t i = 0; i < raytracing_primitives_.size(); ++i)
             collect(raytracing_primitives_.data()[i]);
         for(uint32_t i = 0; i < sbts_.size(); ++i)
             collect(sbts_.data()[i]);
+        for(uint32_t i = 0; i < buffers_.size(); ++i)
+            collect(buffers_.data()[i]);
+        for(uint32_t i = 0; i < textures_.size(); ++i)
+            collect(textures_.data()[i]);
+        for(uint32_t i = 0; i < sampler_states_.size(); ++i)
+            collect(sampler_states_.data()[i]);
         for(uint32_t i = 0; i < kernels_.size(); ++i)
         {
             command_list_->ClearState(kernels_.data()[i].pipeline_state_);
@@ -5950,7 +5950,7 @@ private:
         garbage_collection_.push_back(std::move(garbage));
     }
 
-    void collect(Buffer const &buffer)
+    void collect(Buffer &buffer)
     {
         if(buffer.reference_count_ != nullptr)
         {
@@ -5973,9 +5973,17 @@ private:
         gfxFree(buffer.resource_state_);
         gfxFree(buffer.reference_count_);
         gfxFree(buffer.transitioned_);
+        // Defensive: ensure a stale Buffer slot cannot be re-collected.
+        buffer.resource_ = nullptr;
+        buffer.allocation_ = nullptr;
+        buffer.resource_state_ = nullptr;
+        buffer.reference_count_ = nullptr;
+        buffer.transitioned_ = nullptr;
+        buffer.data_ = nullptr;
+        buffer.data_offset_ = 0;
     }
 
-    void collect(Texture const &texture)
+    void collect(Texture &texture)
     {
         if(texture.isInterop() && command_list_ != nullptr && texture.resource_ != nullptr && texture.resource_state_ != texture.initial_resource_state_)
         {
@@ -5995,6 +6003,13 @@ private:
         for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
             for(size_t j = 0; j < texture.rtv_descriptor_slots_[i].size(); ++j)
                 freeRTVDescriptor(texture.rtv_descriptor_slots_[i][j]);
+        // Defensive: ensure a stale Texture slot cannot be re-collected.
+        texture.resource_ = nullptr;
+        texture.allocation_ = nullptr;
+        for(uint32_t i = 0; i < ARRAYSIZE(texture.dsv_descriptor_slots_); ++i)
+            texture.dsv_descriptor_slots_[i].clear();
+        for(uint32_t i = 0; i < ARRAYSIZE(texture.rtv_descriptor_slots_); ++i)
+            texture.rtv_descriptor_slots_[i].clear();
     }
 
     void collect(SamplerState const &sampler_state)
