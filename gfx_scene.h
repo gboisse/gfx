@@ -434,6 +434,7 @@ GfxInstance *gfxSceneGetInstance(GfxScene scene, uint64_t instance_handle);
 GfxRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index);
 GfxMetadata const &gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle);
 bool gfxSceneSetInstanceMetadata(GfxScene scene, uint64_t instance_handle, GfxMetadata const &metadata);
+std::vector<std::vector<uint64_t>> gfxSceneGetInstancesBySameTransform(GfxScene scene);
 
 //!
 //! Template specializations.
