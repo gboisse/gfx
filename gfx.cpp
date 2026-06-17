@@ -771,7 +771,6 @@ class GfxInternal
                         break;
                     }
                 }
-
                 return descriptor_count;
             }
         };
@@ -7054,9 +7053,7 @@ private:
                 if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
                 {
                     freeDescriptor(parameter.descriptor_slot_);
-
-                    uint32_t const descriptor_count = parameter.getNumDescriptors();
-                    parameter.descriptor_slot_ = allocateDescriptor(descriptor_count);
+                    parameter.descriptor_slot_ = allocateDescriptor(parameter.getNumDescriptors());
                 }
                 break;
             }
@@ -7102,9 +7099,7 @@ private:
                                 if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
                                 {
                                     freeDescriptor(parameter.descriptor_slot_);
-
-                                    uint32_t const descriptor_count = parameter.getNumDescriptors();
-                                    parameter.descriptor_slot_ = allocateDescriptor(descriptor_count);
+                                    parameter.descriptor_slot_ = allocateDescriptor(parameter.getNumDescriptors());
                                 }
                                 break;
                             }
