@@ -1533,18 +1533,18 @@ public:
         sampler_descriptors_.descriptor_heap_        = nullptr;
         sampler_descriptors_.descriptor_handle_size_ = 0;
 
-        for(uint32_t i = 0; i < buffers_.size(); ++i)
-            collect(buffers_.data()[i]);
-        for(uint32_t i = 0; i < textures_.size(); ++i)
-            collect(textures_.data()[i]);
-        for(uint32_t i = 0; i < sampler_states_.size(); ++i)
-            collect(sampler_states_.data()[i]);
         for(uint32_t i = 0; i < acceleration_structures_.size(); ++i)
             collect(acceleration_structures_.data()[i]);
         for(uint32_t i = 0; i < raytracing_primitives_.size(); ++i)
             collect(raytracing_primitives_.data()[i]);
         for(uint32_t i = 0; i < sbts_.size(); ++i)
             collect(sbts_.data()[i]);
+        for(uint32_t i = 0; i < buffers_.size(); ++i)
+            collect(buffers_.data()[i]);
+        for(uint32_t i = 0; i < textures_.size(); ++i)
+            collect(textures_.data()[i]);
+        for(uint32_t i = 0; i < sampler_states_.size(); ++i)
+            collect(sampler_states_.data()[i]);
         for(uint32_t i = 0; i < kernels_.size(); ++i)
         {
             command_list_->ClearState(kernels_.data()[i].pipeline_state_);
