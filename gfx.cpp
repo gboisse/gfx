@@ -767,7 +767,7 @@ class GfxInternal
                         descriptor_count = parameter_->data_.image_.texture_count;
                         break;
                     default:
-                        GFX_ASSERT(!"Unknown type");
+                        GFX_ASSERTMSG(0, "Unknown descriptor type");
                         break;
                     }
                 }
@@ -6475,7 +6475,7 @@ private:
                         break;
                     }
                 kernel_parameter.descriptor_count_ = descriptor_range.NumDescriptors;
-                kernel_parameter.bindless_ = descriptor_range.NumDescriptors == UINT_MAX;
+                kernel_parameter.bindless_ = (descriptor_range.NumDescriptors == UINT_MAX);
 
                 parameter_id_to_index.insert({kernel_parameter.parameter_id_, root_signature_parameters.kernel_parameters.size()});
                 root_signature_parameters.root_parameters.push_back(root_parameter);
@@ -7056,8 +7056,6 @@ private:
                     freeDescriptor(parameter.descriptor_slot_);
 
                     uint32_t const descriptor_count = parameter.getNumDescriptors();
-                    GFX_ASSERT(descriptor_count > 0);
-
                     parameter.descriptor_slot_ = allocateDescriptor(descriptor_count);
                 }
                 break;
@@ -7106,7 +7104,6 @@ private:
                                     freeDescriptor(parameter.descriptor_slot_);
 
                                     uint32_t const descriptor_count = parameter.getNumDescriptors();
-                                    GFX_ASSERT(descriptor_count > 0);
                                     parameter.descriptor_slot_ = allocateDescriptor(descriptor_count);
                                 }
                                 break;
