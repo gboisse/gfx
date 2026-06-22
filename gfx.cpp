@@ -1520,6 +1520,16 @@ public:
         }
         sort_kernels_.clear();
 
+        if(timestamp_query_heaps_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                collect(timestamp_query_heaps_[i].query_heap_);
+                destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
+                timestamp_query_heaps_[i].~TimestampQueryHeap();
+            }
+        gfxFree(timestamp_query_heaps_);
+        timestamp_query_heaps_ = nullptr;
+
         collect(descriptors_);
         descriptors_.descriptor_heap_        = nullptr;
         descriptors_.descriptor_handle_size_ = 0;
@@ -1552,15 +1562,6 @@ public:
         }
         for(uint32_t i = 0; i < programs_.size(); ++i)
             collect(programs_.data()[i]);
-        if(timestamp_query_heaps_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            {
-                collect(timestamp_query_heaps_[i].query_heap_);
-                destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
-                timestamp_query_heaps_[i].~TimestampQueryHeap();
-            }
-        gfxFree(timestamp_query_heaps_);
-        timestamp_query_heaps_ = nullptr;
 
         forceGarbageCollection();
         buffers_.clear();
