@@ -1340,7 +1340,8 @@ public:
 
         D3D12MA::ALLOCATOR_DESC
         allocator_desc          = {};
-        allocator_desc.Flags    = D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
+        allocator_desc.Flags =
+            D3D12MA::ALLOCATOR_FLAG_SINGLETHREADED;
         allocator_desc.pDevice  = device_;
         allocator_desc.pAdapter = adapter_;
         if(!SUCCEEDED(D3D12MA::CreateAllocator(&allocator_desc, &mem_allocator_)))
@@ -1519,6 +1520,16 @@ public:
         }
         sort_kernels_.clear();
 
+        if(timestamp_query_heaps_ != nullptr)
+            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+            {
+                collect(timestamp_query_heaps_[i].query_heap_);
+                destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
+                timestamp_query_heaps_[i].~TimestampQueryHeap();
+            }
+        gfxFree(timestamp_query_heaps_);
+        timestamp_query_heaps_ = nullptr;
+
         collect(descriptors_);
         descriptors_.descriptor_heap_        = nullptr;
         descriptors_.descriptor_handle_size_ = 0;
@@ -1532,18 +1543,18 @@ public:
         sampler_descriptors_.descriptor_heap_        = nullptr;
         sampler_descriptors_.descriptor_handle_size_ = 0;
 
-        for(uint32_t i = 0; i < buffers_.size(); ++i)
-            collect(buffers_.data()[i]);
-        for(uint32_t i = 0; i < textures_.size(); ++i)
-            collect(textures_.data()[i]);
-        for(uint32_t i = 0; i < sampler_states_.size(); ++i)
-            collect(sampler_states_.data()[i]);
         for(uint32_t i = 0; i < acceleration_structures_.size(); ++i)
             collect(acceleration_structures_.data()[i]);
         for(uint32_t i = 0; i < raytracing_primitives_.size(); ++i)
             collect(raytracing_primitives_.data()[i]);
         for(uint32_t i = 0; i < sbts_.size(); ++i)
             collect(sbts_.data()[i]);
+        for(uint32_t i = 0; i < buffers_.size(); ++i)
+            collect(buffers_.data()[i]);
+        for(uint32_t i = 0; i < textures_.size(); ++i)
+            collect(textures_.data()[i]);
+        for(uint32_t i = 0; i < sampler_states_.size(); ++i)
+            collect(sampler_states_.data()[i]);
         for(uint32_t i = 0; i < kernels_.size(); ++i)
         {
             command_list_->ClearState(kernels_.data()[i].pipeline_state_);
@@ -1551,15 +1562,6 @@ public:
         }
         for(uint32_t i = 0; i < programs_.size(); ++i)
             collect(programs_.data()[i]);
-        if(timestamp_query_heaps_ != nullptr)
-            for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-            {
-                collect(timestamp_query_heaps_[i].query_heap_);
-                destroyBuffer(timestamp_query_heaps_[i].query_buffer_);
-                timestamp_query_heaps_[i].~TimestampQueryHeap();
-            }
-        gfxFree(timestamp_query_heaps_);
-        timestamp_query_heaps_ = nullptr;
 
         forceGarbageCollection();
         buffers_.clear();
@@ -2500,7 +2502,7 @@ public:
 
     uint64_t getAccelerationStructureDataSize(GfxAccelerationStructure const &acceleration_structure)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr || !acceleration_structure.handle) return 0;  // avoid spamming console output
         if(!acceleration_structure_handles_.has_handle(acceleration_structure.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid acceleration structure object");
@@ -2912,7 +2914,7 @@ public:
 
     uint64_t getRaytracingPrimitiveDataSize(GfxRaytracingPrimitive const &raytracing_primitive)
     {
-        if(dxr_device_ == nullptr) return 0;    // avoid spamming console output
+        if(dxr_device_ == nullptr || !raytracing_primitive.handle) return 0;    // avoid spamming console output
         if(!raytracing_primitive_handles_.has_handle(raytracing_primitive.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid raytracing primitive object");
@@ -3754,7 +3756,8 @@ public:
         Texture &gfx_texture = textures_[dst]; SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -3837,7 +3840,8 @@ public:
         SetObjectName(gfx_texture, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, face * dst.mip_levels, dst.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -3884,7 +3888,8 @@ public:
         Buffer &gfx_buffer = buffers_[dst]; SetObjectName(gfx_buffer, dst.name);
         uint32_t num_rows[D3D12_REQ_MIP_LEVELS] = {};
         uint64_t row_sizes[D3D12_REQ_MIP_LEVELS] = {};
-        D3D12_RESOURCE_DESC const resource_desc = gfx_texture.resource_->GetDesc();
+        D3D12_RESOURCE_DESC resource_desc = gfx_texture.resource_->GetDesc();
+        resource_desc.Alignment = 0; // must be zero for GetCopyableFootprints
         D3D12_PLACED_SUBRESOURCE_FOOTPRINT subresource_footprints[D3D12_REQ_MIP_LEVELS] = {};
         device_->GetCopyableFootprints(&resource_desc, 0, src.mip_levels, 0, subresource_footprints, num_rows, row_sizes, nullptr);
         uint64_t buffer_offset = 0;
@@ -5320,11 +5325,12 @@ public:
         {
             ID3D12Resource *resource = nullptr;
             D3D12MA::Allocation *allocation = nullptr;
-            D3D12_RESOURCE_DESC const resource_desc = gfx_buffer.resource_->GetDesc();
+            D3D12_RESOURCE_DESC resource_desc = gfx_buffer.resource_->GetDesc();
             D3D12MA::ALLOCATION_DESC
             allocation_desc                = {};
             allocation_desc.HeapType       = D3D12_HEAP_TYPE_DEFAULT;
             allocation_desc.ExtraHeapFlags = D3D12_HEAP_FLAG_SHARED;
+            resource_desc.Alignment        = 0; // default alignment
             if(createResource(allocation_desc, resource_desc, D3D12_RESOURCE_STATE_COMMON, nullptr, &allocation, IID_PPV_ARGS(&resource)) != kGfxResult_NoError)
             {
                 GFX_PRINT_ERROR(kGfxResult_OutOfMemory, "Unable to create shared buffer object");
@@ -5851,6 +5857,7 @@ private:
         case DXGI_FORMAT_R16G16B16A16_UINT:
         case DXGI_FORMAT_R16G16B16A16_SNORM:
         case DXGI_FORMAT_R16G16B16A16_SINT:
+        case DXGI_FORMAT_R32G32_FLOAT:
             return 8;
         case DXGI_FORMAT_BC2_TYPELESS:
         case DXGI_FORMAT_BC2_UNORM:
@@ -10190,6 +10197,7 @@ private:
             D3D12MA::Allocation *allocation = nullptr;
             D3D12_RESOURCE_DESC
             resource_desc        = texture.resource_->GetDesc();
+            resource_desc.Alignment = 0;
             resource_desc.Width  = window_width;
             resource_desc.Height = window_height;
             D3D12MA::ALLOCATION_DESC allocation_desc = {};
