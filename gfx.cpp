@@ -2798,51 +2798,6 @@ public:
                 if (gfx_raytracing_primitive.triangles_.index_stride_ != 0)
                     transition |= transitionResource(buffers_[gfx_raytracing_primitive.triangles_.index_buffer_], D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
             }
-            else if (gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Procedural)
-            {
-                // TODO: support other primitive types
-                GFX_ASSERT(false);
-
-                // if (!raytracing_primitive_handles_.has_handle(element.primitive.handle))
-                //{
-                //     return GFX_SET_ERROR(kGfxResult_InvalidParameter,
-                //         "Cannot set geometry on an invalid raytracing primitive object");
-                // }
-                // if (!buffer_handles_.has_handle(aabb_buffer.handle))
-                //{
-                //     return GFX_SET_ERROR(kGfxResult_InvalidParameter,
-                //         "Cannot build a raytracing primitive using an invalid AABB buffer object");
-                // }
-                // aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
-                // if (aabb_stride == 0)
-                //{
-                //     return GFX_SET_ERROR(kGfxResult_InvalidOperation,
-                //         "Cannot build a raytracing primitive with an AABB buffer object of stride `0'");
-                // }
-                // if (aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
-                //{
-                //     return GFX_SET_ERROR(kGfxResult_InvalidOperation,
-                //         "Cannot build a raytracing primitive with a buffer object containing more than 4
-                //         billion AABBs");
-                // }
-                // RaytracingPrimitive &gfx_raytracing_primitive =
-                // raytracing_primitives_[raytracing_primitive]; if (gfx_raytracing_primitive.type_ !=
-                // RaytracingPrimitive::kType_Procedural)
-                //{
-                //     return GFX_SET_ERROR(kGfxResult_InvalidOperation,
-                //         "Cannot build a non-procedural raytracing primitive object");
-                // }
-                // destroyBuffer(gfx_raytracing_primitive.procedural_.procedural_buffer_);
-                // gfx_raytracing_primitive.procedural_.build_flags_ = (uint32_t)build_flags;
-                // gfx_raytracing_primitive.procedural_.procedural_buffer_ =
-                //     createBufferRange(aabb_buffer, 0, aabb_buffer.size);
-                // gfx_raytracing_primitive.procedural_.procedural_stride_ = aabb_stride;
-                // gfx_raytracing_primitive.type_ = RaytracingPrimitive::kType_Procedural;
-
-                // transition |=
-                //     transitionResource(buffers_[gfx_raytracing_primitive.procedural_.procedural_buffer_],
-                //         D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-            }
             else
                 return GFX_SET_ERROR(kGfxResult_InvalidParameter,"Cannot build a raytracing batch using an invalid primitive type");
         }
