@@ -2852,12 +2852,8 @@ public:
         blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
         blas_inputs.NumDescs = static_cast<UINT>(descs.size());
         blas_inputs.pGeometryDescs = descs.data();
-        // if (update)
-        //{
-        //     blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
-        // }
 
-        // HACK: use first batch element to store BLAS BVH buffer
+        // Use first batch element to store BLAS BVH buffer
         RaytracingPrimitive &gfx_raytracing_primitive = raytracing_primitives_[batch[0].primitive];
         GfxBuffer &bvh_buffer = gfx_raytracing_primitive.type_ == RaytracingPrimitive::kType_Triangles
                                   ? gfx_raytracing_primitive.triangles_.bvh_buffer_

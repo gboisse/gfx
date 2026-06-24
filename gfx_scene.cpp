@@ -1110,6 +1110,8 @@ private:
             }
             materials[i] = material_ref;    // append the new material
         }
+        std::vector<GfxRef<GfxMeshInstance>> instances;
+        instances.reserve(obj_reader.GetShapes().size());
         for(size_t i = 0; i < obj_reader.GetShapes().size(); ++i)
         {
             uint32_t first_index = 0;
@@ -1200,8 +1202,11 @@ private:
                     instance_metadata.object_name += ".";
                     instance_metadata.object_name += std::to_string(mesh_id);
                 }
+                instances.push_back(instance_ref);
             }
         }
+        GfxRef<GfxRenderInstance> render_instance = gfxSceneCreateRenderInstance(scene);
+        std::swap(render_instance->instances, instances);
         return kGfxResult_NoError;
     }
 
