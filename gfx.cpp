@@ -3605,8 +3605,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy to an invalid texture object");
         if(!buffer_handles_.has_handle(src.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot copy from an invalid buffer object");
-        if(!dst.is2D()) // TODO: implement for the other texture types (gboisse)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-2D texture object");
+        if(!dst.is2D() && !dst.is3D()) // TODO: implement for the other texture types (gboisse)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from buffer to a non-2D/3D texture object");
         if(src.cpu_access == kGfxCpuAccess_Read)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy from a buffer object with read CPU access");
         Texture &gfx_texture = textures_[dst]; SetObjectName(gfx_texture, dst.name);
@@ -3632,7 +3632,9 @@ public:
             if(buffer_offset >= src.size)
                 break;  // further mips aren't available
             uint64_t const buffer_row_pitch = row_sizes[mip_level];
-            uint64_t const buffer_size = (uint64_t)num_rows[mip_level] * buffer_row_pitch;
+            uint32_t const slice_count = subresource_footprints[mip_level].Footprint.Depth;
+            uint64_t const total_rows = (uint64_t)num_rows[mip_level] * slice_count;
+            uint64_t const buffer_size = total_rows * buffer_row_pitch;
             if(buffer_offset + buffer_size > src.size)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot copy to mip level %u from buffer object with insufficient storage", mip_level);
             Buffer *texture_upload_buffer = nullptr;
@@ -3640,7 +3642,7 @@ public:
             if(!unrestricted_pitch && (buffer_row_pitch != texture_row_pitch || // we must respect the 256-byte pitch alignment
                GFX_ALIGN(buffer_offset, D3D12_TEXTURE_DATA_PLACEMENT_ALIGNMENT) != buffer_offset))
             {
-                uint64_t texture_upload_buffer_size = num_rows[mip_level] * static_cast<uint64_t>(subresource_footprints[mip_level].Footprint.RowPitch);
+                uint64_t texture_upload_buffer_size = total_rows * static_cast<uint64_t>(subresource_footprints[mip_level].Footprint.RowPitch);
                 if(texture_upload_buffer_.size < texture_upload_buffer_size)
                 {
                     destroyBuffer(texture_upload_buffer_);
@@ -3655,7 +3657,7 @@ public:
                 SetObjectName(*texture_upload_buffer, texture_upload_buffer_.name);
                 if(transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_DEST, kTransitionType_Implicit))
                     submitPipelineBarriers();   // transition our resources if needed
-                for(uint32_t i = 0; i < num_rows[mip_level]; ++i)
+                for(uint32_t i = 0; i < total_rows; ++i)
                     command_list_->CopyBufferRegion(texture_upload_buffer->resource_, i * texture_row_pitch, gfx_buffer.resource_, i * buffer_row_pitch + buffer_offset, buffer_row_pitch);
                 transitionResource(*texture_upload_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE);
                 submitPipelineBarriers();
