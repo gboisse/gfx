@@ -78,8 +78,8 @@ class GfxSceneInternal
         GfxRef<GfxSkin> skin_;
         GfxRef<GfxLight> light_;
         GfxRef<GfxCamera> camera_;
+        GfxRef<GfxRenderInstance> instance_;
         std::vector<uint64_t> children_;
-        std::vector<GfxRef<GfxInstance>> instances_;
         std::vector<float> default_weights_;
     };
 
@@ -173,10 +173,15 @@ class GfxSceneInternal
     GfxArray<GfxMetadata> mesh_metadata_;
     GfxHandles mesh_handles_;
 
-    GfxArray<GfxInstance> instances_;
-    GfxArray<uint64_t> instance_refs_;
-    GfxArray<GfxMetadata> instance_metadata_;
-    GfxHandles instance_handles_;
+    GfxArray<GfxMeshInstance> mesh_instances_;
+    GfxArray<uint64_t> mesh_instance_refs_;
+    GfxArray<GfxMetadata> mesh_instance_metadata_;
+    GfxHandles mesh_instance_handles_;
+
+    GfxArray<GfxRenderInstance> render_instances_;
+    GfxArray<uint64_t> render_instance_refs_;
+    GfxArray<GfxMetadata> render_instance_metadata_;
+    GfxHandles render_instance_handles_;
 
     static GfxArray<GfxScene> scenes_;
     static GfxHandles scene_handles_;
@@ -221,14 +226,20 @@ class GfxSceneInternal
     template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxMesh>() { return mesh_metadata_; }
     template<> inline GfxHandles &object_handles_<GfxMesh>() { return mesh_handles_; }
 
-    template<> inline GfxArray<GfxInstance> &objects_<GfxInstance>() { return instances_; }
-    template<> inline GfxArray<uint64_t> &object_refs_<GfxInstance>() { return instance_refs_; }
-    template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxInstance>() { return instance_metadata_; }
-    template<> inline GfxHandles &object_handles_<GfxInstance>() { return instance_handles_; }
+    template<> inline GfxArray<GfxMeshInstance> &objects_<GfxMeshInstance>() { return mesh_instances_; }
+    template<> inline GfxArray<uint64_t> &object_refs_<GfxMeshInstance>() { return mesh_instance_refs_; }
+    template<> inline GfxArray<GfxMetadata> &object_metadata_<GfxMeshInstance>() { return mesh_instance_metadata_; }
+    template<> inline GfxHandles &object_handles_<GfxMeshInstance>() { return mesh_instance_handles_; }
+
+    template<> inline GfxArray<GfxRenderInstance>& objects_<GfxRenderInstance>() { return render_instances_; }
+    template<> inline GfxArray<uint64_t>& object_refs_<GfxRenderInstance>() { return render_instance_refs_; }
+    template<> inline GfxArray<GfxMetadata>& object_metadata_<GfxRenderInstance>() { return render_instance_metadata_; }
+    template<> inline GfxHandles& object_handles_<GfxRenderInstance>() { return render_instance_handles_; }
 
 public:
     GfxSceneInternal(GfxScene &scene) : gltf_node_handles_("gltf_node"), animation_handles_("animation"), skin_handles_("skin"), camera_handles_("camera")
-                                      , image_handles_("image"), material_handles_("material"), mesh_handles_("mesh"), instance_handles_("instance")
+                                      , image_handles_("image"), material_handles_("material"), mesh_handles_("mesh"), mesh_instance_handles_("mesh_instance")
+                                      , render_instance_handles_("render_instance")
                                       { scene.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxSceneInternal() { terminate(); }
 
@@ -288,7 +299,8 @@ public:
         clearObjects<GfxImage>();
         clearObjects<GfxMaterial>();
         clearObjects<GfxMesh>();
-        clearObjects<GfxInstance>();
+        clearObjects<GfxMeshInstance>();
+        clearObjects<GfxRenderInstance>();
         clearNodes();
 
         return kGfxResult_NoError;
@@ -321,9 +333,8 @@ public:
                 glm::dmat4 const transform = parent_transform * node.default_local_transform_;
                 for(size_t i = 0; i < node.children_.size(); ++i)
                     VisitNode(node.children_[i], transform);
-                for(size_t i = 0; i < node.instances_.size(); ++i)
-                    if(node.instances_[i])
-                        node.instances_[i]->transform = glm::mat4(transform);
+                if(node.instance_)
+                    node.instance_->transform = glm::mat4(transform);
                 if(node.camera_)
                     TransformGltfCamera(*node.camera_, transform);
                 if(node.light_)
@@ -336,15 +347,16 @@ public:
                 GltfAnimationChannel const &channel = gltf_animation->channels_[i];
                 if(!gltf_node_handles_.has_handle(channel.node_) || (channel.type_ != kGltfAnimationChannelType_Weights)) continue;
                 GltfNode const &node = gltf_nodes_[GetObjectIndex(channel.node_)];
-                for(size_t j = 0; j < node.instances_.size(); ++j)
+                for(size_t j = 0; j < node.instance_->instances.size(); ++j)
                 {
-                    if(!node.instances_[j]) continue;
+                    GfxRef<GfxMeshInstance>& instance = node.instance_->instances[j];
+                    if(!instance) continue;
                     if(!node.default_weights_.empty())
-                        node.instances_[j]->weights = node.default_weights_;
-                    else if(!node.instances_[j]->mesh->default_weights.empty())
-                        node.instances_[j]->weights = node.instances_[j]->mesh->default_weights;
+                        instance->weights = node.default_weights_;
+                    else if(!instance->mesh->default_weights.empty())
+                        instance->weights = instance->mesh->default_weights;
                     else
-                        std::fill(node.instances_[j]->weights.begin(), node.instances_[j]->weights.end(), 0.0f);
+                        std::fill(instance->weights.begin(), instance->weights.end(), 0.0f);
                 }
             }
         }
@@ -981,10 +993,10 @@ private:
                         animation_channel.values_[next_index * weights_count + j], interpolate);
                 }
                 GltfNode const &node = gltf_nodes_[GetObjectIndex(animation_channel.node_)];
-                for(size_t j = 0; j < node.instances_.size(); ++j)
+                for(size_t j = 0; j < node.instance_->instances.size(); ++j)
                 {
-                    if(!node.instances_[j]) continue;
-                    node.instances_[j]->weights = weights;
+                    if(!node.instance_->instances[j]) continue;
+                    node.instance_->instances[j]->weights = weights;
                 }
             }
         }
@@ -1005,9 +1017,8 @@ private:
                     animated_node->translate_, animated_node->rotate_, animated_node->scale_);
             for(size_t i = 0; i < node.children_.size(); ++i)
                 VisitNode(node.children_[i], node.world_transform_);
-            for(size_t i = 0; i < node.instances_.size(); ++i)
-                if(node.instances_[i])
-                    node.instances_[i]->transform = glm::mat4(node.world_transform_);
+            if(node.instance_)
+                node.instance_->transform = glm::mat4(node.world_transform_);
             if(node.camera_)
                 TransformGltfCamera(*node.camera_, node.world_transform_);
             if(node.light_)
@@ -1099,6 +1110,8 @@ private:
             }
             materials[i] = material_ref;    // append the new material
         }
+        std::vector<GfxRef<GfxMeshInstance>> instances;
+        instances.reserve(obj_reader.GetShapes().size());
         for(size_t i = 0; i < obj_reader.GetShapes().size(); ++i)
         {
             uint32_t first_index = 0;
@@ -1177,11 +1190,11 @@ private:
                 }
                 mesh_ref->bounds_min = bounds_min;
                 mesh_ref->bounds_max = bounds_max;
-                GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
+                GfxRef<GfxMeshInstance> instance_ref = gfxSceneCreateMeshInstance(scene);
                 instance_ref->mesh = mesh_ref;  // .obj does not support instancing, so simply create one instance per mesh
                 if((*it).first < materials.size())
                     instance_ref->material = materials[(*it).first];
-                GfxMetadata &instance_metadata = instance_metadata_[instance_ref];
+                GfxMetadata &instance_metadata = mesh_instance_metadata_[instance_ref];
                 instance_metadata.asset_file = asset_file;  // set up metadata
                 instance_metadata.object_name = obj_shape.name;
                 if(mesh_id > 0)
@@ -1189,8 +1202,11 @@ private:
                     instance_metadata.object_name += ".";
                     instance_metadata.object_name += std::to_string(mesh_id);
                 }
+                instances.push_back(instance_ref);
             }
         }
+        GfxRef<GfxRenderInstance> render_instance = gfxSceneCreateRenderInstance(scene);
+        std::swap(render_instance->instances, instances);
         return kGfxResult_NoError;
     }
 
@@ -1941,7 +1957,7 @@ private:
                 local_transform = glm::scale(local_transform,
                     glm::vec3(gltf_node->scale[0], gltf_node->scale[1], gltf_node->scale[2]));
             }
-            std::vector<GfxRef<GfxInstance>> instances;
+            std::vector<GfxRef<GfxMeshInstance>> mesh_instances;
             glm::mat4 const transform = parent_transform * local_transform;
             GfxRef<GfxSkin> skin;
             if(gltf_node->skin != nullptr)
@@ -1957,31 +1973,30 @@ private:
                 std::map<cgltf_mesh const *, std::vector<instance_pair>>::const_iterator const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
                 {
-                    instances.reserve((*it).second.size());
+                    mesh_instances.reserve((*it).second.size());
                     for(size_t i = 0; i < (*it).second.size(); ++i)
                     {
-                        GfxRef<GfxInstance> instance_ref = gfxSceneCreateInstance(scene);
-                        instances.push_back(instance_ref);
+                        GfxRef<GfxMeshInstance> mesh_instance_ref = gfxSceneCreateMeshInstance(scene);
+                        mesh_instances.push_back(mesh_instance_ref);
                         GfxConstRef<GfxMesh> mesh = it->second[i].first;
-                        instance_ref->mesh      = mesh;
-                        instance_ref->material  = it->second[i].second;
-                        instance_ref->skin      = skin;
-                        instance_ref->transform = glm::mat4(transform);
+                        mesh_instance_ref->mesh      = mesh;
+                        mesh_instance_ref->material  = it->second[i].second;
+                        mesh_instance_ref->skin      = skin;
                         if(!mesh->morph_targets.empty())
                         {
                             if(gltf_node->weights != nullptr)
-                                instance_ref->weights = std::vector<float>(gltf_node->weights, gltf_node->weights + gltf_node->weights_count);
+                                mesh_instance_ref->weights = std::vector<float>(gltf_node->weights, gltf_node->weights + gltf_node->weights_count);
                             else if(!mesh->default_weights.empty())
-                                instance_ref->weights = mesh->default_weights;
+                                mesh_instance_ref->weights = mesh->default_weights;
                             else
-                                instance_ref->weights = std::vector<float>(mesh->morph_targets.size() / mesh->vertices.size(), 0.0f);
+                                mesh_instance_ref->weights = std::vector<float>(mesh->morph_targets.size() / mesh->vertices.size(), 0.0f);
                         }
-                        GfxMetadata &instance_metadata = instance_metadata_[instance_ref];
+                        GfxMetadata & mesh_instance_metadata = mesh_instance_metadata_[mesh_instance_ref];
                         GfxMetadata const *mesh_metadata = mesh_metadata_.at(it->second[i].first);
                         if(mesh_metadata != nullptr)
-                            instance_metadata = *mesh_metadata; // set up metadata
+                            mesh_instance_metadata = *mesh_metadata; // set up metadata
                         else
-                            instance_metadata.asset_file = asset_file;
+                            mesh_instance_metadata.asset_file = asset_file;
                     }
                 }
             }
@@ -2061,7 +2076,10 @@ private:
             node.world_transform_ = transform;
             node.parent_ = parent_handle;
             std::swap(node.children_, children);
-            std::swap(node.instances_, instances);
+            GfxRef<GfxRenderInstance> render_instance = gfxSceneCreateRenderInstance(scene);
+            render_instance->transform = transform;
+            std::swap(render_instance->instances, mesh_instances);
+            node.instance_ = render_instance;
             node.skin_ = skin;
             node.camera_ = camera;
             node.light_ = light;
@@ -3557,68 +3575,134 @@ bool gfxSceneSetMeshMetadata(GfxScene scene, uint64_t mesh_handle, GfxMetadata c
     return gfx_scene->setObjectMetadata<GfxMesh>(mesh_handle, metadata);
 }
 
-GfxRef<GfxInstance> gfxSceneCreateInstance(GfxScene scene)
+GfxRef<GfxMeshInstance> gfxSceneCreateMeshInstance(GfxScene scene)
 {
-    GfxRef<GfxInstance> const instance_ref = {};
+    GfxRef<GfxMeshInstance> const instance_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return instance_ref; // invalid parameter
-    return gfx_scene->createObject<GfxInstance>(scene);
+    return gfx_scene->createObject<GfxMeshInstance>(scene);
 }
 
-GfxResult gfxSceneDestroyInstance(GfxScene scene, uint64_t instance_handle)
+GfxResult gfxSceneDestroyMeshInstance(GfxScene scene, uint64_t instance_handle)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
-    return gfx_scene->destroyObject<GfxInstance>(instance_handle);
+    return gfx_scene->destroyObject<GfxMeshInstance>(instance_handle);
 }
 
-GfxResult gfxSceneDestroyAllInstances(GfxScene scene)
+GfxResult gfxSceneDestroyAllMeshInstances(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return kGfxResult_InvalidParameter;
-    return gfx_scene->clearObjects<GfxInstance>();
+    return gfx_scene->clearObjects<GfxMeshInstance>();
 }
 
-uint32_t gfxSceneGetInstanceCount(GfxScene scene)
+uint32_t gfxSceneGetMeshInstanceCount(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return 0;    // invalid parameter
-    return gfx_scene->getObjectCount<GfxInstance>();
+    return gfx_scene->getObjectCount<GfxMeshInstance>();
 }
 
-GfxInstance const *gfxSceneGetInstances(GfxScene scene)
+GfxMeshInstance const *gfxSceneGetMeshInstances(GfxScene scene)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return nullptr;  // invalid parameter
-    return gfx_scene->getObjects<GfxInstance>();
+    return gfx_scene->getObjects<GfxMeshInstance>();
 }
 
-GfxInstance *gfxSceneGetInstance(GfxScene scene, uint64_t instance_handle)
+GfxMeshInstance *gfxSceneGetMeshInstance(GfxScene scene, uint64_t instance_handle)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return nullptr;  // invalid parameter
-    return gfx_scene->getObject<GfxInstance>(instance_handle);
+    return gfx_scene->getObject<GfxMeshInstance>(instance_handle);
 }
 
-GfxRef<GfxInstance> gfxSceneGetInstanceHandle(GfxScene scene, uint32_t instance_index)
+GfxRef<GfxMeshInstance> gfxSceneGetMeshInstanceHandle(GfxScene scene, uint32_t instance_index)
 {
-    GfxRef<GfxInstance> const instance_ref = {};
+    GfxRef<GfxMeshInstance> const instance_ref = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return instance_ref; // invalid parameter
-    return gfx_scene->getObjectHandle<GfxInstance>(scene, instance_index);
+    return gfx_scene->getObjectHandle<GfxMeshInstance>(scene, instance_index);
 }
 
-GfxMetadata const &gfxSceneGetInstanceMetadata(GfxScene scene, uint64_t instance_handle)
+GfxMetadata const &gfxSceneGetMeshInstanceMetadata(GfxScene scene, uint64_t instance_handle)
 {
     static GfxMetadata const metadata = {};
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return metadata; // invalid parameter
-    return gfx_scene->getObjectMetadata<GfxInstance>(instance_handle);
+    return gfx_scene->getObjectMetadata<GfxMeshInstance>(instance_handle);
 }
 
-bool gfxSceneSetInstanceMetadata(GfxScene scene, uint64_t instance_handle, GfxMetadata const &metadata)
+bool gfxSceneSetMeshInstanceMetadata(GfxScene scene, uint64_t instance_handle, GfxMetadata const &metadata)
 {
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return false;    // invalid parameter
-    return gfx_scene->setObjectMetadata<GfxInstance>(instance_handle, metadata);
+    return gfx_scene->setObjectMetadata<GfxMeshInstance>(instance_handle, metadata);
+}
+
+GfxRef<GfxRenderInstance> gfxSceneCreateRenderInstance(GfxScene scene)
+{
+    GfxRef<GfxRenderInstance> const instance_ref = {};
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return instance_ref; // invalid parameter
+    return gfx_scene->createObject<GfxRenderInstance>(scene);
+}
+
+GfxResult gfxSceneDestroyRenderInstance(GfxScene scene, uint64_t instance_handle)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->destroyObject<GfxRenderInstance>(instance_handle);
+}
+
+GfxResult gfxSceneDestroyAllRenderInstances(GfxScene scene)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxRenderInstance>();
+}
+
+uint32_t gfxSceneGetRenderInstanceCount(GfxScene scene)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return 0;    // invalid parameter
+    return gfx_scene->getObjectCount<GfxRenderInstance>();
+}
+
+GfxRenderInstance const* gfxSceneGetRenderInstances(GfxScene scene)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObjects<GfxRenderInstance>();
+}
+
+GfxRenderInstance* gfxSceneGetRenderInstance(GfxScene scene, uint64_t instance_handle)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObject<GfxRenderInstance>(instance_handle);
+}
+
+GfxRef<GfxRenderInstance> gfxSceneGetRenderInstanceHandle(GfxScene scene, uint32_t instance_index)
+{
+    GfxRef<GfxRenderInstance> const instance_ref = {};
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return instance_ref; // invalid parameter
+    return gfx_scene->getObjectHandle<GfxRenderInstance>(scene, instance_index);
+}
+
+GfxMetadata const& gfxSceneGetRenderInstanceMetadata(GfxScene scene, uint64_t instance_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxRenderInstance>(instance_handle);
+}
+
+bool gfxSceneSetRenderInstanceMetadata(GfxScene scene, uint64_t instance_handle, GfxMetadata const& metadata)
+{
+    GfxSceneInternal* gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if (!gfx_scene) return false;    // invalid parameter
+    return gfx_scene->setObjectMetadata<GfxRenderInstance>(instance_handle, metadata);
 }
