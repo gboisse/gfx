@@ -738,6 +738,7 @@ class GfxInternal
             std::vector<ID3D12Resource *> bound_textures_;
             Program::Parameter const *parameter_ = nullptr;
             bool raw_access_ = false;
+            bool bindless_ = false;
 
             struct Variable
             {
@@ -751,6 +752,27 @@ class GfxInternal
             Variable *variables_ = nullptr;
             uint32_t variable_count_ = 0;
             uint32_t variable_size_ = 0;
+
+            uint32_t getNumDescriptors() const noexcept
+            {
+                uint32_t descriptor_count = descriptor_count_;
+                if (bindless_)
+                {
+                    switch (parameter_->type_)
+                    {
+                    case Program::Parameter::Type::kType_Buffer:
+                        descriptor_count = parameter_->data_.buffer_.buffer_count;
+                        break;
+                    case Program::Parameter::Type::kType_Image:
+                        descriptor_count = parameter_->data_.image_.texture_count;
+                        break;
+                    default:
+                        GFX_ASSERTMSG(0, "Unknown descriptor type");
+                        break;
+                    }
+                }
+                return descriptor_count;
+            }
         };
 
         struct LocalParameter
@@ -6448,13 +6470,14 @@ private:
                     case Kernel::Parameter::kType_Texture3D:
                     case Kernel::Parameter::kType_RWTexture3D:
                     case Kernel::Parameter::kType_TextureCube:
-                        descriptor_range.NumDescriptors = kGfxConstant_NumBindlessSlots;
+                        descriptor_range.NumDescriptors = UINT_MAX;
                         break;
                     default:
                         GFX_PRINT_ERROR(kGfxResult_InternalError, "Bindless is only supported for buffer and texture objets");
                         break;
                     }
                 kernel_parameter.descriptor_count_ = descriptor_range.NumDescriptors;
+                kernel_parameter.bindless_ = (descriptor_range.NumDescriptors == UINT_MAX);
 
                 parameter_id_to_index.insert({kernel_parameter.parameter_id_, root_signature_parameters.kernel_parameters.size()});
                 root_signature_parameters.root_parameters.push_back(root_parameter);
@@ -7033,8 +7056,7 @@ private:
                 if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
                 {
                     freeDescriptor(parameter.descriptor_slot_);
-                    GFX_ASSERT(parameter.descriptor_count_ > 0);
-                    parameter.descriptor_slot_ = allocateDescriptor(parameter.descriptor_count_);
+                    parameter.descriptor_slot_ = allocateDescriptor(parameter.getNumDescriptors());
                 }
                 break;
             }
@@ -7080,8 +7102,7 @@ private:
                                 if(parameter.parameter_ != nullptr && parameter.id_ != parameter.parameter_->id_)
                                 {
                                     freeDescriptor(parameter.descriptor_slot_);
-                                    GFX_ASSERT(parameter.descriptor_count_ > 0);
-                                    parameter.descriptor_slot_ = allocateDescriptor(parameter.descriptor_count_);
+                                    parameter.descriptor_slot_ = allocateDescriptor(parameter.getNumDescriptors());
                                 }
                                 break;
                             }
@@ -7221,7 +7242,7 @@ private:
                                                                 : dummy_descriptors_[parameter.type_]);
                                 if(parameter.descriptor_slot_ != 0xFFFFFFFFu)
                                     initDescriptorParameter(kernel, program, invalidate_sbt_descriptors, parameter, descriptor_slot);
-                                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                                 {
                                     auto descriptor_handle =
                                         descriptors_.getGPUHandle(descriptor_slot + j);
@@ -8392,7 +8413,7 @@ private:
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
                 dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
                     {
@@ -8454,7 +8475,7 @@ private:
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.buffer_.buffer_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Buffer)
                     {
@@ -8535,8 +8556,8 @@ private:
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
                 dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
@@ -8594,8 +8615,8 @@ private:
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
@@ -8658,8 +8679,8 @@ private:
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2DARRAY;
                 dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
@@ -8718,8 +8739,8 @@ private:
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2DARRAY;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
@@ -8783,8 +8804,8 @@ private:
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE3D;
                 dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
@@ -8842,8 +8863,8 @@ private:
                 D3D12_UNORDERED_ACCESS_VIEW_DESC dummy_uav_desc = {};
                 dummy_uav_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_uav_desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE3D;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
@@ -8907,8 +8928,8 @@ private:
                 dummy_srv_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
                 dummy_srv_desc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURECUBE;
                 dummy_srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-                parameter.bound_textures_.resize(parameter.descriptor_count_);
-                for(uint32_t j = 0; j < parameter.descriptor_count_; ++j)
+                parameter.bound_textures_.resize(parameter.getNumDescriptors());
+                for(uint32_t j = 0; j < parameter.getNumDescriptors(); ++j)
                     if(j >= parameter.parameter_->data_.image_.texture_count ||
                         parameter.parameter_->type_ != Program::Parameter::kType_Image)
                     {
