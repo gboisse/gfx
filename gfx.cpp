@@ -5739,6 +5739,10 @@ private:
         case DXGI_FORMAT_R16G16B16A16_SINT:
         case DXGI_FORMAT_R32G32_FLOAT:
             return 8;
+        case DXGI_FORMAT_R32G32B32_FLOAT:
+        case DXGI_FORMAT_R32G32B32_UINT:
+        case DXGI_FORMAT_R32G32B32_SINT:
+            return 12;
         case DXGI_FORMAT_BC2_TYPELESS:
         case DXGI_FORMAT_BC2_UNORM:
         case DXGI_FORMAT_BC2_UNORM_SRGB:
