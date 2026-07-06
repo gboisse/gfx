@@ -53,6 +53,15 @@ enum GfxConstant
     kGfxConstant_MaxNameLength   = 64,
 };
 
+enum GfxVerbosity
+{
+    kGfxVerbosity_Error = 0,
+    kGfxVerbosity_Warning,
+    kGfxVerbosity_Info,
+
+    kGfxVerbosity_Count
+};
+
 //!
 //! Public macros.
 //!
@@ -170,6 +179,9 @@ enum GfxConstant
                                                                                  name[i] = n[i]; name[i] = '\0'; }                  \
                                         inline operator bool() const { return !!handle; }                                           \
                                         private: uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]
+
+typedef void (*GfxMessageCallback)(char const *message, GfxVerbosity verbosity);
+void gfxMessageSetCallback(GfxMessageCallback callback);
 
 char const *gfxResultGetString(GfxResult result);
 
