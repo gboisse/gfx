@@ -59,6 +59,8 @@ enum GfxVerbosity
     kGfxVerbosity_Error = 0,
     kGfxVerbosity_Warning,
     kGfxVerbosity_Info,
+
+    kGfxVerbosity_Count
 };
 
 //!
@@ -179,8 +181,8 @@ enum GfxVerbosity
                                         inline operator bool() const { return !!handle; }                                           \
                                         private: uint64_t handle; char name[kGfxConstant_MaxNameLength + 1]
 
-typedef void(*gfxMessageCallback)(char const* message, GfxVerbosity verbosity);
-void gfxSetMessageCallback(gfxMessageCallback callback);
+typedef void (*GfxMessageCallback)(char const *message, GfxVerbosity verbosity);
+void gfxMessageSetCallback(GfxMessageCallback callback);
 
 char const *gfxResultGetString(GfxResult result);
 

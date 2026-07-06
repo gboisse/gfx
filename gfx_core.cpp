@@ -29,9 +29,14 @@ SOFTWARE.
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-static gfxMessageCallback userMessageCallback;
+static GfxMessageCallback userMessageCallback;
 
-static void OutputMessage(char const* message, GfxVerbosity verbosity)
+void gfxMessageSetCallback(GfxMessageCallback callback)
+{
+    userMessageCallback = callback;
+}
+
+static void OutputMessage(char const *message, GfxVerbosity verbosity)
 {
     if (userMessageCallback)
     {
@@ -114,9 +119,4 @@ GfxResult GFX_SET_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t l
     message[message.size() - 2] = '\n';
     OutputMessage(message.data(), kGfxVerbosity_Error);
     return result;
-}
-
-void gfxSetMessageCallback(gfxMessageCallback callback)
-{
-    userMessageCallback = callback;
 }
