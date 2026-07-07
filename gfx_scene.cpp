@@ -2991,6 +2991,7 @@ private:
         else
         {
             uint16_t *data = (uint16_t*)image_ref->data.data();
+            uint16_t const *image_data_16bit = (uint16_t const *)image_data;
             uint16_t alpha_check = 65535;   // check alpha
             for(int32_t y = 0; y < image_height; ++y)
                 for(int32_t x = 0; x < image_width; ++x)
@@ -2998,7 +2999,7 @@ private:
                     {
                         int32_t const dst_index = (int32_t)resolved_channel_count * (x + y * image_width) + k;
                         int32_t const src_index = channel_count * (x + y * image_width) + k;
-                        uint16_t const source = (k < channel_count ? image_data[src_index] : (uint16_t)65535);
+                        uint16_t const source = (k < channel_count ? image_data_16bit[src_index] : (uint16_t)65535);
                         if(k == 3) alpha_check &= source;
                         data[dst_index] = source;
                     }
