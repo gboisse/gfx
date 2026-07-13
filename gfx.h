@@ -211,7 +211,13 @@ uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAcceleration
 
 enum GfxBuildRaytracingPrimitiveFlag
 {
-    kGfxBuildRaytracingPrimitiveFlag_Opaque = 1 << 0
+    kGfxBuildRaytracingPrimitiveFlag_None       = 0,
+    kGfxBuildRaytracingPrimitiveFlag_Opaque     = 1 << 0,
+    kGfxBuildRaytracingPrimitiveFlag_Compact    = 1 << 1, // It's recommended to avoid compaction for dynamic geometry since compaction requires extra CPU-GPU sync
+    kGfxBuildRaytracingPrimitiveFlag_Updateable = 1 << 2,
+    kGfxBuildRaytracingPrimitiveFlag_FastTrace  = 1 << 3,
+    kGfxBuildRaytracingPrimitiveFlag_FastBuild  = 1 << 4,
+    kGfxBuildRaytracingPrimitiveFlag_MinMemory  = 1 << 5,
 };
 typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
 
@@ -228,6 +234,7 @@ GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimiti
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
 GfxResult gfxRaytracingPrimitiveBuildProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
+GfxResult gfxRaytracingPrimitiveCompact(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
 
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
