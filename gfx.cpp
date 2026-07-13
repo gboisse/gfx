@@ -3085,10 +3085,12 @@ public:
         for(uint32_t i = 0; i < batch_size; ++i)
             if(!bottom_level_acceleration_structure_handles_.has_handle(blases[i].handle))
                 return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
-                std::vector<std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>> descs;
+        std::vector<std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>> descs;
         descs.reserve(batch_size);
         std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> build_inputs;
         build_inputs.reserve(batch_size);
+        std::vector<size_t> scratch_sizes;
+        scratch_sizes.reserve(batch_size);
         std::vector<D3D12_RESOURCE_BARRIER> barriers_before;
         std::vector<D3D12_RESOURCE_BARRIER> barriers_after;
         auto add_buffer_transition = [&](Buffer const& buffer) {
@@ -3167,8 +3169,10 @@ public:
             D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
             dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
             uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
+            uint64_t const scratch_data_size = GFX_ALIGN(blas_info.ScratchDataSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
+            scratch_sizes.push_back(scratch_data_size);
             // Compute total scratch buffer size for batch build
-            scratch_size += bvh_data_size;
+            scratch_size += scratch_data_size;
             gfx_blas.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
             GfxBuffer& bvh_buffer = gfx_blas.bvh_buffer_;
             if(bvh_data_size > bvh_buffer.size)
@@ -3202,7 +3206,7 @@ public:
             if((blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
                 build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_ + scratch_offset;
-            scratch_offset += bvh_buffer.size;
+            scratch_offset += scratch_sizes[i];
             dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
         }
         dxr_command_list_->ResourceBarrier(UINT(barriers_after.size()), barriers_after.data());
