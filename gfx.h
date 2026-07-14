@@ -253,6 +253,8 @@ GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer index_buffe
 GfxGeometry gfxCreateGeometryProcedural(GfxContext context, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 GfxResult gfxDestroyGeometry(GfxContext context, GfxGeometry geometry);
 
+GfxResult gfxGeometrySetOpaque(GfxContext context, GfxGeometry geometry, bool opaque);
+
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
@@ -264,12 +266,11 @@ GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, 
 enum GfxBuildBottomLevelASFlag
 {
     kGfxBuildBottomLevelASFlag_None = 0,
-    kGfxBuildBottomLevelASFlag_Opaque = 1 << 0,
-    kGfxBuildBottomLevelASFlag_Compact = 1 << 1, // It's recommended to avoid compaction for dynamic geometry since compaction requires extra CPU-GPU sync
-    kGfxBuildBottomLevelASFlag_Updateable = 1 << 2,
-    kGfxBuildBottomLevelASFlag_FastTrace = 1 << 3,
-    kGfxBuildBottomLevelASFlag_FastBuild = 1 << 4,
-    kGfxBuildBottomLevelASFlag_MinMemory = 1 << 5,
+    kGfxBuildBottomLevelASFlag_Compact = 1 << 0, // It's recommended to avoid compaction for dynamic geometry since compaction requires extra CPU-GPU sync
+    kGfxBuildBottomLevelASFlag_Updateable = 1 << 1,
+    kGfxBuildBottomLevelASFlag_FastTrace = 1 << 2,
+    kGfxBuildBottomLevelASFlag_FastBuild = 1 << 3,
+    kGfxBuildBottomLevelASFlag_MinMemory = 1 << 4,
 };
 typedef uint32_t GfxBuildBottomLevelASFlags;
 

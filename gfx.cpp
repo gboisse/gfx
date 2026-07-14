@@ -518,6 +518,7 @@ class GfxInternal
             GfxBuffer index_buffer_ = {};
             uint32_t vertex_stride_ = 0;
             GfxBuffer vertex_buffer_ = {};
+            bool opaque = false;
         } triangles_;
         struct
         {
@@ -2998,6 +2999,19 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult geometrySetOpaque(GfxGeometry const &geometry, bool opaque)
+    {
+        if(!geometry)
+            return kGfxResult_NoError;
+        if(!geometry_handles_.has_handle(geometry.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set opaque flag on an invalid geometry object");
+        Geometry &gfx_geometry = geometries_[geometry];
+        if(gfx_geometry.type_ != Geometry::kType_Triangles)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set opaque flag on a non-triangles geometry object");
+        gfx_geometry.triangles_.opaque = opaque;
+        return kGfxResult_NoError;
+    }
+
     GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const& index_buffer, GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
     {
         if(!geometry_handles_.has_handle(geometry.handle))
@@ -3141,7 +3155,7 @@ public:
                 {
                     D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-                    if((flags[i] & kGfxBuildBottomLevelASFlag_Opaque) != 0)
+                    if(gfx_geometry.triangles_.opaque)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
                     Buffer& gfx_vertex_buffer = buffers_[gfx_geometry.triangles_.vertex_buffer_];
                     Buffer* gfx_index_buffer = gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr;
@@ -11197,6 +11211,13 @@ GfxResult gfxDestroyGeometry(GfxContext context, GfxGeometry geometry)
     GfxInternal* gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyGeometry(geometry);
+}
+
+GfxResult gfxGeometrySetOpaque(GfxContext context, GfxGeometry geometry, bool opaque)
+{
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->geometrySetOpaque(geometry, opaque);
 }
 
 GfxResult gfxGeometryTrianglesUpdate(GfxContext , GfxGeometry , GfxBuffer , uint32_t )
