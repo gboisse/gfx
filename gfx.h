@@ -27,7 +27,8 @@ SOFTWARE.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <d3d12.h>
+// #include <d3d12.h>
+#include "third_party/directx12-agility/build/native/include/d3d12.h"
 #include <dxgi1_6.h>
 #include "gfx_core.h"
 

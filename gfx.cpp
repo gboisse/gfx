@@ -1009,7 +1009,7 @@ public:
                 DXGI_OUTPUT_DESC1 output_desc = {};
                 output6->GetDesc1(&output_desc);
                 if(output_desc.BitsPerColor > 8)
-                    back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
+                    back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM; // HACK to get things running, should be 10-bit
                 if((flags & kGfxCreateContextFlag_EnableHDRSwapChain) != 0)
                 {
                     if(output_desc.ColorSpace == DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020)
@@ -1017,7 +1017,7 @@ public:
                         if((flags & kGfxCreateContextFlag_EnableLinearSwapChain) == 0)
                         {
                             color_space_        = DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020;
-                            back_buffer_format_ = DXGI_FORMAT_R10G10B10A2_UNORM;
+                            back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM; // HACK to get things running, should be 10-bit
                         }
                         else
                         {
@@ -2885,7 +2885,7 @@ public:
         char const last_char = file_path[strlen(file_path) - 1];
         char const *path_separator = (last_char == '/' || last_char == '\\' ? "" : "/");
         GFX_SNPRINTF(program.name, sizeof(program.name), "%s%s%s", file_path, path_separator, file_name);
-        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_9" : "6_0");
+        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_8" : "6_0");
         program.handle = program_handles_.allocate_handle();
         Program &gfx_program = programs_.insert(program);
         gfx_program.shader_model_ = shader_model;
@@ -2904,7 +2904,7 @@ public:
             GFX_SNPRINTF(program.name, sizeof(program.name), "%s", name);
         else
             GFX_SNPRINTF(program.name, sizeof(program.name), "gfx_Program%llu", program.handle);
-        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_9" : "6_0");
+        shader_model = (shader_model != nullptr ? shader_model : dxr_device_ != nullptr ? "6_8" : "6_0");
         Program &gfx_program = programs_.insert(program);
         gfx_program.shader_model_ = shader_model;
         gfx_program.file_path_ = (name != nullptr ? name : program.name);
