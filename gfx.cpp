@@ -9465,8 +9465,26 @@ private:
         std::vector<WCHAR> wshader_profile(mbstowcs(nullptr, shader_profiles[shader_type], 0) + 1);
         mbstowcs(wshader_profile.data(), shader_profiles[shader_type], wshader_profile.size());
 
+        // Find the relative path (if any) to an include path.
+        // Relative path is then used as file name, and the parent folder is then added to include paths.
+        // This results in non-absolute paths being used on shader #line directives on includes.
+        auto file_path_full = std::filesystem::path(wshader_file.begin(), wshader_file.end()).lexically_normal();
+        auto file_path_relative = file_path_full;
+        for (size_t i = 0; i < program.include_paths_.size(); ++i)
+        {
+            auto include_path =
+                std::filesystem::path(program.include_paths_[i].c_str()).lexically_normal();
+            auto path_relative = std::filesystem::relative(file_path_full, include_path);
+            if (!path_relative.empty())
+            {
+                file_path_relative = include_path / path_relative;
+                break;
+            }
+        }
+        auto fname_relative = file_path_relative.wstring();
+
         std::vector<LPCWSTR> shader_args;
-        shader_args.push_back(wshader_file.data());
+        shader_args.push_back(fname_relative.data());
         if(dxr_device_ != nullptr)
             shader_args.push_back(L"-enable-16bit-types");
         shader_args.push_back(L"-I"); shader_args.push_back(L".");
@@ -9543,6 +9561,7 @@ private:
         }
 
         std::vector<std::wstring> include_paths;
+        include_paths.push_back(file_path_full.parent_path().wstring());
         if(!program.include_paths_.empty())
         {
             include_paths.reserve(program.include_paths_.size());
