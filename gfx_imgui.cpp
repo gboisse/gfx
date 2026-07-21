@@ -56,6 +56,7 @@ class GfxImGuiInternal
     GfxSamplerState font_sampler_linear_ = {};         // linear sampler (default)
     GfxSamplerState font_sampler_nearest_ = {}; // nearest sampler (selected via callback)
     GfxSamplerState current_sampler_ = {};      // sampler in use for the current draw
+    int32_t alpha_mode_ = 0;                    // 0 == normal blend, 1 == reverse alpha, 2 == opaque
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
@@ -113,6 +114,7 @@ public:
         imgui_program_desc.ps =
             "Texture2D FontBuffer;\r\n"
             "SamplerState FontSampler;\r\n"
+            "int AlphaMode;\r\n"
             "\r\n"
             "struct Pixel\r\n"
             "{\r\n"
@@ -124,6 +126,17 @@ public:
             "float4 main(in Pixel input) : SV_Target\r\n"
             "{\r\n"
             "    float4 col = input.col * FontBuffer.SampleLevel(FontSampler, input.uv, 0.0f);\r\n"
+            "    // AlphaMode: 0 == normal alpha blending, 1 == reverse alpha blending, 2 == no alpha (opaque).\r\n"
+            "    if (AlphaMode == 1)\r\n"
+            "    {\r\n"
+            "        // Treat the alpha channel as reversed (0 == opaque, 1 == transparent).\r\n"
+            "        col.a = 1.0f - col.a;\r\n"
+            "    }\r\n"
+            "    else if (AlphaMode == 2)\r\n"
+            "    {\r\n"
+            "        // Ignore the source alpha and emit a fully opaque pixel\r\n"
+            "        return float4(col.rgb, 1.0f);\r\n"
+            "    }\r\n"
             "    // imgui assumes blending is performed in srgb which again is mathematically incorrect. To replicate expected behaviour we use pre-multiplied alpha and convert to linear space here.\r\n"
             "    col.rgb *= col.a;\r\n"
             "    col.a = 1.0f - col.a;\r\n"
@@ -203,6 +216,24 @@ public:
     {
         GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
         gfx->current_sampler_ = gfx->font_sampler_nearest_;
+    }
+
+    static void gfx_DrawCallback_SetOpaque(ImDrawList const *, ImDrawCmd const *)
+    {
+        GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
+        gfx->alpha_mode_ = 2;
+    }
+
+    static void gfx_DrawCallback_SetReverseAlpha(ImDrawList const *, ImDrawCmd const *)
+    {
+        GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
+        gfx->alpha_mode_ = 1;
+    }
+
+    static void gfx_DrawCallback_SetNormalAlpha(ImDrawList const *, ImDrawCmd const *)
+    {
+        GfxImGuiInternal *gfx = (GfxImGuiInternal *)ImGui::GetIO().UserData;
+        gfx->alpha_mode_ = 0;
     }
 
     GfxResult initialize(GfxContext const &gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
@@ -429,6 +460,7 @@ public:
                         // Re-bind sampler each draw so callback-driven sampler changes (e.g.
                         // gfxImGuiDrawCallback_SetSamplerLinear) take effect on subsequent draws.
                         gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_);
+                        gfxProgramSetParameter(gfx_, imgui_program_, "AlphaMode", alpha_mode_);
                         gfxCommandSetScissorRect(gfx_, (int32_t)cmd->ClipRect.x,
                                                        (int32_t)cmd->ClipRect.y,
                                                        (int32_t)(cmd->ClipRect.z - cmd->ClipRect.x),
@@ -545,10 +577,16 @@ public:
             gfxCommandBindColorTarget(gfx_, 0, output_texture);
         gfxCommandSetViewport(gfx_); // draw to render texture
         current_sampler_ = font_sampler_linear_;
+        alpha_mode_      = 0;
         gfxProgramSetParameter(gfx_, imgui_program_, "FontSampler", current_sampler_);
+        gfxProgramSetParameter(gfx_, imgui_program_, "AlphaMode", alpha_mode_);
     }
 
     static inline GfxImGuiInternal *GetGfxImGui() { if(ImGui::GetCurrentContext() == nullptr) return nullptr; GfxImGuiInternal *gfx_imgui = static_cast<GfxImGuiInternal *>(ImGui::GetIO().UserData); return (gfx_imgui != nullptr && gfx_imgui->magic_ == kConstant_Magic ? gfx_imgui : nullptr); }
+
+    static ImDrawCallback GetOpaqueCallback() { return gfx_DrawCallback_SetOpaque; }
+    static ImDrawCallback GetReverseAlphaCallback() { return gfx_DrawCallback_SetReverseAlpha; }
+    static ImDrawCallback GetNormalAlphaCallback() { return gfx_DrawCallback_SetNormalAlpha; }
 };
 
 GfxResult gfxImGuiInitialize(GfxContext gfx, char const **font_filenames, uint32_t font_count, ImFontConfig const *font_configs, ImGuiConfigFlags flags)
@@ -597,4 +635,19 @@ bool gfxImGuiIsInitialized()
 {
     GfxImGuiInternal *gfx_imgui = GfxImGuiInternal::GetGfxImGui();
     return (gfx_imgui != nullptr ? true : false);
+}
+
+ImDrawCallback gfxImGuiGetOpaqueDrawCallback()
+{
+    return GfxImGuiInternal::GetOpaqueCallback();
+}
+
+ImDrawCallback gfxImGuiGetReverseAlphaDrawCallback()
+{
+    return GfxImGuiInternal::GetReverseAlphaCallback();
+}
+
+ImDrawCallback gfxImGuiGetNormalAlphaDrawCallback()
+{
+    return GfxImGuiInternal::GetNormalAlphaCallback();
 }
