@@ -272,41 +272,35 @@ public:
 
         if(work_area_width > width)
         {
-            window_rect.left  = work_area.left + (work_area_width - width) / 2;
-            window_rect.right = window_rect.left + width;
+            window_rect.left = work_area.left + (work_area_width - width) / 2;
         }
         else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
         {
             width = work_area_width;
-            window_rect.left  = work_area.left;
-            window_rect.right = window_rect.left + width;
+            window_rect.left = work_area.left;
         }
         else
         {
-            window_rect.left  = work_area.left;
-            window_rect.right = window_rect.left + width;
+            window_rect.left = work_area.left;
         }
 
         if(work_area_height > height)
         {
-            window_rect.top    = work_area.top + (work_area_height - height) / 2;
-            window_rect.bottom = window_rect.top + height;
+            window_rect.top = work_area.top + (work_area_height - height) / 2;
         }
         else if((flags_ & kGfxCreateWindowFlag_ShrinkToScreen) != 0)
         {
             height = work_area_height;
-            window_rect.top    = work_area.top;
-            window_rect.bottom = window_rect.top + height;
+            window_rect.top = work_area.top;
         }
         else
         {
             // Align to top of the work area
-            window_rect.top    = work_area.top;
-            window_rect.bottom = window_rect.top + height;
+            window_rect.top = work_area.top;
         }
 
-        SetWindowPos(window_, NULL, window_rect.left, window_rect.top, window_rect.right - window_rect.left,
-                     window_rect.bottom - window_rect.top, SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
+        SetWindowPos(window_, NULL, window_rect.left, window_rect.top, width, height,
+            SWP_NOZORDER | (creation ? SWP_NOACTIVATE : (SWP_FRAMECHANGED | SWP_SHOWWINDOW)));
     }
 
     inline void toggleFullscreen()
