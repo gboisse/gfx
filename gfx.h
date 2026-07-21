@@ -239,6 +239,7 @@ struct GfxRaytracingPrimitiveBatchElement
 };
 
 GfxResult gfxRaytracingPrimitiveBuildBatch(GfxContext context, GfxRaytracingPrimitiveBatchElement const* batch, size_t batch_size);
+GfxResult gfxRaytracingPrimitiveUpdateBatch(GfxContext context, GfxRaytracingPrimitiveBatchElement const* batch, size_t batch_size);
 
 GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
 GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
