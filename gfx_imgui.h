@@ -45,6 +45,10 @@ GfxResult gfxImGuiSetDPIScale(float scale);
 
 bool gfxImGuiIsInitialized();
 
+ImDrawCallback gfxImGuiGetOpaqueDrawCallback();
+ImDrawCallback gfxImGuiGetReverseAlphaDrawCallback();
+ImDrawCallback gfxImGuiGetNormalAlphaDrawCallback();
+
 #endif //! GFX_INCLUDE_GFX_IMGUI_H
 
 //!
