@@ -334,6 +334,7 @@ GfxResult gfxTopLevelAccelerationStructureRemoveInstance(GfxContext context, Gfx
 uint32_t gfxTopLevelAccelerationStructureGetInstanceCount(GfxContext context, GfxTopLevelAccelerationStructure tlas);
 GfxTopLevelAccelerationStructureInstance const* gfxTopLevelAccelerationStructureGetInstances(GfxContext context, GfxTopLevelAccelerationStructure tlas);
 
+GfxResult gfxTopLevelAccelerationStructureBuild(GfxContext context, GfxTopLevelAccelerationStructure tlas);
 GfxResult gfxTopLevelAccelerationStructureUpdate(GfxContext context, GfxTopLevelAccelerationStructure tlas);
 uint64_t gfxTopLevelAccelerationStructureGetDataSize(GfxContext context, GfxTopLevelAccelerationStructure tlas); // in bytes
 

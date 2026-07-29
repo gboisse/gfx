@@ -3551,7 +3551,7 @@ public:
         return top_level_acceleration_structures_[tlas].instances_.data();
     }
 
-    GfxResult topLevelAccelerationStructureUpdate(GfxTopLevelAccelerationStructure const &tlas)
+    GfxResult topLevelAccelerationStructureBuild(GfxTopLevelAccelerationStructure const &tlas, bool update)
     {
         if(dxr_device_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
@@ -3599,10 +3599,8 @@ public:
         tlas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
         tlas_inputs.NumDescs = instance_desc_count;
         tlas_inputs.InstanceDescs = gpu_addr;
-        // TODO: handle TLAS updates
-        //if(!gfx_acceleration_structure.needs_rebuild_ && gfx_acceleration_structure.bvh_buffer_)
-        //    tlas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
-        //gfx_acceleration_structure.needs_update_ = gfx_acceleration_structure.needs_rebuild_ = false;
+        if (update && gfx_acceleration_structure.bvh_buffer_)
+            tlas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_info = {};
         dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_info);
         uint64_t const scratch_data_size = GFX_MAX(tlas_info.ScratchDataSizeInBytes, tlas_info.UpdateScratchDataSizeInBytes);
@@ -11588,11 +11586,18 @@ GfxTopLevelAccelerationStructureInstance const* gfxTopLevelAccelerationStructure
     return gfx->topLevelAccelerationStructureGetInstances(tlas);
 }
 
+GfxResult gfxTopLevelAccelerationStructureBuild(GfxContext context, GfxTopLevelAccelerationStructure tlas)
+{
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->topLevelAccelerationStructureBuild(tlas, false);
+}
+
 GfxResult gfxTopLevelAccelerationStructureUpdate(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
     GfxInternal* gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->topLevelAccelerationStructureUpdate(tlas);
+    return gfx->topLevelAccelerationStructureBuild(tlas, true);
 }
 
 uint64_t gfxTopLevelAccelerationStructureGetDataSize(GfxContext context, GfxTopLevelAccelerationStructure tlas)
