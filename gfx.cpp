@@ -133,6 +133,7 @@ class GfxInternal
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
     uint32_t back_buffer_index_ = 0;
+    uint64_t finish_calls_counter_ = 0;
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
@@ -532,9 +533,12 @@ class GfxInternal
 
     struct BottomLevelAccelerationStructure
     {
-        uint32_t build_flags = 0;
+        uint32_t build_flags_ = 0;
         GfxBuffer bvh_buffer_ = {};
         uint64_t bvh_data_size_ = 0;
+        uint64_t finish_calls_state_ = 0; // Used to detect whether `finish()` was called in between build & compact operations
+        GfxBuffer bvh_compact_size_buffer_ = {};
+        GfxBuffer bvh_compact_size_readback_buffer_ = {};
         std::vector<GfxGeometry> geometries_;
     };
     GfxArray<BottomLevelAccelerationStructure> bottom_level_acceleration_structures_;
@@ -3329,6 +3333,39 @@ public:
         return bottom_level_acceleration_structures_[blas].geometries_.data();
     }
 
+    GfxResult bottomLevelAccelerationStructureCompact(GfxBottomLevelAccelerationStructure const &blas)
+    {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
+        if(!blas)
+            return kGfxResult_NoError;
+        if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot compact invalid bottom level acceleration structure object");
+        BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
+        bool const allow_compaction = (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Compact) != 0;
+        if(!allow_compaction)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Compaction is not allowed for this bottom level acceleration structure object");
+        if(gfx_blas.finish_calls_state_ >= finish_calls_counter_)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet. Please, call `gfxFinish()' and try again");
+        Buffer &dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
+        D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compacted_size_desc = {};
+        memcpy(&compacted_size_desc, dst.data_, sizeof(compacted_size_desc));
+        size_t const old_size = gfx_blas.bvh_buffer_.getSize();
+        if(compacted_size_desc.CompactedSizeInBytes == 0 || compacted_size_desc.CompactedSizeInBytes > old_size)
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Can't readback compacted bottom level acceleration structure size. Possible sync issue");
+        GfxBuffer compacted_buffer = createBuffer(compacted_size_desc.CompactedSizeInBytes, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+        Buffer const &gfx_compacted_buffer = buffers_[compacted_buffer];
+        Buffer const &gfx_original_bvh = buffers_[gfx_blas.bvh_buffer_];
+        compacted_buffer.setName(gfx_blas.bvh_buffer_.getName());
+        D3D12_GPU_VIRTUAL_ADDRESS const src_address = gfx_original_bvh.resource_->GetGPUVirtualAddress() + gfx_original_bvh.data_offset_;
+        D3D12_GPU_VIRTUAL_ADDRESS const dst_address = gfx_compacted_buffer.resource_->GetGPUVirtualAddress() + gfx_compacted_buffer.data_offset_;
+        dxr_command_list_->CopyRaytracingAccelerationStructure(dst_address, src_address, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_COPY_MODE_COMPACT);
+        destroyBuffer(gfx_blas.bvh_buffer_);
+        gfx_blas.bvh_buffer_ = compacted_buffer;
+        gfx_blas.bvh_data_size_ = gfx_blas.bvh_buffer_.getSize();
+        return kGfxResult_NoError;
+    }
+
     uint64_t getBottomLevelAccelerationStructureDataSize(GfxBottomLevelAccelerationStructure const& blas)
     {
         if(!blas.handle)
@@ -3348,8 +3385,12 @@ public:
             return kGfxResult_InvalidParameter;
         // Validate blas inputs
         for(uint32_t i = 0; i < batch_size; ++i)
+        {
             if(!bottom_level_acceleration_structure_handles_.has_handle(blases[i].handle))
                 return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
+            if(update && (bottom_level_acceleration_structures_[blases[i]].build_flags_ & kGfxBuildBottomLevelASFlag_Updateable) == 0)
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable bottom level acceleration structure object");
+        }
         std::vector<std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>> descs;
         descs.reserve(batch_size);
         std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> build_inputs;
@@ -3392,13 +3433,14 @@ public:
             barriers_before.push_back(make_before_transition(buffer));
             barriers_after.push_back(make_after_transition(buffer));
         };
+        constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         uint64_t scratch_size = 0u;
         for(uint32_t i = 0; i < batch_size; ++i)
         {
             GfxBottomLevelAccelerationStructure const& blas = blases[i];
             BottomLevelAccelerationStructure& gfx_blas = bottom_level_acceleration_structures_[blas];
             if(flags != nullptr)
-                gfx_blas.build_flags = flags[i];
+                gfx_blas.build_flags_ = flags[i];
             std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> blas_descs;
             blas_descs.reserve(gfx_blas.geometries_.size());
             for(size_t j = 0; j < gfx_blas.geometries_.size(); ++j)
@@ -3430,27 +3472,29 @@ public:
                     blas_descs.push_back(desc);
                 }
             }
+            bool const allow_compaction = (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Compact) != 0;
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
             blas_inputs.Type = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_BOTTOM_LEVEL;
             blas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_NONE;
             blas_inputs.NumDescs = static_cast<UINT>(blas_descs.size());
             blas_inputs.pGeometryDescs = blas_descs.data();
-            if((gfx_blas.build_flags & kGfxBuildBottomLevelASFlag_Compact) != 0)
+            if(allow_compaction)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION;
-            if((gfx_blas.build_flags & kGfxBuildBottomLevelASFlag_Updateable) != 0)
+            if((gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Updateable) != 0)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
-            if((gfx_blas.build_flags & kGfxBuildBottomLevelASFlag_FastTrace) != 0)
+            if((gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_FastTrace) != 0)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-            if((gfx_blas.build_flags & kGfxBuildBottomLevelASFlag_FastBuild) != 0)
+            if((gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_FastBuild) != 0)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
-            if((gfx_blas.build_flags & kGfxBuildBottomLevelASFlag_MinMemory) != 0)
+            if((gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_MinMemory) != 0)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
             if (update)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
             D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
             dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
             uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
-            uint64_t const scratch_data_size = GFX_ALIGN(blas_info.ScratchDataSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
+            uint64_t const data_size = (update ? blas_info.UpdateScratchDataSizeInBytes : blas_info.ScratchDataSizeInBytes);
+            uint64_t const scratch_data_size = GFX_ALIGN(data_size, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
             scratch_sizes.push_back(scratch_data_size);
             // Compute total scratch buffer size for batch build
             scratch_size += scratch_data_size;
@@ -3464,6 +3508,26 @@ public:
                 if(!bvh_buffer)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create bottom level acceleration structure buffer");
             }
+            if(allow_compaction)
+            {
+                if(!gfx_blas.bvh_compact_size_buffer_)
+                {
+                    gfx_blas.bvh_compact_size_buffer_ = createBuffer(compact_size, nullptr, kGfxCpuAccess_None);
+                    gfx_blas.bvh_compact_size_readback_buffer_ = createBuffer(compact_size, nullptr, kGfxCpuAccess_Read);
+                    // We could pass `D3D12_RESOURCE_STATE_UNORDERED_ACCESS` to `createBuffer` directly,
+                    // but then DX12 spams warnings about "Ignoring InitialState D3D12_RESOURCE_STATE_UNORDERED_ACCESS".
+                    // So, in order to suppress them, we do this.
+                    Buffer &buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
+                    transitionResource(buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS, kTransitionType_Implicit);
+                }
+            }
+            else if(gfx_blas.bvh_compact_size_buffer_)
+            {
+                destroyBuffer(gfx_blas.bvh_compact_size_buffer_);
+                destroyBuffer(gfx_blas.bvh_compact_size_readback_buffer_);
+                gfx_blas.bvh_compact_size_buffer_ = {};
+                gfx_blas.bvh_compact_size_readback_buffer_ = {};
+            }
             build_inputs.push_back(blas_inputs);
             descs.push_back(std::move(blas_descs));
         }
@@ -3475,6 +3539,7 @@ public:
         if(!barriers_before.empty())
             dxr_command_list_->ResourceBarrier(UINT(barriers_before.size()), barriers_before.data());
         uint64_t scratch_offset = 0u;
+        bool readback = false;
         for(uint32_t i = 0; i < batch_size; ++i)
         {
             GfxBottomLevelAccelerationStructure const& blas = blases[i];
@@ -3489,10 +3554,39 @@ public:
                 build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_ + scratch_offset;
             scratch_offset += scratch_sizes[i];
-            dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
+            D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC postbuild_desc = {};
+            bool const blas_compactable = (blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION) != 0;
+            if(blas_compactable)
+            {
+                Buffer& compact_size_buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
+                postbuild_desc.DestBuffer = compact_size_buffer.resource_->GetGPUVirtualAddress();
+                postbuild_desc.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
+            }
+            dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, blas_compactable ? 1 : 0, blas_compactable ? &postbuild_desc : nullptr);
+            if (blas_compactable)
+            {
+                Buffer &compact_size_buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
+                transitionResource(compact_size_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
+                readback = true;
+            }
         }
         if(!barriers_after.empty())
             dxr_command_list_->ResourceBarrier(UINT(barriers_after.size()), barriers_after.data());
+        if(readback)
+        {
+            submitPipelineBarriers();
+            for(uint32_t i = 0; i < batch_size; ++i)
+            {
+                if((build_inputs[i].Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION) == 0)
+                    continue;
+                GfxBottomLevelAccelerationStructure const &blas = blases[i];
+                BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
+                Buffer& dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
+                Buffer& src = buffers_[gfx_blas.bvh_compact_size_buffer_];
+                dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
+                gfx_blas.finish_calls_state_ = finish_calls_counter_;
+            }
+        }
         return kGfxResult_NoError;
     }
 
@@ -5746,6 +5840,7 @@ public:
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
         resetState();   // re-install state
         decayResourceState();
+        finish_calls_counter_++;
         return kGfxResult_NoError;
     }
 
@@ -6931,6 +7026,8 @@ private:
     void collect(BottomLevelAccelerationStructure const &blas)
     {
         destroyBuffer(blas.bvh_buffer_);
+        destroyBuffer(blas.bvh_compact_size_buffer_);
+        destroyBuffer(blas.bvh_compact_size_readback_buffer_);
     }
 
     void collect(TopLevelAccelerationStructureInstance const &)
