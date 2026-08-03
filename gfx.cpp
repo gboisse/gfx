@@ -3113,6 +3113,20 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
+    GfxGeometry createGeometryTriangles(GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
+    {
+        GfxGeometry geometry = {};
+        geometry.type = GfxGeometry::kType_Triangles;
+        geometry.handle = geometry_handles_.allocate_handle();
+        Geometry &gfx_geometry = geometries_.insert(geometry);
+        gfx_geometry.type_ = Geometry::kType_Triangles;
+        gfx_geometry.triangles_.index_buffer_ = {};
+        gfx_geometry.triangles_.index_stride_ = 0;
+        gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
+        gfx_geometry.triangles_.vertex_stride_ = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
+        return geometry;
+    }
+
     GfxGeometry createGeometryTriangles(GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
         GfxGeometry geometry = {};
@@ -3124,7 +3138,19 @@ public:
         uint32_t const index_stride = (index_buffer.stride == 2 ? 2 : 4);
         gfx_geometry.triangles_.index_stride_ = index_stride;
         gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
-        gfx_geometry.triangles_.vertex_stride_ = vertex_stride;
+        gfx_geometry.triangles_.vertex_stride_ = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
+        return geometry;
+    }
+
+    GfxGeometry createGeometryProcedural(GfxBuffer aabb_buffer, uint32_t aabb_stride)
+    {
+        GfxGeometry geometry = {};
+        geometry.type = GfxGeometry::kType_Procedural;
+        geometry.handle = geometry_handles_.allocate_handle();
+        Geometry &gfx_geometry = geometries_.insert(geometry);
+        gfx_geometry.type_ = Geometry::kType_Procedural;
+        gfx_geometry.procedural_.procedural_buffer_ = aabb_buffer;
+        gfx_geometry.procedural_.procedural_stride_ = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
         return geometry;
     }
 
@@ -3153,6 +3179,29 @@ public:
         gfx_geometry.triangles_.opaque = opaque;
         return kGfxResult_NoError;
     }
+    
+    GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
+    {
+        if(!geometry_handles_.has_handle(geometry.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update buffers on an invalid geometry object");
+        if(!buffer_handles_.has_handle(vertex_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update a geometry using an invalid vertex buffer object");
+        vertex_stride = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
+        if(vertex_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a geometry with a vertex buffer object of stride `0'");
+        if(vertex_buffer.size / vertex_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a geometry with a buffer object containing more than 4 billion vertices");
+        Geometry &gfx_geometry = geometries_[geometry];
+        if(gfx_geometry.type_ != Geometry::kType_Triangles)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-triangle geometry object");
+        destroyBuffer(gfx_geometry.triangles_.index_buffer_);
+        destroyBuffer(gfx_geometry.triangles_.vertex_buffer_);
+        gfx_geometry.triangles_.index_buffer_ = {};
+        gfx_geometry.triangles_.index_stride_ = 0;
+        gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
+        gfx_geometry.triangles_.vertex_stride_ = vertex_stride;
+        return kGfxResult_NoError;
+    }
 
     GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const& index_buffer, GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
     {
@@ -3179,6 +3228,26 @@ public:
         gfx_geometry.triangles_.index_stride_ = index_stride;
         gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
         gfx_geometry.triangles_.vertex_stride_ = vertex_stride;
+        return kGfxResult_NoError;
+    }
+
+    GfxResult updateGeometryProcedural(GfxGeometry const &geometry, GfxBuffer const &aabb_buffer, uint32_t aabb_stride)
+    {
+        if(!geometry_handles_.has_handle(geometry.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update buffers on an invalid geometry object");
+        if(!buffer_handles_.has_handle(aabb_buffer.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update a geometry using an invalid AABB buffer object");
+        aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
+        if (aabb_stride == 0)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a geometry with an AABB buffer object of stride `0'");
+        if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a geometry with a buffer object containing more than 4 billion AABBs");
+        Geometry &gfx_geometry = geometries_[geometry];
+        if(gfx_geometry.type_ != Geometry::kType_Procedural)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-procedural geometry object");
+        destroyBuffer(gfx_geometry.procedural_.procedural_buffer_);
+        gfx_geometry.procedural_.procedural_buffer_ = aabb_buffer;
+        gfx_geometry.procedural_.procedural_stride_ = aabb_stride;
         return kGfxResult_NoError;
     }
 
@@ -3221,9 +3290,49 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxResult bottomLevelAccelerationStructureRemoveGeometry(GfxBottomLevelAccelerationStructure const& blas, GfxGeometry const& geometry)
+    {
+        if(!blas || !geometry)
+            return kGfxResult_NoError;
+        if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot remove geometry from an invalid bottom level acceleration structure object");
+        if(!geometry_handles_.has_handle(geometry.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot remove invalid geometry object from a bottom level acceleration structure");
+        BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
+        gfx_blas.geometries_.erase(std::remove(gfx_blas.geometries_.begin(), gfx_blas.geometries_.end(), geometry), gfx_blas.geometries_.end());
+        return kGfxResult_NoError;
+    }
+
+    uint32_t bottomLevelAccelerationStructureGetGeometryCount(GfxBottomLevelAccelerationStructure const& blas)
+    {
+        if(!blas)
+            return 0;
+        if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter,
+                "Cannot get geometry count from an invalid bottom level acceleration structure object");
+            return 0;
+        }
+        return static_cast<uint32_t>(bottom_level_acceleration_structures_[blas].geometries_.size());
+    }
+
+    GfxGeometry const* bottomLevelAccelerationStructureGetGeometries(GfxBottomLevelAccelerationStructure const& blas)
+    {
+        if(!blas)
+            return nullptr;
+        if (!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter,
+                "Cannot get geometries from an invalid bottom level acceleration structure object");
+            return nullptr;
+        }
+        return bottom_level_acceleration_structures_[blas].geometries_.data();
+    }
+
     uint64_t getBottomLevelAccelerationStructureDataSize(GfxBottomLevelAccelerationStructure const& blas)
     {
-        if(dxr_device_ == nullptr || !blas.handle) return 0;
+        if(!blas.handle)
+            return 0;
         if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid bottom level acceleration structure object");
@@ -6826,7 +6935,7 @@ private:
 
     void collect(TopLevelAccelerationStructureInstance const &)
     {
-        // Nothing to do
+        // Nothing to collect
     }
 
     void collect(TopLevelAccelerationStructure const& tlas)
@@ -11355,10 +11464,12 @@ GfxResult gfxRaytracingPrimitiveUpdateProcedural(GfxContext context, GfxRaytraci
     return gfx->updateRaytracingPrimitiveProcedural(raytracing_primitive, aabb_buffer, aabb_stride);
 }
 
-GfxGeometry gfxCreateGeometryTriangles(GfxContext , GfxBuffer , uint32_t )
+GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
-    // TODO:
-    return {};
+    GfxGeometry const geometry = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return geometry;   // invalid context
+    return gfx->createGeometryTriangles(vertex_buffer, vertex_stride);
 }
 
 GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
@@ -11369,10 +11480,12 @@ GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer index_buffe
     return gfx->createGeometryTriangles(index_buffer, vertex_buffer, vertex_stride);
 }
 
-GfxGeometry gfxCreateGeometryProcedural(GfxContext , GfxBuffer , uint32_t )
+GfxGeometry gfxCreateGeometryProcedural(GfxContext context, GfxBuffer aabb_buffer, uint32_t aabb_stride)
 {
-    // TODO:
-    return {};
+    GfxGeometry const geometry = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if (!gfx) return geometry; // invalid context
+    return gfx->createGeometryProcedural(aabb_buffer, aabb_stride);
 }
 
 GfxResult gfxDestroyGeometry(GfxContext context, GfxGeometry geometry)
@@ -11389,10 +11502,11 @@ GfxResult gfxGeometrySetOpaque(GfxContext context, GfxGeometry geometry, bool op
     return gfx->geometrySetOpaque(geometry, opaque);
 }
 
-GfxResult gfxGeometryTrianglesUpdate(GfxContext , GfxGeometry , GfxBuffer , uint32_t )
+GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
-    // TODO:
-    return kGfxResult_InvalidParameter;
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->updateGeometryTriangles(geometry, vertex_buffer, vertex_stride);
 }
 
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
@@ -11402,10 +11516,11 @@ GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, G
     return gfx->updateGeometryTriangles(geometry, index_buffer, vertex_buffer, vertex_stride);
 }
 
-GfxResult gfxGeometryProceduralUpdate(GfxContext , GfxGeometry , GfxBuffer , uint32_t )
+GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride)
 {
-    // TODO:
-    return kGfxResult_InvalidParameter;
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->updateGeometryProcedural(geometry, aabb_buffer, aabb_stride);
 }
 
 GfxBottomLevelAccelerationStructure gfxCreateBottomLevelAccelerationStructure(GfxContext context)
@@ -11430,22 +11545,25 @@ GfxResult gfxBottomLevelAccelerationStructureAddGeometry(GfxContext context, Gfx
     return gfx->bottomLevelAccelerationStructureAddGeometry(blas, geometry);
 }
 
-GfxResult gfxBottomLevelAccelerationStructureRemoveGeometry(GfxContext , GfxBottomLevelAccelerationStructure , GfxGeometry )
+GfxResult gfxBottomLevelAccelerationStructureRemoveGeometry(GfxContext context, GfxBottomLevelAccelerationStructure blas, GfxGeometry geometry)
 {
-    // TODO:
-    return kGfxResult_InvalidParameter;
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->bottomLevelAccelerationStructureRemoveGeometry(blas, geometry);
 }
 
-uint32_t gfxBottomLevelAccelerationStructureGetGeometryCount(GfxContext , GfxBottomLevelAccelerationStructure )
+uint32_t gfxBottomLevelAccelerationStructureGetGeometryCount(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    // TODO:
-    return 0u;
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return 0u; // invalid context
+    return gfx->bottomLevelAccelerationStructureGetGeometryCount(blas);
 }
 
-GfxGeometry const* gfxBottomLevelAccelerationStructureGetGeometries(GfxContext , GfxBottomLevelAccelerationStructure )
+GfxGeometry const* gfxBottomLevelAccelerationStructureGetGeometries(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    // TODO:
-    return nullptr;
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return nullptr; // invalid context
+    return gfx->bottomLevelAccelerationStructureGetGeometries(blas);
 }
 
 GfxResult gfxBottomLevelAccelerationStructureBuild(GfxContext , GfxBottomLevelAccelerationStructure , GfxBuildBottomLevelASFlags )
@@ -11460,10 +11578,11 @@ GfxResult gfxBottomLevelAccelerationStructureUpdate(GfxContext , GfxBottomLevelA
     return kGfxResult_InvalidParameter;
 }
 
-GfxResult gfxBottomLevelAccelerationStructureCompact(GfxContext , GfxBottomLevelAccelerationStructure )
+GfxResult gfxBottomLevelAccelerationStructureCompact(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    // TODO:
-    return kGfxResult_InvalidParameter;
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->bottomLevelAccelerationStructureCompact(blas);
 }
 
 uint64_t gfxBottomLevelAccelerationStructureGetDataSize(GfxContext context, GfxBottomLevelAccelerationStructure blas)
