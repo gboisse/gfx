@@ -3117,7 +3117,7 @@ public:
         return buildRaytracingPrimitive(raytracing_primitive, gfx_raytracing_primitive, true);
     }
 
-    GfxGeometry createGeometryTriangles(GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
+    GfxGeometry createGeometryTriangles(GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
         GfxGeometry geometry = {};
         geometry.type = GfxGeometry::kType_Triangles;
@@ -3164,7 +3164,7 @@ public:
             return kGfxResult_NoError;
         if(!geometry_handles_.has_handle(geometry.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid geometry object");
-        Geometry const& gfx_geometry = geometries_[geometry];
+        Geometry const &gfx_geometry = geometries_[geometry];
         collect(gfx_geometry); // release resources
         geometries_.erase(geometry); // destroy geometry
         geometry_handles_.free_handle(geometry.handle);
@@ -3184,7 +3184,7 @@ public:
         return kGfxResult_NoError;
     }
     
-    GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
+    GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
         if(!geometry_handles_.has_handle(geometry.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update buffers on an invalid geometry object");
@@ -3207,7 +3207,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const& index_buffer, GfxBuffer const& vertex_buffer, uint32_t vertex_stride)
+    GfxResult updateGeometryTriangles(GfxGeometry const &geometry, GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, uint32_t vertex_stride)
     {
         if(!geometry_handles_.has_handle(geometry.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update buffers on an invalid geometry object");
@@ -3268,13 +3268,13 @@ public:
         return blas;
     }
 
-    GfxResult destroyBottomLevelAccelerationStructure(GfxBottomLevelAccelerationStructure const& blas)
+    GfxResult destroyBottomLevelAccelerationStructure(GfxBottomLevelAccelerationStructure const &blas)
     {
         if(!blas)
             return kGfxResult_NoError;
         if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid bottom level acceleration structure object");
-        BottomLevelAccelerationStructure const& gfx_blas = bottom_level_acceleration_structures_[blas];
+        BottomLevelAccelerationStructure const &gfx_blas = bottom_level_acceleration_structures_[blas];
         collect(gfx_blas); // release resources
         bottom_level_acceleration_structures_.erase(blas); // destroy blas
         bottom_level_acceleration_structure_handles_.free_handle(blas.handle);
@@ -3294,7 +3294,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult bottomLevelAccelerationStructureRemoveGeometry(GfxBottomLevelAccelerationStructure const& blas, GfxGeometry const& geometry)
+    GfxResult bottomLevelAccelerationStructureRemoveGeometry(GfxBottomLevelAccelerationStructure const &blas, GfxGeometry const &geometry)
     {
         if(!blas || !geometry)
             return kGfxResult_NoError;
@@ -3307,7 +3307,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    uint32_t bottomLevelAccelerationStructureGetGeometryCount(GfxBottomLevelAccelerationStructure const& blas)
+    uint32_t bottomLevelAccelerationStructureGetGeometryCount(GfxBottomLevelAccelerationStructure const &blas)
     {
         if(!blas)
             return 0;
@@ -3320,7 +3320,7 @@ public:
         return static_cast<uint32_t>(bottom_level_acceleration_structures_[blas].geometries_.size());
     }
 
-    GfxGeometry const* bottomLevelAccelerationStructureGetGeometries(GfxBottomLevelAccelerationStructure const& blas)
+    GfxGeometry const* bottomLevelAccelerationStructureGetGeometries(GfxBottomLevelAccelerationStructure const &blas)
     {
         if(!blas)
             return nullptr;
@@ -3403,7 +3403,7 @@ public:
             // Already in expected state, nothing to do
             if (*buffer.resource_state_ == D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
                 return;
-            ID3D12Resource* d3d_buffer = buffer.resource_;
+            ID3D12Resource *d3d_buffer = buffer.resource_;
             auto same_buffer = [d3d_buffer](D3D12_RESOURCE_BARRIER const &barrier) -> bool {
                 return barrier.Transition.pResource == d3d_buffer;
             };
@@ -3437,26 +3437,26 @@ public:
         uint64_t scratch_size = 0u;
         for(uint32_t i = 0; i < batch_size; ++i)
         {
-            GfxBottomLevelAccelerationStructure const& blas = blases[i];
-            BottomLevelAccelerationStructure& gfx_blas = bottom_level_acceleration_structures_[blas];
+            GfxBottomLevelAccelerationStructure const &blas = blases[i];
+            BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
             if(flags != nullptr)
                 gfx_blas.build_flags_ = flags[i];
             std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> blas_descs;
             blas_descs.reserve(gfx_blas.geometries_.size());
             for(size_t j = 0; j < gfx_blas.geometries_.size(); ++j)
             {
-                GfxGeometry const& geometry = gfx_blas.geometries_[j];
+                GfxGeometry const &geometry = gfx_blas.geometries_[j];
                 if(!geometry_handles_.has_handle(geometry.handle))
                     return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
-                Geometry const& gfx_geometry = geometries_[geometry];
+                Geometry const &gfx_geometry = geometries_[geometry];
                 if(gfx_geometry.type_ == Geometry::kType_Triangles)
                 {
                     D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
                     if(gfx_geometry.triangles_.opaque)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-                    Buffer& gfx_vertex_buffer = buffers_[gfx_geometry.triangles_.vertex_buffer_];
-                    Buffer* gfx_index_buffer = gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr;
+                    Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.triangles_.vertex_buffer_];
+                    Buffer *gfx_index_buffer = gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr;
                     if(gfx_index_buffer != nullptr)
                     {
                         desc.Triangles.IndexFormat = gfx_geometry.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
@@ -3499,7 +3499,7 @@ public:
             // Compute total scratch buffer size for batch build
             scratch_size += scratch_data_size;
             gfx_blas.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
-            GfxBuffer& bvh_buffer = gfx_blas.bvh_buffer_;
+            GfxBuffer &bvh_buffer = gfx_blas.bvh_buffer_;
             if(bvh_data_size > bvh_buffer.size)
             {
                 destroyBuffer(bvh_buffer);
@@ -3532,7 +3532,7 @@ public:
             descs.push_back(std::move(blas_descs));
         }
         GFX_TRY(allocateRaytracingScratch(scratch_size)); // ensure scratch is large enough
-        Buffer& gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
+        Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
         if(transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
             submitPipelineBarriers(); // ensure scratch is not in use
         GFX_ASSERT(dxr_command_list_ != nullptr); // should never happen
@@ -3542,10 +3542,10 @@ public:
         bool readback = false;
         for(uint32_t i = 0; i < batch_size; ++i)
         {
-            GfxBottomLevelAccelerationStructure const& blas = blases[i];
-            BottomLevelAccelerationStructure& gfx_blas = bottom_level_acceleration_structures_[blas];
-            GfxBuffer& bvh_buffer = gfx_blas.bvh_buffer_;
-            Buffer& gfx_buffer = buffers_[bvh_buffer];
+            GfxBottomLevelAccelerationStructure const &blas = blases[i];
+            BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
+            GfxBuffer &bvh_buffer = gfx_blas.bvh_buffer_;
+            Buffer &gfx_buffer = buffers_[bvh_buffer];
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS const &blas_inputs = build_inputs[i];
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
             build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
@@ -3558,7 +3558,7 @@ public:
             bool const blas_compactable = (blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION) != 0;
             if(blas_compactable)
             {
-                Buffer& compact_size_buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
+                Buffer &compact_size_buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
                 postbuild_desc.DestBuffer = compact_size_buffer.resource_->GetGPUVirtualAddress();
                 postbuild_desc.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
             }
@@ -3581,8 +3581,8 @@ public:
                     continue;
                 GfxBottomLevelAccelerationStructure const &blas = blases[i];
                 BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
-                Buffer& dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
-                Buffer& src = buffers_[gfx_blas.bvh_compact_size_buffer_];
+                Buffer &dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
+                Buffer &src = buffers_[gfx_blas.bvh_compact_size_buffer_];
                 dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
                 gfx_blas.finish_calls_state_ = finish_calls_counter_;
             }
@@ -3616,7 +3616,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxBottomLevelAccelerationStructure const* topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const& instance)
+    GfxBottomLevelAccelerationStructure const* topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance)
     {
         if(!instance)
             return nullptr;
@@ -3628,7 +3628,7 @@ public:
         return &top_level_acceleration_structure_instances_[instance].blas_;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const& instance, GfxBottomLevelAccelerationStructure const &blas)
+    GfxResult topLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance, GfxBottomLevelAccelerationStructure const &blas)
     {
         if(!instance || !blas)
             return kGfxResult_NoError;
@@ -3641,50 +3641,42 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetTransform(GfxTopLevelAccelerationStructureInstance const& instance, float const* row_major_4x4_transform)
+    GfxResult topLevelAccelerationStructureInstanceSetTransform(GfxTopLevelAccelerationStructureInstance const &instance, float const* row_major_4x4_transform)
     {
-        if (dxr_device_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set transform on an invalid top level acceleration structure instance object");
         if (row_major_4x4_transform == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot pass `nullptr' as the transform of a top level acceleration structure instance object");
-        TopLevelAccelerationStructureInstance& gfx_instance = top_level_acceleration_structure_instances_[instance];
+        TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         memcpy(gfx_instance.transform_, row_major_4x4_transform, sizeof(gfx_instance.transform_));
         return kGfxResult_NoError;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetInstanceID(GfxTopLevelAccelerationStructureInstance const& instance, uint32_t instance_id)
+    GfxResult topLevelAccelerationStructureInstanceSetInstanceID(GfxTopLevelAccelerationStructureInstance const &instance, uint32_t instance_id)
     {
-        if (dxr_device_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instanceID on an invalid top level acceleration structure instance object");
         if (instance_id >= (1u << 24))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set an instanceID that is greater than %u", (1u << 24) - 1);
-        TopLevelAccelerationStructureInstance& gfx_instance = top_level_acceleration_structure_instances_[instance];
+        TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         gfx_instance.instance_id_ = instance_id;
         return kGfxResult_NoError;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetInstanceMask(GfxTopLevelAccelerationStructureInstance const& instance, uint8_t instance_mask)
+    GfxResult topLevelAccelerationStructureInstanceSetInstanceMask(GfxTopLevelAccelerationStructureInstance const &instance, uint8_t instance_mask)
     {
-        if (dxr_device_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instance mask on an invalid top level acceleration structure instance object");
-        TopLevelAccelerationStructureInstance& gfx_instance = top_level_acceleration_structure_instances_[instance];
+        TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         gfx_instance.instance_mask_ = instance_mask;
         return kGfxResult_NoError;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxTopLevelAccelerationStructureInstance const& instance, uint32_t instance_contribution_to_hit_group_index)
+    GfxResult topLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxTopLevelAccelerationStructureInstance const &instance, uint32_t instance_contribution_to_hit_group_index)
     {
-        if (dxr_device_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instance contribution to hit group index on an invalid top level acceleration structure instance object");
-        TopLevelAccelerationStructureInstance& gfx_instance = top_level_acceleration_structure_instances_[instance];
+        TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         gfx_instance.instance_contribution_to_hit_group_index_ = instance_contribution_to_hit_group_index;
         return kGfxResult_NoError;
     }
@@ -3702,13 +3694,13 @@ public:
         return tlas;
     }
 
-    GfxResult destroyTopLevelAccelerationStructure(GfxTopLevelAccelerationStructure const& tlas)
+    GfxResult destroyTopLevelAccelerationStructure(GfxTopLevelAccelerationStructure const &tlas)
     {
         if(!tlas)
             return kGfxResult_NoError;
         if(!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid top level acceleration structure object");
-        TopLevelAccelerationStructure const& gfx_tlas = top_level_acceleration_structures_[tlas];
+        TopLevelAccelerationStructure const &gfx_tlas = top_level_acceleration_structures_[tlas];
         collect(gfx_tlas); // release resources
         top_level_acceleration_structures_.erase(tlas); // destroy tlas
         top_level_acceleration_structure_handles_.free_handle(tlas.handle);
@@ -3717,8 +3709,6 @@ public:
 
     GfxResult topLevelAccelerationStructureAddInstance(GfxTopLevelAccelerationStructure const &tlas, GfxTopLevelAccelerationStructureInstance const &instance)
     {
-        if(dxr_device_ == nullptr)
-            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!tlas || !instance)
             return kGfxResult_NoError;
         if(!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
@@ -3727,6 +3717,19 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot add invalid instance to a top level acceleration structure object");
         TopLevelAccelerationStructure &gfx_tlas = top_level_acceleration_structures_[tlas];
         gfx_tlas.instances_.push_back(instance);
+        return kGfxResult_NoError;
+    }
+
+    GfxResult topLevelAccelerationStructureRemoveInstance(GfxTopLevelAccelerationStructure const &tlas, GfxTopLevelAccelerationStructureInstance const &instance)
+    {
+        if(!tlas || !instance)
+            return kGfxResult_NoError;
+        if(!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot remove instance from an invalid top level acceleration structure object");
+        if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot remove invalid instance from a top level acceleration structure object");
+        TopLevelAccelerationStructure &gfx_tlas = top_level_acceleration_structures_[tlas];
+        gfx_tlas.instances_.erase(std::remove(gfx_tlas.instances_.begin(), gfx_tlas.instances_.end(), instance), gfx_tlas.instances_.end());
         return kGfxResult_NoError;
     }
 
@@ -11782,10 +11785,11 @@ GfxResult gfxTopLevelAccelerationStructureAddInstance(GfxContext context, GfxTop
     return gfx->topLevelAccelerationStructureAddInstance(tlas, instance);
 }
 
-GfxResult gfxTopLevelAccelerationStructureRemoveInstance(GfxContext , GfxTopLevelAccelerationStructure , GfxTopLevelAccelerationStructureInstance )
+GfxResult gfxTopLevelAccelerationStructureRemoveInstance(GfxContext context, GfxTopLevelAccelerationStructure tlas, GfxTopLevelAccelerationStructureInstance instance)
 {
-    // TODO:
-    return kGfxResult_InvalidParameter;
+    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->topLevelAccelerationStructureRemoveInstance(tlas, instance);
 }
 
 uint32_t gfxTopLevelAccelerationStructureGetInstanceCount(GfxContext context, GfxTopLevelAccelerationStructure tlas)

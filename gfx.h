@@ -273,7 +273,7 @@ GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, 
 
 //!
 //! Bottom level acceleration structure
-//! 
+//!
 
 enum GfxBuildBottomLevelASFlag
 {
@@ -301,8 +301,8 @@ GfxResult gfxBottomLevelAccelerationStructureUpdate(GfxContext context, GfxBotto
 GfxResult gfxBottomLevelAccelerationStructureCompact(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 uint64_t gfxBottomLevelAccelerationStructureGetDataSize(GfxContext context, GfxBottomLevelAccelerationStructure blas); // in bytes
 
-GfxResult gfxBottomLevelAccelerationStructureBatchBuild(GfxContext context, GfxBottomLevelAccelerationStructure const* blases, GfxBuildBottomLevelASFlags const* flags, uint32_t batch_size);
-GfxResult gfxBottomLevelAccelerationStructureBatchUpdate(GfxContext context, GfxBottomLevelAccelerationStructure const* blases, uint32_t batch_size);
+GfxResult gfxBottomLevelAccelerationStructureBatchBuild(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t batch_size);
+GfxResult gfxBottomLevelAccelerationStructureBatchUpdate(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t batch_size);
 
 //!
 //! Top level acceleration structure instance
@@ -315,14 +315,14 @@ GfxResult gfxDestroyTopLevelAccelerationStructureInstance(GfxContext context, Gf
 
 GfxBottomLevelAccelerationStructure const* gfxTopLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance);
 GfxResult gfxTopLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, GfxBottomLevelAccelerationStructure blas);
-GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const* row_major_4x4_transform);
+GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const *row_major_4x4_transform);
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceID(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_id); // retrieved through `ray_query.CommittedInstanceID()`
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceMask(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint8_t instance_mask);
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_contribution_to_hit_group_index);
 
-//! 
+//!
 //! Top level acceleration structure
-//! 
+//!
 
 class GfxTopLevelAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxTopLevelAccelerationStructure); public: };
 
