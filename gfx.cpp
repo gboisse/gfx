@@ -520,13 +520,13 @@ class GfxInternal
             GfxBuffer index_buffer_ = {};
             uint32_t vertex_stride_ = 0;
             GfxBuffer vertex_buffer_ = {};
-            bool opaque = false;
         } triangles_;
         struct
         {
             uint32_t procedural_stride_ = 0;
             GfxBuffer procedural_buffer_ = {};
         } procedural_;
+        bool opaque = false;
     };
     GfxArray<Geometry> geometries_;
     GfxHandles geometry_handles_;
@@ -3178,9 +3178,7 @@ public:
         if(!geometry_handles_.has_handle(geometry.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set opaque flag on an invalid geometry object");
         Geometry &gfx_geometry = geometries_[geometry];
-        if(gfx_geometry.type_ != Geometry::kType_Triangles)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set opaque flag on a non-triangles geometry object");
-        gfx_geometry.triangles_.opaque = opaque;
+        gfx_geometry.opaque = opaque;
         return kGfxResult_NoError;
     }
     
@@ -3326,8 +3324,7 @@ public:
             return nullptr;
         if (!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
         {
-            GFX_PRINT_ERROR(kGfxResult_InvalidParameter,
-                "Cannot get geometries from an invalid bottom level acceleration structure object");
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get geometries from an invalid bottom level acceleration structure object");
             return nullptr;
         }
         return bottom_level_acceleration_structures_[blas].geometries_.data();
@@ -3335,6 +3332,8 @@ public:
 
     GfxResult bottomLevelAccelerationStructureBuild(GfxBottomLevelAccelerationStructure const &blas, GfxBuildBottomLevelASFlags flags, bool update)
     {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!blas)
             return kGfxResult_NoError;
         if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
@@ -3356,13 +3355,13 @@ public:
             {
                 D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
                 desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-                if(gfx_geometry.triangles_.opaque)
+                if(gfx_geometry.opaque)
                     desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
                 Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.triangles_.vertex_buffer_];
-                Buffer *gfx_index_buffer = gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr;
+                Buffer *gfx_index_buffer = (gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr);
                 if(gfx_index_buffer != nullptr)
                 {
-                    desc.Triangles.IndexFormat = gfx_geometry.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+                    desc.Triangles.IndexFormat = (gfx_geometry.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT);
                     desc.Triangles.IndexCount = (uint32_t)(gfx_geometry.triangles_.index_buffer_.size / gfx_geometry.triangles_.index_stride_);
                     desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
                     transition |= transitionResource(*gfx_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
@@ -3510,6 +3509,8 @@ public:
 
     GfxResult bottomLevelAccelerationStructureBatchBuild(GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t batch_size, bool update)
     {
+        if(dxr_device_ == nullptr)
+            return kGfxResult_InvalidOperation; // avoid spamming console output
         if(blases == nullptr || (!update && flags == nullptr))
             return kGfxResult_InvalidParameter;
         // Validate blas inputs
@@ -3533,7 +3534,7 @@ public:
         {
             GfxBottomLevelAccelerationStructure const &blas = blases[i];
             BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
-            if(flags != nullptr)
+            if(!update && flags != nullptr)
                 gfx_blas.build_flags_ = flags[i];
             std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> blas_descs;
             blas_descs.reserve(gfx_blas.geometries_.size());
@@ -3547,7 +3548,7 @@ public:
                 {
                     D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-                    if(gfx_geometry.triangles_.opaque)
+                    if(gfx_geometry.opaque)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
                     Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.triangles_.vertex_buffer_];
                     Buffer *gfx_index_buffer = gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr;
