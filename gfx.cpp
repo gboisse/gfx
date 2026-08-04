@@ -3526,44 +3526,9 @@ public:
         build_inputs.reserve(batch_size);
         std::vector<size_t> scratch_sizes;
         scratch_sizes.reserve(batch_size);
-        std::vector<D3D12_RESOURCE_BARRIER> barriers_before;
-        std::vector<D3D12_RESOURCE_BARRIER> barriers_after;
-        auto add_buffer_transition = [&](Buffer const& buffer) {
-            // Already in expected state, nothing to do
-            if (*buffer.resource_state_ == D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE)
-                return;
-            ID3D12Resource *d3d_buffer = buffer.resource_;
-            auto same_buffer = [d3d_buffer](D3D12_RESOURCE_BARRIER const &barrier) -> bool {
-                return barrier.Transition.pResource == d3d_buffer;
-            };
-            auto it = std::find_if(barriers_before.begin(), barriers_before.end(), same_buffer);
-            if (it != barriers_before.end())
-                return;
-            auto make_before_transition = [](Buffer const& buffer) -> D3D12_RESOURCE_BARRIER {
-                D3D12_RESOURCE_BARRIER result = {};
-                result.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                result.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-                result.Transition.pResource = buffer.resource_;
-                result.Transition.StateBefore = *buffer.resource_state_;
-                result.Transition.StateAfter = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                result.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                return result;
-            };
-            auto make_after_transition = [](Buffer const& buffer) -> D3D12_RESOURCE_BARRIER {
-                D3D12_RESOURCE_BARRIER result = {};
-                result.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
-                result.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-                result.Transition.pResource = buffer.resource_;
-                result.Transition.StateBefore = D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE;
-                result.Transition.StateAfter = *buffer.resource_state_;
-                result.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
-                return result;
-            };
-            barriers_before.push_back(make_before_transition(buffer));
-            barriers_after.push_back(make_after_transition(buffer));
-        };
         constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         uint64_t scratch_size = 0u;
+        bool transition = false;
         for(uint32_t i = 0; i < batch_size; ++i)
         {
             GfxBottomLevelAccelerationStructure const &blas = blases[i];
@@ -3591,13 +3556,13 @@ public:
                         desc.Triangles.IndexFormat = gfx_geometry.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
                         desc.Triangles.IndexCount = (uint32_t)(gfx_geometry.triangles_.index_buffer_.size / gfx_geometry.triangles_.index_stride_);
                         desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
-                        add_buffer_transition(*gfx_index_buffer);
+                        transition |= transitionResource(*gfx_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                     }
                     desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
                     desc.Triangles.VertexCount = (uint32_t)(gfx_geometry.triangles_.vertex_buffer_.size / gfx_geometry.triangles_.vertex_stride_);
                     desc.Triangles.VertexBuffer.StartAddress = gfx_vertex_buffer.resource_->GetGPUVirtualAddress() + gfx_vertex_buffer.data_offset_;
                     desc.Triangles.VertexBuffer.StrideInBytes = gfx_geometry.triangles_.vertex_stride_;
-                    add_buffer_transition(gfx_vertex_buffer);
+                    transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                     blas_descs.push_back(desc);
                 }
             }
@@ -3662,11 +3627,10 @@ public:
         }
         GFX_TRY(allocateRaytracingScratch(scratch_size)); // ensure scratch is large enough
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
-        if(transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+        transition |= transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        if(transition)
             submitPipelineBarriers(); // ensure scratch is not in use
         GFX_ASSERT(dxr_command_list_ != nullptr); // should never happen
-        if(!barriers_before.empty())
-            dxr_command_list_->ResourceBarrier(UINT(barriers_before.size()), barriers_before.data());
         uint64_t scratch_offset = 0u;
         bool readback = false;
         for(uint32_t i = 0; i < batch_size; ++i)
@@ -3692,15 +3656,13 @@ public:
                 postbuild_desc.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
             }
             dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, blas_compactable ? 1 : 0, blas_compactable ? &postbuild_desc : nullptr);
-            if (blas_compactable)
+            if(blas_compactable)
             {
                 Buffer &compact_size_buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
                 transitionResource(compact_size_buffer, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
                 readback = true;
             }
         }
-        if(!barriers_after.empty())
-            dxr_command_list_->ResourceBarrier(UINT(barriers_after.size()), barriers_after.data());
         if(readback)
         {
             submitPipelineBarriers();
