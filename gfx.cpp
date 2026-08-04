@@ -543,6 +543,9 @@ class GfxInternal
     };
     GfxArray<BottomLevelAccelerationStructure> bottom_level_acceleration_structures_;
     GfxHandles bottom_level_acceleration_structure_handles_;
+    std::vector<std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>> batch_descs_;
+    std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> batch_build_inputs_;
+    std::vector<size_t> batch_scratch_sizes_;
 
     struct TopLevelAccelerationStructureInstance
     {
@@ -3373,6 +3376,21 @@ public:
                 transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                 descs.push_back(desc);
             }
+            else if(gfx_geometry.type_ == Geometry::kType_Procedural)
+            {
+                D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
+                desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+                if(gfx_geometry.opaque)
+                    desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+                Buffer &gfx_aabb_buffer = buffers_[gfx_geometry.procedural_.procedural_buffer_];
+                desc.AABBs.AABBCount = 1;
+                desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+                desc.AABBs.AABBs.StartAddress = gfx_aabb_buffer.resource_->GetGPUVirtualAddress() + gfx_aabb_buffer.data_offset_;
+                transition |= transitionResource(gfx_aabb_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+                descs.push_back(desc);
+            }
+            else
+                return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build bottom level acceleration structure with unknown geometry type");
         }
         bool const allow_compaction = (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Compact) != 0;
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
@@ -3513,7 +3531,6 @@ public:
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(blases == nullptr || (!update && flags == nullptr))
             return kGfxResult_InvalidParameter;
-        // Validate blas inputs
         for(uint32_t i = 0; i < batch_size; ++i)
         {
             if(!bottom_level_acceleration_structure_handles_.has_handle(blases[i].handle))
@@ -3521,12 +3538,12 @@ public:
             if(update && (bottom_level_acceleration_structures_[blases[i]].build_flags_ & kGfxBuildBottomLevelASFlag_Updateable) == 0)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable bottom level acceleration structure object");
         }
-        std::vector<std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>> descs;
-        descs.reserve(batch_size);
-        std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> build_inputs;
-        build_inputs.reserve(batch_size);
-        std::vector<size_t> scratch_sizes;
-        scratch_sizes.reserve(batch_size);
+        batch_descs_.reserve(batch_size);
+        batch_descs_.clear();
+        batch_build_inputs_.reserve(batch_size);
+        batch_build_inputs_.clear();
+        batch_scratch_sizes_.reserve(batch_size);
+        batch_scratch_sizes_.clear();
         constexpr size_t compact_size = sizeof(D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC);
         uint64_t scratch_size = 0u;
         bool transition = false;
@@ -3566,6 +3583,21 @@ public:
                     transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                     blas_descs.push_back(desc);
                 }
+                else if(gfx_geometry.type_ == Geometry::kType_Procedural)
+                {
+                    D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
+                    desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
+                    if(gfx_geometry.opaque)
+                        desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+                    Buffer &gfx_aabb_buffer = buffers_[gfx_geometry.procedural_.procedural_buffer_];
+                    desc.AABBs.AABBCount = 1;
+                    desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
+                    desc.AABBs.AABBs.StartAddress = gfx_aabb_buffer.resource_->GetGPUVirtualAddress() + gfx_aabb_buffer.data_offset_;
+                    transition |= transitionResource(gfx_aabb_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+                    blas_descs.push_back(desc);
+                }
+                else
+                    return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build bottom level acceleration structure with unknown geometry type");
             }
             bool const allow_compaction = (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Compact) != 0;
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS blas_inputs = {};
@@ -3590,7 +3622,7 @@ public:
             uint64_t const bvh_data_size = GFX_ALIGN(blas_info.ResultDataMaxSizeInBytes, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
             uint64_t const data_size = (update ? blas_info.UpdateScratchDataSizeInBytes : blas_info.ScratchDataSizeInBytes);
             uint64_t const scratch_data_size = GFX_ALIGN(data_size, D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BYTE_ALIGNMENT);
-            scratch_sizes.push_back(scratch_data_size);
+            batch_scratch_sizes_.push_back(scratch_data_size);
             // Compute total scratch buffer size for batch build
             scratch_size += scratch_data_size;
             gfx_blas.bvh_data_size_ = (uint64_t)blas_info.ResultDataMaxSizeInBytes;
@@ -3623,8 +3655,8 @@ public:
                 gfx_blas.bvh_compact_size_buffer_ = {};
                 gfx_blas.bvh_compact_size_readback_buffer_ = {};
             }
-            build_inputs.push_back(blas_inputs);
-            descs.push_back(std::move(blas_descs));
+            batch_build_inputs_.push_back(blas_inputs);
+            batch_descs_.push_back(std::move(blas_descs));
         }
         GFX_TRY(allocateRaytracingScratch(scratch_size)); // ensure scratch is large enough
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
@@ -3640,14 +3672,14 @@ public:
             BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
             GfxBuffer &bvh_buffer = gfx_blas.bvh_buffer_;
             Buffer &gfx_buffer = buffers_[bvh_buffer];
-            D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS const &blas_inputs = build_inputs[i];
+            D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS const &blas_inputs = batch_build_inputs_[i];
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
             build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             build_desc.Inputs = blas_inputs;
             if((blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
                 build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
             build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_ + scratch_offset;
-            scratch_offset += scratch_sizes[i];
+            scratch_offset += batch_scratch_sizes_[i];
             D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_DESC postbuild_desc = {};
             bool const blas_compactable = (blas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION) != 0;
             if(blas_compactable)
@@ -3669,7 +3701,7 @@ public:
             submitPipelineBarriers();
             for(uint32_t i = 0; i < batch_size; ++i)
             {
-                if((build_inputs[i].Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION) == 0)
+                if((batch_build_inputs_[i].Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_COMPACTION) == 0)
                     continue;
                 GfxBottomLevelAccelerationStructure const &blas = blases[i];
                 BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
