@@ -490,7 +490,7 @@ class GfxInternal
     struct TopLevelAccelerationStructureInstance
     {
         uint32_t index_ = 0;
-        float transform_[16] = {};
+        float transform_[12] = {};
         uint32_t instance_id_ = 0;
         uint8_t instance_mask_ = 0xFFu;
         uint32_t instance_contribution_to_hit_group_index_ = 0;
@@ -2921,14 +2921,14 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetTransform(GfxTopLevelAccelerationStructureInstance const &instance, float const* row_major_4x4_transform)
+    GfxResult topLevelAccelerationStructureInstanceSetTransform(GfxTopLevelAccelerationStructureInstance const &instance, float const* row_major_3x4_transform)
     {
         if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set transform on an invalid top level acceleration structure instance object");
-        if (row_major_4x4_transform == nullptr)
+        if (row_major_3x4_transform == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot pass `nullptr' as the transform of a top level acceleration structure instance object");
         TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
-        memcpy(gfx_instance.transform_, row_major_4x4_transform, sizeof(gfx_instance.transform_));
+        memcpy(gfx_instance.transform_, row_major_3x4_transform, sizeof(gfx_instance.transform_));
         return kGfxResult_NoError;
     }
 
@@ -3051,7 +3051,7 @@ public:
         D3D12_RAYTRACING_INSTANCE_DESC *instance_descs = (D3D12_RAYTRACING_INSTANCE_DESC *)data;
         uint32_t instance_desc_count = 0;
         if(gpu_addr == 0)
-            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate for updating acceleration structure object with %u raytracing primitives", (uint32_t)gfx_acceleration_structure.instances_.size());
+            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to allocate for updating top level acceleration structure object with %u instances", (uint32_t)gfx_acceleration_structure.instances_.size());
         for(size_t i = 0; i < gfx_acceleration_structure.instances_.size(); ++i)
         {
             auto const &instance = gfx_acceleration_structure.instances_[i];
@@ -3063,11 +3063,7 @@ public:
                 continue;   // no valid BVH memory, probably wasn't built
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
             Buffer const &gfx_buffer = buffers_[buffer];
-            for(uint32_t row = 0; row < 3; ++row)
-                for(uint32_t col = 0; col < 3; ++col)
-                    instance_desc.Transform[row][col] = gfx_instance.transform_[4 * row + col];
-            for(uint32_t j = 0; j < 3; ++j)
-                instance_desc.Transform[j][3] = gfx_instance.transform_[4 * j + 3];
+            memcpy(instance_desc.Transform, gfx_instance.transform_, sizeof(instance_desc.Transform));
             instance_desc.InstanceID = gfx_instance.instance_id_;
             instance_desc.InstanceMask = gfx_instance.instance_mask_;
             instance_desc.InstanceContributionToHitGroupIndex = gfx_instance.instance_contribution_to_hit_group_index_;
@@ -10565,11 +10561,11 @@ GfxResult gfxTopLevelAccelerationStructureInstanceSetBottomLevelAccelerationStru
     return gfx->topLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(instance, blas);
 }
 
-GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const* row_major_4x4_transform)
+GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const* row_major_3x4_transform)
 {
     GfxInternal* gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->topLevelAccelerationStructureInstanceSetTransform(instance, row_major_4x4_transform);
+    return gfx->topLevelAccelerationStructureInstanceSetTransform(instance, row_major_3x4_transform);
 }
 
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceID(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_id)
