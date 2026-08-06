@@ -237,13 +237,11 @@ GfxResult gfxBottomLevelAccelerationStructureRemoveGeometry(GfxContext context, 
 uint32_t gfxBottomLevelAccelerationStructureGetGeometryCount(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 GfxGeometry const* gfxBottomLevelAccelerationStructureGetGeometries(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 
-GfxResult gfxBottomLevelAccelerationStructureBuild(GfxContext context, GfxBottomLevelAccelerationStructure blas, GfxBuildBottomLevelASFlags flags);
-GfxResult gfxBottomLevelAccelerationStructureUpdate(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 GfxResult gfxBottomLevelAccelerationStructureCompact(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 uint64_t gfxBottomLevelAccelerationStructureGetDataSize(GfxContext context, GfxBottomLevelAccelerationStructure blas); // in bytes
 
-GfxResult gfxBottomLevelAccelerationStructureBatchBuild(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t batch_size);
-GfxResult gfxBottomLevelAccelerationStructureBatchUpdate(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t batch_size);
+GfxResult gfxBuildBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t blas_count);
+GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t blas_count);
 
 //!
 //! Top level acceleration structure instance
