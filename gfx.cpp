@@ -2683,7 +2683,7 @@ public:
 
     GfxResult bottomLevelAccelerationStructureBuild(GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t blas_count, bool update)
     {
-        if(dxr_device_ == nullptr)
+        if(dxr_device_ == nullptr || dxr_command_list_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(blases == nullptr || (!update && flags == nullptr))
             return kGfxResult_InvalidParameter;
@@ -2819,7 +2819,6 @@ public:
         transition |= transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
         if(transition)
             submitPipelineBarriers(); // ensure scratch is not in use
-        GFX_ASSERT(dxr_command_list_ != nullptr); // should never happen
         uint64_t scratch_offset = 0u;
         bool readback = false;
         for(uint32_t i = 0; i < blas_count; ++i)
@@ -3101,8 +3100,7 @@ public:
         GFX_ASSERT(buffer_handles_.has_handle(raytracing_scratch_buffer_.handle));
         Buffer &gfx_buffer = buffers_[gfx_acceleration_structure.bvh_buffer_];
         Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
-        // TODO:
-        //SetObjectName(gfx_buffer, acceleration_structure.name);
+        SetObjectName(gfx_buffer, tlas.getName());
         if(transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
             submitPipelineBarriers();   // ensure scratch is not in use
         D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
