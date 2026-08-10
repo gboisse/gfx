@@ -2636,6 +2636,8 @@ public:
             }
         }
         collect(gfx_raytracing_primitive);  // release resources
+        if(raytracing_primitive_compaction_indices_.has(raytracing_primitive))
+            raytracing_primitive_compaction_indices_.erase(raytracing_primitive);
         raytracing_primitives_.erase(raytracing_primitive); // destroy raytracing primitive
         raytracing_primitive_handles_.free_handle(raytracing_primitive.handle);
         return kGfxResult_NoError;
@@ -7516,7 +7518,8 @@ private:
         bool const allow_compaction = (gfx_raytracing_primitive.triangles_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Compact) != 0;
         if(!allow_compaction)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Compaction is not allowed for this primitive");
-        if(!raytracing_primitive_compaction_indices_.has(raytracing_primitive) || raytracing_primitive_compaction_indices_[raytracing_primitive] != 0xFFFFFFFFu)
+        uint32_t const *raytracing_primitive_compaction_index = raytracing_primitive_compaction_indices_.at(raytracing_primitive);
+        if(raytracing_primitive_compaction_index == nullptr || *raytracing_primitive_compaction_index != 0xFFFFFFFFu)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet");
         Buffer &dst = buffers_[gfx_raytracing_primitive.triangles_.bvh_compact_size_readback_buffer_];
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compact_size_desc{};
@@ -7546,7 +7549,8 @@ private:
         bool const allow_compaction = (gfx_raytracing_primitive.procedural_.build_flags_ & kGfxBuildRaytracingPrimitiveFlag_Compact) != 0;
         if(!allow_compaction)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Compaction is not allowed for this primitive");
-        if(!raytracing_primitive_compaction_indices_.has(raytracing_primitive) || raytracing_primitive_compaction_indices_[raytracing_primitive] != 0xFFFFFFFFu)
+        uint32_t const *raytracing_primitive_compaction_index = raytracing_primitive_compaction_indices_.at(raytracing_primitive);
+        if(raytracing_primitive_compaction_index == nullptr || *raytracing_primitive_compaction_index != 0xFFFFFFFFu)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet");
         Buffer &dst = buffers_[gfx_raytracing_primitive.procedural_.bvh_compact_size_readback_buffer_];
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compact_size_desc{};
