@@ -7727,7 +7727,7 @@ private:
             transitionResource(src, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
             submitPipelineBarriers();
             dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
-            raytracing_primitive_compaction_indices_[raytracing_primitive] = fence_index_;
+            raytracing_primitive_compaction_indices_.insert(raytracing_primitive, fence_index_);
         }
         return kGfxResult_NoError;
     }
@@ -7851,7 +7851,7 @@ private:
             transitionResource(src, D3D12_RESOURCE_STATE_COPY_SOURCE, kTransitionType_Implicit);
             submitPipelineBarriers();
             dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
-            raytracing_primitive_compaction_indices_[raytracing_primitive] = fence_index_;
+            raytracing_primitive_compaction_indices_.insert(raytracing_primitive, fence_index_);
         }
         return kGfxResult_NoError;
     }
