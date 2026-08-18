@@ -85,6 +85,8 @@ __declspec(dllexport) UINT GetD3D12SDKVersion()
 }
 }
 
+constexpr uint32_t blas_compaction_sentinel = 0xFFFFFFFFu;
+
 class GfxInternal
 {
     GFX_NON_COPYABLE(GfxInternal);
@@ -133,7 +135,6 @@ class GfxInternal
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
     uint32_t back_buffer_index_ = 0;
-    uint64_t finish_calls_counter_ = 0;
 
     GfxKernel bound_kernel_ = {};
     GfxBuffer draw_id_buffer_ = {};
@@ -476,13 +477,13 @@ class GfxInternal
         uint32_t build_flags_ = 0;
         GfxBuffer bvh_buffer_ = {};
         uint64_t bvh_data_size_ = 0;
-        uint64_t finish_calls_state_ = 0; // Used to detect whether `finish()` was called in between build & compact operations
         GfxBuffer bvh_compact_size_buffer_ = {};
         GfxBuffer bvh_compact_size_readback_buffer_ = {};
         std::vector<GfxGeometry> geometries_;
     };
     GfxArray<BottomLevelAccelerationStructure> bottom_level_acceleration_structures_;
     GfxHandles bottom_level_acceleration_structure_handles_;
+    GfxArray<uint32_t> blas_compaction_indices_;
     std::vector<std::vector<D3D12_RAYTRACING_GEOMETRY_DESC>> batch_descs_;
     std::vector<D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS> batch_build_inputs_;
     std::vector<size_t> batch_scratch_sizes_;
@@ -2579,6 +2580,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid bottom level acceleration structure object");
         BottomLevelAccelerationStructure const &gfx_blas = bottom_level_acceleration_structures_[blas];
         collect(gfx_blas); // release resources
+        if(blas_compaction_indices_.has(blas))
+            blas_compaction_indices_.erase(blas);
         bottom_level_acceleration_structures_.erase(blas); // destroy blas
         bottom_level_acceleration_structure_handles_.free_handle(blas.handle);
         return kGfxResult_NoError;
@@ -2627,7 +2630,7 @@ public:
     {
         if(!blas)
             return nullptr;
-        if (!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
+        if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get geometries from an invalid bottom level acceleration structure object");
             return nullptr;
@@ -2647,8 +2650,9 @@ public:
         bool const allow_compaction = (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Compact) != 0;
         if(!allow_compaction)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Compaction is not allowed for this bottom level acceleration structure object");
-        if(gfx_blas.finish_calls_state_ >= finish_calls_counter_)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet. Please, call `gfxFinish()' and try again");
+        uint32_t const *compaction_index = blas_compaction_indices_.at(blas);
+        if(compaction_index == nullptr || *compaction_index != blas_compaction_sentinel)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet.");
         Buffer &dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compacted_size_desc = {};
         memcpy(&compacted_size_desc, dst.data_, sizeof(compacted_size_desc));
@@ -2863,7 +2867,7 @@ public:
                 Buffer &dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
                 Buffer &src = buffers_[gfx_blas.bvh_compact_size_buffer_];
                 dxr_command_list_->CopyBufferRegion(dst.resource_, dst.data_offset_, src.resource_, src.data_offset_, compact_size);
-                gfx_blas.finish_calls_state_ = finish_calls_counter_;
+                blas_compaction_indices_.insert(blas, fence_index_);
             }
         }
         return kGfxResult_NoError;
@@ -5101,6 +5105,9 @@ public:
             decayResourceState();
         }
         constant_buffer_pool_cursors_[fence_index_] = 0;
+        for(uint32_t i = 0; i < blas_compaction_indices_.size(); ++i)
+            if(blas_compaction_indices_.data()[i] == fence_index_)
+                blas_compaction_indices_.data()[i] = blas_compaction_sentinel;
         resetState();   // re-install state
         return runGarbageCollection();
     }
@@ -5115,9 +5122,9 @@ public:
         GFX_TRY(sync());    // make sure GPU has gone through all pending work
         command_allocators_[fence_index_]->Reset();
         command_list_->Reset(command_allocators_[fence_index_], nullptr);
+        memset(blas_compaction_indices_.data(), blas_compaction_sentinel, blas_compaction_indices_.size() * sizeof(uint32_t));
         resetState();   // re-install state
         decayResourceState();
-        finish_calls_counter_++;
         return kGfxResult_NoError;
     }
 
