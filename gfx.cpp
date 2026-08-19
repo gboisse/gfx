@@ -2714,11 +2714,14 @@ public:
             return kGfxResult_InvalidParameter;
         for(uint32_t i = 0; i < blas_count; ++i)
         {
-            if(!bottom_level_acceleration_structure_handles_.has_handle(blases[i].handle))
+            GfxBottomLevelAccelerationStructure const &blas = blases[i];
+            if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
                 return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
-            if(update && (bottom_level_acceleration_structures_[blases[i]].build_flags_ & kGfxBuildBottomLevelASFlag_Updateable) == 0)
-                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable bottom level acceleration structure object");
             BottomLevelAccelerationStructure const &gfx_blas = bottom_level_acceleration_structures_[blases[i]];
+            if(update && (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Updateable) == 0)
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable bottom level acceleration structure object");
+            if(update && gfx_blas.state_ != BottomLevelAccelerationStructure::kState_Built)
+                return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a bottom level acceleration structure object that has not yet been built");
             for(GfxGeometry const &geometry : gfx_blas.geometries_)
                 if(!geometry_handles_.has_handle(geometry.handle))
                     return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
