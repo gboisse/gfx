@@ -474,6 +474,15 @@ class GfxInternal
 
     struct BottomLevelAccelerationStructure
     {
+        enum
+        {
+            kState_NeedBuild = 0,
+            kState_Built,
+            kState_Compacted,
+
+            kState_Count
+        } state_ = kState_NeedBuild;
+
         uint32_t build_flags_ = 0;
         GfxBuffer bvh_buffer_ = {};
         uint64_t bvh_data_size_ = 0;
@@ -2597,6 +2606,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot add invalid geometry object to a bottom level acceleration structure");
         BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
         gfx_blas.geometries_.push_back(geometry);
+        gfx_blas.state_ = BottomLevelAccelerationStructure::kState_NeedBuild;
         return kGfxResult_NoError;
     }
 
@@ -2610,6 +2620,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot remove invalid geometry object from a bottom level acceleration structure");
         BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
         gfx_blas.geometries_.erase(std::remove(gfx_blas.geometries_.begin(), gfx_blas.geometries_.end(), geometry), gfx_blas.geometries_.end());
+        gfx_blas.state_ = BottomLevelAccelerationStructure::kState_NeedBuild;
         return kGfxResult_NoError;
     }
 
@@ -2647,6 +2658,10 @@ public:
         if(!bottom_level_acceleration_structure_handles_.has_handle(blas.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot compact invalid bottom level acceleration structure object");
         BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
+        if(gfx_blas.state_ == BottomLevelAccelerationStructure::kState_Compacted)
+            return kGfxResult_NoError;
+        if(gfx_blas.state_ != BottomLevelAccelerationStructure::kState_Built)
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot compact bottom level acceleration structure object that has not yet been built");
         bool const allow_compaction = (gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_Compact) != 0;
         if(!allow_compaction)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Compaction is not allowed for this bottom level acceleration structure object");
@@ -2669,6 +2684,7 @@ public:
         destroyBuffer(gfx_blas.bvh_buffer_);
         gfx_blas.bvh_buffer_ = compacted_buffer;
         gfx_blas.bvh_data_size_ = gfx_blas.bvh_buffer_.getSize();
+        gfx_blas.state_ = BottomLevelAccelerationStructure::kState_Compacted;
         return kGfxResult_NoError;
     }
 
@@ -2681,8 +2697,13 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get the data size of an invalid bottom level acceleration structure object");
             return 0;
         }
-
-        return bottom_level_acceleration_structures_[blas].bvh_data_size_;
+        BottomLevelAccelerationStructure const &gfx_blas = bottom_level_acceleration_structures_[blas];
+        if((gfx_blas.state_ != BottomLevelAccelerationStructure::kState_Built) && (gfx_blas.state_ != BottomLevelAccelerationStructure::kState_Compacted))
+        {
+            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get the data size of bottom level acceleration structure that has not yet been built");
+            return 0;
+        }
+        return gfx_blas.bvh_data_size_;
     }
 
     GfxResult bottomLevelAccelerationStructureBuild(GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t blas_count, bool update)
@@ -2697,6 +2718,10 @@ public:
                 return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
             if(update && (bottom_level_acceleration_structures_[blases[i]].build_flags_ & kGfxBuildBottomLevelASFlag_Updateable) == 0)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-updateable bottom level acceleration structure object");
+            BottomLevelAccelerationStructure const &gfx_blas = bottom_level_acceleration_structures_[blases[i]];
+            for(GfxGeometry const &geometry : gfx_blas.geometries_)
+                if(!geometry_handles_.has_handle(geometry.handle))
+                    return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
         }
         batch_descs_.reserve(blas_count);
         batch_descs_.clear();
@@ -2718,8 +2743,6 @@ public:
             for(size_t j = 0; j < gfx_blas.geometries_.size(); ++j)
             {
                 GfxGeometry const &geometry = gfx_blas.geometries_[j];
-                if(!geometry_handles_.has_handle(geometry.handle))
-                    return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
                 Geometry const &gfx_geometry = geometries_[geometry];
                 if(gfx_geometry.type_ == Geometry::kType_Triangles)
                 {
@@ -2848,6 +2871,7 @@ public:
                 postbuild_desc.InfoType = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE;
             }
             dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, blas_compactable ? 1 : 0, blas_compactable ? &postbuild_desc : nullptr);
+            gfx_blas.state_ = BottomLevelAccelerationStructure::kState_Built;
             if(blas_compactable)
             {
                 Buffer &compact_size_buffer = buffers_[gfx_blas.bvh_compact_size_buffer_];
@@ -6283,7 +6307,7 @@ private:
         // Nothing to collect
     }
 
-    void collect(TopLevelAccelerationStructure const& tlas)
+    void collect(TopLevelAccelerationStructure const &tlas)
     {
         destroyBuffer(tlas.bvh_buffer_);
     }
