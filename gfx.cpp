@@ -3069,7 +3069,7 @@ public:
 
     GfxResult topLevelAccelerationStructureBuild(GfxTopLevelAccelerationStructure const &tlas, bool update)
     {
-        if(dxr_device_ == nullptr)
+        if(dxr_device_ == nullptr || dxr_command_list_ == nullptr)
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(!tlas)
             return kGfxResult_NoError;
@@ -3140,7 +3140,6 @@ public:
         if((tlas_inputs.Flags & D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE) != 0)
             build_desc.SourceAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
         build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
-        GFX_ASSERT(dxr_command_list_ != nullptr);   // should never happen
         dxr_command_list_->BuildRaytracingAccelerationStructure(&build_desc, 0, nullptr);
         return kGfxResult_NoError;
     }
