@@ -453,20 +453,23 @@ class GfxInternal
             kType_Procedural,
 
             kType_Count
-        } type_;
+        } type_ = kType_Count;
 
-        struct
+        union
         {
-            uint32_t index_stride_ = 0;
-            GfxBuffer index_buffer_ = {};
-            uint32_t vertex_stride_ = 0;
-            GfxBuffer vertex_buffer_ = {};
-        } triangles_;
-        struct
-        {
-            uint32_t procedural_stride_ = 0;
-            GfxBuffer procedural_buffer_ = {};
-        } procedural_;
+            struct
+            {
+                uint32_t index_stride_ = 0;
+                GfxBuffer index_buffer_ = {};
+                uint32_t vertex_stride_ = 0;
+                GfxBuffer vertex_buffer_ = {};
+            } triangles_;
+            struct
+            {
+                uint32_t procedural_stride_ = 0;
+                GfxBuffer procedural_buffer_ = {};
+            } procedural_;
+        } data_ = {};
         bool opaque = false;
     };
     GfxArray<Geometry> geometries_;
@@ -2439,10 +2442,10 @@ public:
         geometry.handle = geometry_handles_.allocate_handle();
         Geometry &gfx_geometry = geometries_.insert(geometry);
         gfx_geometry.type_ = Geometry::kType_Triangles;
-        gfx_geometry.triangles_.index_buffer_ = {};
-        gfx_geometry.triangles_.index_stride_ = 0;
-        gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
-        gfx_geometry.triangles_.vertex_stride_ = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
+        gfx_geometry.data_.triangles_.index_buffer_ = {};
+        gfx_geometry.data_.triangles_.index_stride_ = 0;
+        gfx_geometry.data_.triangles_.vertex_buffer_ = vertex_buffer;
+        gfx_geometry.data_.triangles_.vertex_stride_ = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
         return geometry;
     }
 
@@ -2453,11 +2456,11 @@ public:
         geometry.handle = geometry_handles_.allocate_handle();
         Geometry &gfx_geometry = geometries_.insert(geometry);
         gfx_geometry.type_ = Geometry::kType_Triangles;
-        gfx_geometry.triangles_.index_buffer_ = index_buffer;
+        gfx_geometry.data_.triangles_.index_buffer_ = index_buffer;
         uint32_t const index_stride = (index_buffer.stride == 2 ? 2 : 4);
-        gfx_geometry.triangles_.index_stride_ = index_stride;
-        gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
-        gfx_geometry.triangles_.vertex_stride_ = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
+        gfx_geometry.data_.triangles_.index_stride_ = index_stride;
+        gfx_geometry.data_.triangles_.vertex_buffer_ = vertex_buffer;
+        gfx_geometry.data_.triangles_.vertex_stride_ = (vertex_stride != 0 ? vertex_stride : vertex_buffer.stride);
         return geometry;
     }
 
@@ -2468,8 +2471,8 @@ public:
         geometry.handle = geometry_handles_.allocate_handle();
         Geometry &gfx_geometry = geometries_.insert(geometry);
         gfx_geometry.type_ = Geometry::kType_Procedural;
-        gfx_geometry.procedural_.procedural_buffer_ = aabb_buffer;
-        gfx_geometry.procedural_.procedural_stride_ = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
+        gfx_geometry.data_.procedural_.procedural_buffer_ = aabb_buffer;
+        gfx_geometry.data_.procedural_.procedural_stride_ = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
         return geometry;
     }
 
@@ -2511,12 +2514,12 @@ public:
         Geometry &gfx_geometry = geometries_[geometry];
         if(gfx_geometry.type_ != Geometry::kType_Triangles)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-triangle geometry object");
-        destroyBuffer(gfx_geometry.triangles_.index_buffer_);
-        destroyBuffer(gfx_geometry.triangles_.vertex_buffer_);
-        gfx_geometry.triangles_.index_buffer_ = {};
-        gfx_geometry.triangles_.index_stride_ = 0;
-        gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
-        gfx_geometry.triangles_.vertex_stride_ = vertex_stride;
+        destroyBuffer(gfx_geometry.data_.triangles_.index_buffer_);
+        destroyBuffer(gfx_geometry.data_.triangles_.vertex_buffer_);
+        gfx_geometry.data_.triangles_.index_buffer_ = {};
+        gfx_geometry.data_.triangles_.index_stride_ = 0;
+        gfx_geometry.data_.triangles_.vertex_buffer_ = vertex_buffer;
+        gfx_geometry.data_.triangles_.vertex_stride_ = vertex_stride;
         return kGfxResult_NoError;
     }
 
@@ -2539,12 +2542,12 @@ public:
         Geometry &gfx_geometry = geometries_[geometry];
         if(gfx_geometry.type_ != Geometry::kType_Triangles)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-triangle geometry object");
-        destroyBuffer(gfx_geometry.triangles_.index_buffer_);
-        destroyBuffer(gfx_geometry.triangles_.vertex_buffer_);
-        gfx_geometry.triangles_.index_buffer_ = index_buffer;
-        gfx_geometry.triangles_.index_stride_ = index_stride;
-        gfx_geometry.triangles_.vertex_buffer_ = vertex_buffer;
-        gfx_geometry.triangles_.vertex_stride_ = vertex_stride;
+        destroyBuffer(gfx_geometry.data_.triangles_.index_buffer_);
+        destroyBuffer(gfx_geometry.data_.triangles_.vertex_buffer_);
+        gfx_geometry.data_.triangles_.index_buffer_ = index_buffer;
+        gfx_geometry.data_.triangles_.index_stride_ = index_stride;
+        gfx_geometry.data_.triangles_.vertex_buffer_ = vertex_buffer;
+        gfx_geometry.data_.triangles_.vertex_stride_ = vertex_stride;
         return kGfxResult_NoError;
     }
 
@@ -2562,9 +2565,9 @@ public:
         Geometry &gfx_geometry = geometries_[geometry];
         if(gfx_geometry.type_ != Geometry::kType_Procedural)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a non-procedural geometry object");
-        destroyBuffer(gfx_geometry.procedural_.procedural_buffer_);
-        gfx_geometry.procedural_.procedural_buffer_ = aabb_buffer;
-        gfx_geometry.procedural_.procedural_stride_ = aabb_stride;
+        destroyBuffer(gfx_geometry.data_.procedural_.procedural_buffer_);
+        gfx_geometry.data_.procedural_.procedural_buffer_ = aabb_buffer;
+        gfx_geometry.data_.procedural_.procedural_stride_ = aabb_stride;
         return kGfxResult_NoError;
     }
 
@@ -2753,19 +2756,19 @@ public:
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
                     if(gfx_geometry.opaque)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-                    Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.triangles_.vertex_buffer_];
-                    Buffer *gfx_index_buffer = gfx_geometry.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.triangles_.index_buffer_] : nullptr;
+                    Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.data_.triangles_.vertex_buffer_];
+                    Buffer *gfx_index_buffer = gfx_geometry.data_.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.data_.triangles_.index_buffer_] : nullptr;
                     if(gfx_index_buffer != nullptr)
                     {
-                        desc.Triangles.IndexFormat = gfx_geometry.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
-                        desc.Triangles.IndexCount = (uint32_t)(gfx_geometry.triangles_.index_buffer_.size / gfx_geometry.triangles_.index_stride_);
+                        desc.Triangles.IndexFormat = gfx_geometry.data_.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+                        desc.Triangles.IndexCount = (uint32_t)(gfx_geometry.data_.triangles_.index_buffer_.size / gfx_geometry.data_.triangles_.index_stride_);
                         desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
                         transition |= transitionResource(*gfx_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                     }
                     desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-                    desc.Triangles.VertexCount = (uint32_t)(gfx_geometry.triangles_.vertex_buffer_.size / gfx_geometry.triangles_.vertex_stride_);
+                    desc.Triangles.VertexCount = (uint32_t)(gfx_geometry.data_.triangles_.vertex_buffer_.size / gfx_geometry.data_.triangles_.vertex_stride_);
                     desc.Triangles.VertexBuffer.StartAddress = gfx_vertex_buffer.resource_->GetGPUVirtualAddress() + gfx_vertex_buffer.data_offset_;
-                    desc.Triangles.VertexBuffer.StrideInBytes = gfx_geometry.triangles_.vertex_stride_;
+                    desc.Triangles.VertexBuffer.StrideInBytes = gfx_geometry.data_.triangles_.vertex_stride_;
                     transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                     blas_descs.push_back(desc);
                 }
@@ -2775,7 +2778,7 @@ public:
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
                     if(gfx_geometry.opaque)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-                    Buffer &gfx_aabb_buffer = buffers_[gfx_geometry.procedural_.procedural_buffer_];
+                    Buffer &gfx_aabb_buffer = buffers_[gfx_geometry.data_.procedural_.procedural_buffer_];
                     desc.AABBs.AABBCount = 1;
                     desc.AABBs.AABBs.StrideInBytes = sizeof(D3D12_RAYTRACING_AABB);
                     desc.AABBs.AABBs.StartAddress = gfx_aabb_buffer.resource_->GetGPUVirtualAddress() + gfx_aabb_buffer.data_offset_;
@@ -6285,11 +6288,11 @@ private:
         switch(geometry.type_)
         {
         case Geometry::kType_Triangles:
-            destroyBuffer(geometry.triangles_.index_buffer_);
-            destroyBuffer(geometry.triangles_.vertex_buffer_);
+            destroyBuffer(geometry.data_.triangles_.index_buffer_);
+            destroyBuffer(geometry.data_.triangles_.vertex_buffer_);
             break;
         case Geometry::kType_Procedural:
-            destroyBuffer(geometry.procedural_.procedural_buffer_);
+            destroyBuffer(geometry.data_.procedural_.procedural_buffer_);
             break;
         default:
             GFX_ASSERTMSG(0, "An invalid geometry type was supplied");
