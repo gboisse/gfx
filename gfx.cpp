@@ -85,7 +85,7 @@ __declspec(dllexport) UINT GetD3D12SDKVersion()
 }
 }
 
-constexpr uint32_t blas_compaction_sentinel = 0xFFFFFFFFu;
+constexpr uint32_t const blas_compaction_sentinel = 0xFFFFFFFFu;
 
 class GfxInternal
 {
@@ -775,9 +775,9 @@ class GfxInternal
             uint32_t getNumDescriptors() const noexcept
             {
                 uint32_t descriptor_count = descriptor_count_;
-                if (bindless_)
+                if(bindless_)
                 {
-                    switch (parameter_->type_)
+                    switch(parameter_->type_)
                     {
                     case Program::Parameter::Type::kType_Buffer:
                         descriptor_count = parameter_->data_.buffer_.buffer_count;
@@ -2558,7 +2558,7 @@ public:
         if(!buffer_handles_.has_handle(aabb_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot update a geometry using an invalid AABB buffer object");
         aabb_stride = (aabb_stride != 0 ? aabb_stride : aabb_buffer.stride);
-        if (aabb_stride == 0)
+        if(aabb_stride == 0)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a geometry with an AABB buffer object of stride `0'");
         if(aabb_buffer.size / aabb_stride > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a geometry with a buffer object containing more than 4 billion AABBs");
@@ -2804,7 +2804,7 @@ public:
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_BUILD;
             if((gfx_blas.build_flags_ & kGfxBuildBottomLevelASFlag_MinMemory) != 0)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_MINIMIZE_MEMORY;
-            if (update)
+            if(update)
                 blas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
             D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO blas_info = {};
             dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&blas_inputs, &blas_info);
@@ -2954,11 +2954,11 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult topLevelAccelerationStructureInstanceSetTransform(GfxTopLevelAccelerationStructureInstance const &instance, float const* row_major_3x4_transform)
+    GfxResult topLevelAccelerationStructureInstanceSetTransform(GfxTopLevelAccelerationStructureInstance const &instance, float const *row_major_3x4_transform)
     {
-        if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
+        if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set transform on an invalid top level acceleration structure instance object");
-        if (row_major_3x4_transform == nullptr)
+        if(row_major_3x4_transform == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot pass `nullptr' as the transform of a top level acceleration structure instance object");
         TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         memcpy(gfx_instance.transform_, row_major_3x4_transform, sizeof(gfx_instance.transform_));
@@ -2967,9 +2967,9 @@ public:
 
     GfxResult topLevelAccelerationStructureInstanceSetInstanceID(GfxTopLevelAccelerationStructureInstance const &instance, uint32_t instance_id)
     {
-        if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
+        if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instanceID on an invalid top level acceleration structure instance object");
-        if (instance_id >= (1u << 24))
+        if(instance_id >= (1u << 24))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set an instanceID that is greater than %u", (1u << 24) - 1);
         TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         gfx_instance.instance_id_ = instance_id;
@@ -2978,7 +2978,7 @@ public:
 
     GfxResult topLevelAccelerationStructureInstanceSetInstanceMask(GfxTopLevelAccelerationStructureInstance const &instance, uint8_t instance_mask)
     {
-        if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
+        if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instance mask on an invalid top level acceleration structure instance object");
         TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         gfx_instance.instance_mask_ = instance_mask;
@@ -2987,7 +2987,7 @@ public:
 
     GfxResult topLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxTopLevelAccelerationStructureInstance const &instance, uint32_t instance_contribution_to_hit_group_index)
     {
-        if (!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
+        if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set instance contribution to hit group index on an invalid top level acceleration structure instance object");
         TopLevelAccelerationStructureInstance &gfx_instance = top_level_acceleration_structure_instances_[instance];
         gfx_instance.instance_contribution_to_hit_group_index_ = instance_contribution_to_hit_group_index;
@@ -3050,7 +3050,7 @@ public:
     {
         if(!tlas)
             return 0u;
-        if (!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
+        if(!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get instance count from an invalid top level acceleration structure object");
             return 0u;
@@ -3058,11 +3058,11 @@ public:
         return static_cast<uint32_t>(top_level_acceleration_structures_[tlas].instances_.size());
     }
 
-    GfxTopLevelAccelerationStructureInstance const* topLevelAccelerationStructureGetInstances(GfxTopLevelAccelerationStructure const &tlas)
+    GfxTopLevelAccelerationStructureInstance const *topLevelAccelerationStructureGetInstances(GfxTopLevelAccelerationStructure const &tlas)
     {
         if(!tlas)
             return nullptr;
-        if (!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
+        if(!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get instances from an invalid top level acceleration structure object");
             return nullptr;
@@ -3114,7 +3114,7 @@ public:
         tlas_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_ALLOW_UPDATE;
         tlas_inputs.NumDescs = instance_desc_count;
         tlas_inputs.InstanceDescs = gpu_addr;
-        if (update && gfx_acceleration_structure.bvh_buffer_)
+        if(update && gfx_acceleration_structure.bvh_buffer_)
             tlas_inputs.Flags |= D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PERFORM_UPDATE;
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO tlas_info = {};
         dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&tlas_inputs, &tlas_info);
@@ -6296,7 +6296,7 @@ private:
             break;
         default:
             GFX_ASSERTMSG(0, "An invalid geometry type was supplied");
-            break;                
+            break;
         }
     }
 
@@ -7244,7 +7244,7 @@ private:
                 command_list_->RSSetScissorRects(1, &scissor_rect);
             }
             D3D_PRIMITIVE_TOPOLOGY primitive_topology = D3D_PRIMITIVE_TOPOLOGY_UNDEFINED;
-            switch (kernel.draw_state_.primitive_topology_type_)
+            switch(kernel.draw_state_.primitive_topology_type_)
             {
             case D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST; break;
             case D3D12_PRIMITIVE_TOPOLOGY_TYPE_LINE: primitive_topology = D3D_PRIMITIVE_TOPOLOGY_LINELIST; break;
@@ -7757,12 +7757,12 @@ private:
         return kGfxResult_NoError;
     }
 
-    GfxBuffer const& getTopLevelAccelerationStructureInstanceBuffer(TopLevelAccelerationStructureInstance const& instance)
+    GfxBuffer const &getTopLevelAccelerationStructureInstanceBuffer(TopLevelAccelerationStructureInstance const &instance)
     {
         static GfxBuffer const invalid_buffer = {};
         if(!bottom_level_acceleration_structure_handles_.has_handle(instance.blas_.handle))
             return invalid_buffer;
-        BottomLevelAccelerationStructure const& blas = bottom_level_acceleration_structures_[instance.blas_];
+        BottomLevelAccelerationStructure const &blas = bottom_level_acceleration_structures_[instance.blas_];
         return blas.bvh_buffer_;
     }
 
@@ -9823,7 +9823,7 @@ private:
                         for(size_t i = max_cached_files; i < bytecode_files.size(); ++i)
                             std::filesystem::remove(bytecode_files[i]);
                     }
-                    if (reflection_files.size() > max_cached_files)
+                    if(reflection_files.size() > max_cached_files)
                     {
                         std::sort(reflection_files.begin(), reflection_files.end(),
                             [](std::filesystem::path const &a, std::filesystem::path const &b) {
@@ -10166,7 +10166,7 @@ private:
         LPSTR error_text = nullptr;
         DWORD const result = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, nullptr, reason,
                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&error_text), 0, nullptr);
-        if (command_list_ != nullptr)
+        if(command_list_ != nullptr)
         {
             command_list_->Release();
             command_list_ = nullptr;
@@ -10447,7 +10447,7 @@ GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer vertex_buff
 GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
     GfxGeometry const geometry = {};
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return geometry;   // invalid context
     return gfx->createGeometryTriangles(index_buffer, vertex_buffer, vertex_stride);
 }
@@ -10456,41 +10456,41 @@ GfxGeometry gfxCreateGeometryProcedural(GfxContext context, GfxBuffer aabb_buffe
 {
     GfxGeometry const geometry = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if (!gfx) return geometry; // invalid context
+    if(!gfx) return geometry; // invalid context
     return gfx->createGeometryProcedural(aabb_buffer, aabb_stride);
 }
 
 GfxResult gfxDestroyGeometry(GfxContext context, GfxGeometry geometry)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyGeometry(geometry);
 }
 
 GfxResult gfxGeometrySetOpaque(GfxContext context, GfxGeometry geometry, bool opaque)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->geometrySetOpaque(geometry, opaque);
 }
 
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateGeometryTriangles(geometry, vertex_buffer, vertex_stride);
 }
 
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateGeometryTriangles(geometry, index_buffer, vertex_buffer, vertex_stride);
 }
 
 GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->updateGeometryProcedural(geometry, aabb_buffer, aabb_stride);
 }
@@ -10498,40 +10498,40 @@ GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, 
 GfxBottomLevelAccelerationStructure gfxCreateBottomLevelAccelerationStructure(GfxContext context)
 {
     GfxBottomLevelAccelerationStructure const blas = {};
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return blas;   // invalid context
     return gfx->createBottomLevelAccelerationStructure();
 }
 
 GfxResult gfxDestroyBottomLevelAccelerationStructure(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyBottomLevelAccelerationStructure(blas);
 }
 
 GfxResult gfxBottomLevelAccelerationStructureAddGeometry(GfxContext context, GfxBottomLevelAccelerationStructure blas, GfxGeometry geometry)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->bottomLevelAccelerationStructureAddGeometry(blas, geometry);
 }
 
 GfxResult gfxBottomLevelAccelerationStructureRemoveGeometry(GfxContext context, GfxBottomLevelAccelerationStructure blas, GfxGeometry geometry)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->bottomLevelAccelerationStructureRemoveGeometry(blas, geometry);
 }
 
 uint32_t gfxBottomLevelAccelerationStructureGetGeometryCount(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0u; // invalid context
     return gfx->bottomLevelAccelerationStructureGetGeometryCount(blas);
 }
 
-GfxGeometry const* gfxBottomLevelAccelerationStructureGetGeometries(GfxContext context, GfxBottomLevelAccelerationStructure blas)
+GfxGeometry const *gfxBottomLevelAccelerationStructureGetGeometries(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr; // invalid context
@@ -10540,28 +10540,28 @@ GfxGeometry const* gfxBottomLevelAccelerationStructureGetGeometries(GfxContext c
 
 GfxResult gfxBottomLevelAccelerationStructureCompact(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->bottomLevelAccelerationStructureCompact(blas);
 }
 
 uint64_t gfxBottomLevelAccelerationStructureGetDataSize(GfxContext context, GfxBottomLevelAccelerationStructure blas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0;  // invalid context
     return gfx->getBottomLevelAccelerationStructureDataSize(blas);
 }
 
-GfxResult gfxBuildBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const* blases, GfxBuildBottomLevelASFlags const* flags, uint32_t blas_count)
+GfxResult gfxBuildBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t blas_count)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->bottomLevelAccelerationStructureBuild(blases, flags, blas_count, false);
 }
 
-GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const* blases, uint32_t blas_count)
+GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t blas_count)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->bottomLevelAccelerationStructureBuild(blases, nullptr, blas_count, true);
 }
@@ -10569,56 +10569,56 @@ GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBott
 GfxTopLevelAccelerationStructureInstance gfxCreateTopLevelAccelerationStructureInstance(GfxContext context)
 {
     GfxTopLevelAccelerationStructureInstance const instance = {};
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return instance;   // invalid context
     return gfx->createTopLevelAccelerationStructureInstance();
 }
 
 GfxResult gfxDestroyTopLevelAccelerationStructureInstance(GfxContext context, GfxTopLevelAccelerationStructureInstance instance)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyTopLevelAccelerationStructureInstance(instance);
 }
 
-GfxBottomLevelAccelerationStructure const* gfxTopLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance)
+GfxBottomLevelAccelerationStructure const *gfxTopLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;
     return gfx->topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(instance);
 }
 
 GfxResult gfxTopLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, GfxBottomLevelAccelerationStructure blas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(instance, blas);
 }
 
-GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const* row_major_3x4_transform)
+GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const *row_major_3x4_transform)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureInstanceSetTransform(instance, row_major_3x4_transform);
 }
 
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceID(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_id)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureInstanceSetInstanceID(instance, instance_id);
 }
 
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceMask(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint8_t instance_mask)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureInstanceSetInstanceMask(instance, instance_mask);
 }
 
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_contribution_to_hit_group_index)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(instance, instance_contribution_to_hit_group_index);
 }
@@ -10626,63 +10626,63 @@ GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceContributionToHitGr
 GfxTopLevelAccelerationStructure gfxCreateTopLevelAccelerationStructure(GfxContext context)
 {
     GfxTopLevelAccelerationStructure const tlas = {};
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return tlas;   // invalid context
     return gfx->createTopLevelAccelerationStructure();
 }
 
 GfxResult gfxDestroyTopLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->destroyTopLevelAccelerationStructure(tlas);
 }
 
 GfxResult gfxTopLevelAccelerationStructureAddInstance(GfxContext context, GfxTopLevelAccelerationStructure tlas, GfxTopLevelAccelerationStructureInstance instance)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureAddInstance(tlas, instance);
 }
 
 GfxResult gfxTopLevelAccelerationStructureRemoveInstance(GfxContext context, GfxTopLevelAccelerationStructure tlas, GfxTopLevelAccelerationStructureInstance instance)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureRemoveInstance(tlas, instance);
 }
 
 uint32_t gfxTopLevelAccelerationStructureGetInstanceCount(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0u;
     return gfx->topLevelAccelerationStructureGetInstanceCount(tlas);
 }
 
-GfxTopLevelAccelerationStructureInstance const* gfxTopLevelAccelerationStructureGetInstances(GfxContext context, GfxTopLevelAccelerationStructure tlas)
+GfxTopLevelAccelerationStructureInstance const *gfxTopLevelAccelerationStructureGetInstances(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return nullptr;
     return gfx->topLevelAccelerationStructureGetInstances(tlas);
 }
 
 GfxResult gfxTopLevelAccelerationStructureBuild(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureBuild(tlas, false);
 }
 
 GfxResult gfxTopLevelAccelerationStructureUpdate(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
     return gfx->topLevelAccelerationStructureBuild(tlas, true);
 }
 
 uint64_t gfxTopLevelAccelerationStructureGetDataSize(GfxContext context, GfxTopLevelAccelerationStructure tlas)
 {
-    GfxInternal* gfx = GfxInternal::GetGfx(context);
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return 0u;
     return gfx->topLevelAccelerationStructureGetDataSize(tlas);
 }
@@ -10821,7 +10821,7 @@ GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char
     return gfx->setProgramSamplerState(program, parameter_name, sampler_state);
 }
 
-GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const* parameter_name, GfxTopLevelAccelerationStructure acceleration_structure)
+GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxTopLevelAccelerationStructure acceleration_structure)
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
