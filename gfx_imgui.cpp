@@ -60,7 +60,7 @@ class GfxImGuiInternal
     GfxBuffer *index_buffers_ = nullptr;
     GfxBuffer *vertex_buffers_ = nullptr;
     GfxProgram imgui_program_ = {};
-    GfxKernel imgui_kernel_ = {};
+    GfxArray<GfxKernel> imgui_kernels_ = {};
     float dpi_scale_ = 1.0f;
 
     GfxProgram composite_program_ = {};
@@ -74,11 +74,12 @@ public:
 
     GfxResult initializeKernel()
     {
-        gfxDestroyKernel(gfx_, imgui_kernel_);
+        for(uint32_t i = 0; i < imgui_kernels_.size(); ++i)
+            gfxDestroyKernel(gfx_, imgui_kernels_.data()[i]);
+        imgui_kernels_.clear();
         gfxDestroyProgram(gfx_, imgui_program_);
         gfxDestroyKernel(gfx_, composite_kernel_);
         gfxDestroyProgram(gfx_, composite_program_);
-        GfxDrawState imgui_draw_state;
         GfxProgramDesc imgui_program_desc = {};
         imgui_program_desc.vs =
             "float4x4 ProjectionMatrix;\r\n"
@@ -145,11 +146,8 @@ public:
             "    return col;\r\n"
             "}\r\n";
         imgui_program_ = gfxCreateProgram(gfx_, imgui_program_desc, "gfx_ImGuiProgram");
-        GFX_TRY(gfxDrawStateSetBlendMode(imgui_draw_state, D3D12_BLEND_ONE, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD)); // enable alpha blending
-        GFX_TRY(gfxDrawStateSetCullMode(imgui_draw_state, D3D12_CULL_MODE_NONE));
-        GFX_TRY(gfxDrawStateSetColorTarget(imgui_draw_state, 0, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB));
-        imgui_kernel_ = gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state);
-        if(!imgui_program_ || !imgui_kernel_)
+        GfxKernel const imgui_kernel = getKernel(DXGI_FORMAT_R8G8B8A8_UNORM_SRGB);
+        if(!imgui_program_ || !imgui_kernel)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create program to draw ImGui");
         return kGfxResult_NoError;
     }
@@ -247,7 +245,6 @@ public:
         if(gui_context == nullptr)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Failed to initialize Imgui context");
         ImGui::SetCurrentContext(gui_context);
-        ImGui::StyleColorsDark();
         ImGuiIO &io = ImGui::GetIO();
         io.ConfigFlags |= flags; // config flags
         io.BackendRendererName = "imgui_impl_gfx";
@@ -352,8 +349,10 @@ public:
                     GFX_TRY(gfxDestroyBuffer(gfx_, vertex_buffers_[i]));
                     vertex_buffers_[i].~GfxBuffer();
                 }
+            for(uint32_t i = 0; i < imgui_kernels_.size(); ++i)
+                gfxDestroyKernel(gfx_, imgui_kernels_.data()[i]);
+            imgui_kernels_.clear();
             GFX_TRY(gfxDestroyProgram(gfx_, imgui_program_));
-            GFX_TRY(gfxDestroyKernel(gfx_, imgui_kernel_));
             GFX_TRY(gfxDestroyProgram(gfx_, composite_program_));
             GFX_TRY(gfxDestroyKernel(gfx_, composite_kernel_));
             composite_kernel_ = {};
@@ -365,8 +364,11 @@ public:
 
     GfxResult render(GfxTexture output_texture)
     {
-        if (!output_texture && gfxGetBackBufferFormat(gfx_) != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+        if(!output_texture && gfxGetBackBufferColorSpace(gfx_) != DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709)
             GFX_SET_ERROR(kGfxResult_InvalidParameter, "ImGui can only composite to sRGB render targets");
+        if(!!output_texture && output_texture.getFormat() != DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+            GFX_SET_ERROR(kGfxResult_InvalidParameter, "ImGui can only render to sRGB output textures");
+
         ImGuiIO &io = ImGui::GetIO();
         ImGui::Render();    // implicit ImGui::EndFrame()
         ImDrawData *draw_data = ImGui::GetDrawData();
@@ -379,7 +381,7 @@ public:
 
         if(draw_data->TotalVtxCount > 0)
         {
-            if (!!output_texture)
+            if(!!output_texture)
                 gfxCommandClearTexture(gfx_, output_texture);
             char buffer[256];
             GfxBuffer &index_buffer = index_buffers_[buffer_index];
@@ -560,6 +562,18 @@ public:
         return kGfxResult_NoError;
     }
 
+    GfxKernel getKernel(DXGI_FORMAT color_format)
+    {
+        GfxKernel const *imgui_kernel = imgui_kernels_.at(color_format);
+        if(imgui_kernel != nullptr)
+            return *imgui_kernel;
+        GfxDrawState imgui_draw_state;
+        gfxDrawStateSetBlendMode(imgui_draw_state, D3D12_BLEND_ONE, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD, D3D12_BLEND_ZERO, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_OP_ADD); // enable alpha blending
+        gfxDrawStateSetCullMode(imgui_draw_state, D3D12_CULL_MODE_NONE);
+        gfxDrawStateSetColorTarget(imgui_draw_state, 0, color_format);
+        return imgui_kernels_.insert(color_format, gfxCreateGraphicsKernel(gfx_, imgui_program_, imgui_draw_state));
+    }
+
     void setDPIScale(float scale)
     {
         ImGuiStyle &style = ImGui::GetStyle();
@@ -570,11 +584,10 @@ public:
 
     void setupRenderState(GfxBuffer const &index_buffer, GfxBuffer const &vertex_buffer, GfxTexture const &output_texture)
     {
-        gfxCommandBindKernel(gfx_, imgui_kernel_);
+        gfxCommandBindKernel(gfx_, getKernel(output_texture ? DXGI_FORMAT_R8G8B8A8_UNORM_SRGB : gfxGetBackBufferFormat(gfx_)));
         gfxCommandBindIndexBuffer(gfx_, index_buffer);
         gfxCommandBindVertexBuffer(gfx_, vertex_buffer);
-        if (!!output_texture)
-            gfxCommandBindColorTarget(gfx_, 0, output_texture);
+        gfxCommandBindColorTarget(gfx_, 0, output_texture);
         gfxCommandSetViewport(gfx_); // draw to render texture
         current_sampler_ = font_sampler_linear_;
         alpha_mode_      = 0;

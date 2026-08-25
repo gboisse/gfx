@@ -32,6 +32,7 @@ SOFTWARE.
 #include <d3d12shader.h>        // shader reflection
 #include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 #include <filesystem>
+#include <mutex>
 
 #ifdef __clang__
 #    pragma clang diagnostic push
@@ -368,7 +369,7 @@ class GfxInternal
             } raster_state_;
         };
 
-        DrawState() : reference_count_(0) {}
+        DrawState() : reference_count_(1) {}    // retain
         DrawState(DrawState &&other) : draw_state_(other.draw_state_), reference_count_(other.reference_count_) { other.reference_count_ = 0; }
         ~DrawState() { GFX_ASSERT(reference_count_ == 0); }
 
@@ -387,8 +388,6 @@ class GfxInternal
         Data draw_state_;
         uint32_t reference_count_;
     };
-    static GfxArray<DrawState> draw_states_;
-    static GfxHandles draw_state_handles_;
 
     struct Object
     {
@@ -3312,8 +3311,7 @@ public:
             return mesh_kernel;
         }
         GFX_ASSERT(define_count == 0 || defines != nullptr);
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState const *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState const *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a mesh kernel using an invalid draw state object");
@@ -3383,8 +3381,7 @@ public:
             return graphics_kernel;
         }
         GFX_ASSERT(define_count == 0 || defines != nullptr);
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState const *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState const *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a graphics kernel using an invalid draw state object");
@@ -4107,6 +4104,11 @@ public:
         if(target_index >= kGfxConstant_MaxRenderTarget)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot bind more than %u render targets", (uint32_t)kGfxConstant_MaxRenderTarget);
         if(!target_texture)
+        {
+            bound_color_targets_[target_index] = {}; // unbind
+            return kGfxResult_NoError;
+        }
+        if(!texture_handles_.has_handle(target_texture.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
         if(mip_level >= target_texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
@@ -4121,6 +4123,11 @@ public:
     GfxResult encodeBindDepthStencilTarget(GfxTexture target_texture, uint32_t mip_level, uint32_t slice)
     {
         if(!target_texture)
+        {
+            bound_depth_stencil_target_ = {}; // unbind
+            return kGfxResult_NoError;
+        }
+        if(!texture_handles_.has_handle(target_texture.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to an invalid texture object");
         if(mip_level >= target_texture.mip_levels)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot draw to mip level that does not exist in texture object");
@@ -4665,8 +4672,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(data_type < 0 || data_type >= kGfxDataType_Count)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot scan buffer object of unsupported data type `%u'", data_type);
-        if(dst.size != src.size)
-            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot scan if source and destination buffer objects aren't of the same size");
+        if(dst.size < src.size)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot scan if destination buffer is smaller than source buffer");
         if((dst.size >> 2) > 0xFFFFFFFFull)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot scan buffer object of more than 4 billion keys");
         if(dst.cpu_access == kGfxCpuAccess_Read || src.cpu_access == kGfxCpuAccess_Read)
@@ -4993,33 +5000,27 @@ public:
     {
         for(uint32_t i = 0; i < buffers_.size(); ++i)
         {
-            auto *buffer = buffers_.at(i);
-            if(buffer != nullptr && buffer->initial_resource_state_ == D3D12_RESOURCE_STATE_COMMON && !*buffer->transitioned_ && (*buffer->resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == *buffer->resource_state_)
-                *buffer->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            Buffer &buffer = buffers_.data()[i];
+            if(buffer.initial_resource_state_ == D3D12_RESOURCE_STATE_COMMON && !*buffer.transitioned_ && (*buffer.resource_state_ & D3D12_RESOURCE_STATE_GENERIC_READ) == *buffer.resource_state_)
+                *buffer.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         }
         for(uint32_t i = 0; i < textures_.size(); ++i)
         {
-            auto *texture = textures_.at(i);
-            if(texture != nullptr && !texture->transitioned_ && (texture->resource_state_ & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) == texture->resource_state_)
-                texture->resource_state_ = D3D12_RESOURCE_STATE_COMMON;
+            Texture &texture = textures_.data()[i];
+            if(!texture.transitioned_ && (texture.resource_state_ & D3D12_RESOURCE_STATE_ALL_SHADER_RESOURCE) == texture.resource_state_)
+                texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
         }
         if(dbg_command_list_ != nullptr)
         {
             for(uint32_t i = 0; i < buffers_.size(); ++i)
             {
-                auto *buffer = buffers_.at(i);
-                if(buffer != nullptr)
-                {
-                    dbg_command_list_->AssertResourceState(buffer->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *buffer->resource_state_);
-                }
+                Buffer const &buffer = buffers_.data()[i];
+                dbg_command_list_->AssertResourceState(buffer.resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, *buffer.resource_state_);
             }
             for(uint32_t i = 0; i < textures_.size(); ++i)
             {
-                auto *texture = textures_.at(i);
-                if(texture != nullptr)
-                {
-                    dbg_command_list_->AssertResourceState(texture->resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, texture->resource_state_);
-                }
+                Texture const &texture = textures_.data()[i];
+                dbg_command_list_->AssertResourceState(texture.resource_, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, texture.resource_state_);
             }
         }
     }
@@ -5055,6 +5056,11 @@ public:
             {
                 RECT window_rect = {};
                 GetClientRect(window_, &window_rect);
+                uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
+                uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
+                bool const resized = (!IsIconic(window_) && (window_width != window_width_ || window_height != window_height_));
+                if(resized)
+                    GFX_TRY(resizeTextures(window_width, window_height));
                 D3D12_RESOURCE_BARRIER resource_barrier = {};
                 resource_barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
                 resource_barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
@@ -5075,14 +5081,10 @@ public:
                 {
                     return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during present: %s", hr);
                 }
-                uint32_t const window_width  = GFX_MAX(window_rect.right,  (LONG)8);
-                uint32_t const window_height = GFX_MAX(window_rect.bottom, (LONG)8);
                 back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
                 fence_index_ = (fence_index_ + 1) % max_frames_in_flight_;
-                if(!IsIconic(window_) && (window_width != window_width_ || window_height != window_height_))
-                {
-                    GFX_TRY(resizeCallback(window_width, window_height)); // reset fence index
-                }
+                if(resized)
+                    GFX_TRY(resizeBackBuffers(window_width, window_height)); // reset fence index
                 if(fences_[fence_index_]->GetCompletedValue() != fence_values_[fence_index_])
                 {
                     fences_[fence_index_]->SetEventOnCompletion(fence_values_[fence_index_], fence_event_);
@@ -5686,16 +5688,13 @@ public:
 
     static void DispenseDrawState(GfxDrawState &draw_state)
     {
-        draw_state.handle = draw_state_handles_.allocate_handle();
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        GFX_ASSERT(!draw_states_.has(draw_state_index));    // should never happen
-        draw_states_.insert(draw_state_index).reference_count_ = 1;
+        draw_state.handle = reinterpret_cast<uint64_t>(new DrawState());
+        GFX_ASSERT(!!draw_state.handle);    // out of memory
     }
 
     static void RetainDrawState(GfxDrawState const &draw_state)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);  // look up draw state
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         GFX_ASSERT(gfx_draw_state != nullptr); if(!gfx_draw_state) return;
         GFX_ASSERT(gfx_draw_state->reference_count_ > 0);
         ++gfx_draw_state->reference_count_;
@@ -5703,21 +5702,16 @@ public:
 
     static void ReleaseDrawState(GfxDrawState const &draw_state)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);  // look up draw state
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         GFX_ASSERT(gfx_draw_state != nullptr); if(!gfx_draw_state) return;
         GFX_ASSERT(gfx_draw_state->reference_count_ > 0);
         if(--gfx_draw_state->reference_count_ == 0)
-        {
-            draw_states_.erase(draw_state_index);
-            draw_state_handles_.free_handle(draw_state.handle);
-        }
+            delete gfx_draw_state;
     }
 
     static GfxResult SetDrawStateColorTarget(GfxDrawState const &draw_state, uint32_t target_index, DXGI_FORMAT texture_format)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set color target on an invalid draw state object");
         if(target_index >= kGfxConstant_MaxRenderTarget)
@@ -5728,8 +5722,7 @@ public:
 
     static GfxResult SetDrawStateDepthStencilTarget(GfxDrawState const &draw_state, DXGI_FORMAT texture_format)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth/stencil target on an invalid draw state object");
         gfx_draw_state->draw_state_.depth_stencil_format_ = texture_format;
@@ -5738,8 +5731,7 @@ public:
 
     static GfxResult SetDrawStateCullMode(GfxDrawState const &draw_state, D3D12_CULL_MODE cull_mode)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set cull mode on an invalid draw state object");
         gfx_draw_state->draw_state_.raster_state_.cull_mode_ = cull_mode;
@@ -5748,8 +5740,7 @@ public:
 
     static GfxResult SetDrawStateFillMode(GfxDrawState const &draw_state, D3D12_FILL_MODE fill_mode)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set fill mode on an invalid draw state object");
         gfx_draw_state->draw_state_.raster_state_.fill_mode_ = fill_mode;
@@ -5758,8 +5749,7 @@ public:
 
     static GfxResult SetDrawStateDepthFunction(GfxDrawState const &draw_state, D3D12_COMPARISON_FUNC depth_function)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth function on an invalid draw state object");
         gfx_draw_state->draw_state_.depth_stencil_state_.depth_func_ = depth_function;
@@ -5768,8 +5758,7 @@ public:
 
     static GfxResult SetDrawStateDepthWriteMask(GfxDrawState const &draw_state, D3D12_DEPTH_WRITE_MASK depth_write_mask)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set depth write mask on an invalid draw state object");
         gfx_draw_state->draw_state_.depth_stencil_state_.depth_write_mask_ = depth_write_mask;
@@ -5778,8 +5767,7 @@ public:
 
     static GfxResult SetDrawStatePrimitiveTopologyType(GfxDrawState const &draw_state, D3D12_PRIMITIVE_TOPOLOGY_TYPE primitive_topology_type)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set primitive topology type on an invalid draw state object");
         gfx_draw_state->draw_state_.primitive_topology_type_ = primitive_topology_type;
@@ -5788,8 +5776,7 @@ public:
 
     static GfxResult SetDrawStateBlendMode(GfxDrawState const &draw_state, D3D12_BLEND src_blend, D3D12_BLEND dst_blend, D3D12_BLEND_OP blend_op, D3D12_BLEND src_blend_alpha, D3D12_BLEND dst_blend_alpha, D3D12_BLEND_OP blend_op_alpha)
     {
-        uint32_t const draw_state_index = static_cast<uint32_t>(draw_state.handle & 0xFFFFFFFFull);
-        DrawState *gfx_draw_state = draw_states_.at(draw_state_index);
+        DrawState *gfx_draw_state = reinterpret_cast<DrawState *>(draw_state.handle);
         if(!gfx_draw_state)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot set blend mode on an invalid draw state object");
         gfx_draw_state->draw_state_.blend_state_.src_blend_ = src_blend;
@@ -9763,18 +9750,21 @@ private:
                 fclose(fd); // write out PDB for shader debugging
             }
             // Delete older pdb files
+            static std::mutex shader_pdb_cleanup;
+            std::scoped_lock<std::mutex> lock(shader_pdb_cleanup);
             std::filesystem::directory_iterator const end;
             std::vector<std::filesystem::path>        pdb_files;
-            for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_pdb_dir + shader_key_dir)}; iter != end; ++iter)
-                if(is_regular_file(*iter))
+            std::error_code                           ec, ec2;
+            for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_pdb_dir + shader_key_dir)}; iter != end && !ec2; iter.increment(ec2))
+                if(is_regular_file(*iter, ec))
                     if(iter->path().extension() == ".pdb")
                         pdb_files.emplace_back(*iter);
             if(pdb_files.size() > max_cached_files)
             {
-                std::sort(pdb_files.begin(), pdb_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
-                    return last_write_time(a) > last_write_time(b); });
+                std::sort(pdb_files.begin(), pdb_files.end(), [&ec](const std::filesystem::path &a, const std::filesystem::path &b) {
+                    return last_write_time(a, ec) > last_write_time(b, ec); });
                 for(size_t i = max_cached_files; i < pdb_files.size(); ++i)
-                    std::filesystem::remove(pdb_files[i]);
+                    std::filesystem::remove(pdb_files[i], ec);
             }
         }
 
@@ -9798,19 +9788,22 @@ private:
                     {
                         fwrite(dxc_bytecode->GetBufferPointer(), dxc_bytecode->GetBufferSize(), 1, fd);
                         fclose(fd); // write out bytecode for shader caching
-                    }
-                    fd = _wfopen(shader_key_reflection.c_str(), L"wb");
-                    if(fd)
-                    {
-                        fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
-                        fclose(fd); // write out reflection for shader caching
+                        fd = _wfopen(shader_key_reflection.c_str(), L"wb");
+                        if(fd)
+                        {
+                            fwrite(dxc_reflection->GetBufferPointer(), dxc_reflection->GetBufferSize(), 1, fd);
+                            fclose(fd); // write out reflection for shader caching
+                        }
                     }
                     // Delete older cached files
+                    static std::mutex shader_cache_cleanup;
+                    std::scoped_lock<std::mutex> lock(shader_cache_cleanup);
                     std::filesystem::directory_iterator const end;
                     std::vector<std::filesystem::path>        bytecode_files;
                     std::vector<std::filesystem::path>        reflection_files;
-                    for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_cache_dir + shader_key_dir)}; iter != end; ++iter)
-                        if(is_regular_file(*iter))
+                    std::error_code                           ec, ec2;
+                    for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_cache_dir + shader_key_dir)}; iter != end && !ec2; iter.increment(ec2))
+                        if(is_regular_file(*iter, ec))
                         {
                             if(iter->path().extension() == ".bytecode")
                                 bytecode_files.emplace_back(*iter);
@@ -9819,18 +9812,18 @@ private:
                         }
                     if(bytecode_files.size() > max_cached_files)
                     {
-                        std::sort(bytecode_files.begin(), bytecode_files.end(), [](const std::filesystem::path &a, const std::filesystem::path &b) {
-                            return last_write_time(a) > last_write_time(b); });
+                        std::sort(bytecode_files.begin(), bytecode_files.end(), [&ec](const std::filesystem::path &a, const std::filesystem::path &b) {
+                            return last_write_time(a, ec) > last_write_time(b, ec); });
                         for(size_t i = max_cached_files; i < bytecode_files.size(); ++i)
-                            std::filesystem::remove(bytecode_files[i]);
+                            std::filesystem::remove(bytecode_files[i], ec);
                     }
                     if(reflection_files.size() > max_cached_files)
                     {
                         std::sort(reflection_files.begin(), reflection_files.end(),
-                            [](std::filesystem::path const &a, std::filesystem::path const &b) {
-                                return last_write_time(a) > last_write_time(b); });
+                            [&ec](std::filesystem::path const &a, std::filesystem::path const &b) {
+                                return last_write_time(a, ec) > last_write_time(b, ec); });
                         for(size_t i = max_cached_files; i < reflection_files.size(); ++i)
-                            std::filesystem::remove(reflection_files[i]);
+                            std::filesystem::remove(reflection_files[i], ec);
                     }
                 }
             }
@@ -10094,10 +10087,32 @@ private:
         return forceGarbageCollection();
     }
 
-    GfxResult resizeCallback(uint32_t window_width, uint32_t window_height)
+    GfxResult resizeBackBuffers(uint32_t window_width, uint32_t window_height)
     {
         if(!IsWindow(window_)) return kGfxResult_NoError;   // can't resize past window tear down
         GFX_ASSERT(swap_chain_ != nullptr);
+        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
+        {
+            collect(back_buffers_[i]);
+            back_buffers_[i] = nullptr;
+            freeRTVDescriptor(back_buffer_rtvs_[i]);
+        }
+        sync(); // make sure the GPU is done with the previous swap chain before resizing
+        window_width_  = window_width;
+        window_height_ = window_height;
+        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, back_buffer_format_, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
+        if(hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_HUNG)
+            GFX_TRY(handleDeviceLost());
+        else if(FAILED(hr))
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during resizeBuffers: %s", hr);
+        back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
+        GFX_TRY(acquireSwapChainBuffers());
+        GFX_TRY(createBackBufferRTVs());
+        return kGfxResult_NoError;
+    }
+
+    GfxResult resizeTextures(uint32_t window_width, uint32_t window_height)
+    {
         for(uint32_t i = 0; i < textures_.size(); ++i)
         {
             Texture &texture = textures_.data()[i];
@@ -10124,6 +10139,22 @@ private:
             texture.resource_state_ = D3D12_RESOURCE_STATE_COMMON;
             texture.initial_resource_state_ = D3D12_RESOURCE_STATE_COMMON;
             texture.transitioned_ = false;
+            if(resource_desc.Flags != D3D12_RESOURCE_FLAG_NONE)
+            {
+                D3D12_RESOURCE_STATES transition_state = D3D12_RESOURCE_STATE_COMMON;
+                if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET) != 0)
+                    transition_state = D3D12_RESOURCE_STATE_RENDER_TARGET;
+                else if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL) != 0)
+                    transition_state = D3D12_RESOURCE_STATE_DEPTH_WRITE;
+                else if((resource_desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS) != 0)
+                    transition_state = D3D12_RESOURCE_STATE_UNORDERED_ACCESS;
+                if(transition_state != D3D12_RESOURCE_STATE_COMMON)
+                {
+                    if(transitionResource(texture, transition_state, kTransitionType_Implicit))
+                        submitPipelineBarriers();   // transition our resources if needed
+                    command_list_->DiscardResource(texture.resource_, nullptr);
+                }
+            }
             for(uint32_t j = 0; j < ARRAYSIZE(texture.dsv_descriptor_slots_); ++j)
             {
                 texture.dsv_descriptor_slots_[j].resize(resource_desc.DepthOrArraySize);
@@ -10137,27 +10168,6 @@ private:
                     texture.rtv_descriptor_slots_[j][k] = 0xFFFFFFFFu;
             }
         }
-        for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
-        {
-            collect(back_buffers_[i]);
-            back_buffers_[i] = nullptr;
-            freeRTVDescriptor(back_buffer_rtvs_[i]);
-        }
-        sync(); // make sure the GPU is done with the previous swap chain before resizing
-        window_width_  = window_width;
-        window_height_ = window_height;
-        HRESULT const hr = swap_chain_->ResizeBuffers(max_frames_in_flight_, window_width, window_height, back_buffer_format_, DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING);
-        if(hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET || hr == DXGI_ERROR_DEVICE_HUNG)
-        {
-            GFX_TRY(handleDeviceLost());
-        }
-        else if(FAILED(hr))
-        {
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Error detected during resizeBuffers: %s", hr);
-        }
-        back_buffer_index_ = swap_chain_->GetCurrentBackBufferIndex();
-        GFX_TRY(acquireSwapChainBuffers());
-        GFX_TRY(createBackBufferRTVs());
         return kGfxResult_NoError;
     }
 
@@ -10200,9 +10210,6 @@ uint32_t const GfxInternal::kNumThreads_Invalid[] =
     1,
     1
 };
-
-GfxArray<GfxInternal::DrawState> GfxInternal::draw_states_;
-GfxHandles                       GfxInternal::draw_state_handles_("draw state");
 
 GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags, IDXGIAdapter *adapter)
 {

@@ -183,9 +183,6 @@ class GfxSceneInternal
     GfxArray<GfxMetadata> render_instance_metadata_;
     GfxHandles render_instance_handles_;
 
-    static GfxArray<GfxScene> scenes_;
-    static GfxHandles scene_handles_;
-
     template<typename TYPE> GfxArray<TYPE> &objects_();
     template<typename TYPE> GfxArray<uint64_t> &object_refs_();
     template<typename TYPE> GfxArray<GfxMetadata> &object_metadata_();
@@ -3030,9 +3027,6 @@ private:
         return kGfxResult_NoError;
     }
 };
-
-GfxArray<GfxScene> GfxSceneInternal::scenes_;
-GfxHandles         GfxSceneInternal::scene_handles_("scene");
 
 template<typename TYPE>
 GfxResult GfxSceneInternal::destroyObjectCallback(uint64_t object_handle)

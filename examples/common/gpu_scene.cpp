@@ -124,7 +124,7 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
 
         std::vector<GfxVertex> const &vertex_buffer = mesh_ref->vertices;
 
-        for(const GfxVertex &vertex : vertex_buffer)
+        for(GfxVertex const &vertex : vertex_buffer)
         {
             Vertex gpu_vertex = {};
 
@@ -213,12 +213,12 @@ void ReleaseGpuScene(GfxContext gfx, GpuScene const &gpu_scene)
     gfxDestroyBuffer(gfx, gpu_scene.transform_buffer);
     gfxDestroyBuffer(gfx, gpu_scene.previous_transform_buffer);
 
-    for(const GfxBuffer &upload_transform_buffer : gpu_scene.upload_transform_buffers)
+    for(GfxBuffer const &upload_transform_buffer : gpu_scene.upload_transform_buffers)
     {
         gfxDestroyBuffer(gfx, upload_transform_buffer);
     }
 
-    for(const GfxTexture &texture : gpu_scene.textures)
+    for(GfxTexture const &texture : gpu_scene.textures)
     {
         gfxDestroyTexture(gfx, texture);
     }

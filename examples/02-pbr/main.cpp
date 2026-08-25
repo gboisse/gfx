@@ -21,11 +21,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ****************************************************************************/
-#include "gfx_imgui.h"
 
 #include "ibl.h"
 #include "gpu_scene.h"
 #include "fly_camera.h"
+
 #include "glm/gtc/matrix_transform.hpp"
 
 namespace
@@ -41,7 +41,6 @@ int32_t main()
     GfxWindow  window = gfxCreateWindow(1280, 720, "gfx - PBR");
     GfxContext gfx    = gfxCreateContext(window);
     GfxScene   scene  = gfxCreateScene();
-    gfxImGuiInitialize(gfx);
 
     // Import the scene data
     gfxSceneImport(scene, scene_path);
@@ -194,7 +193,6 @@ int32_t main()
         gfxCommandDraw(gfx, 3);
 
         // And submit the frame
-        gfxImGuiRender();
         gfxFrame(gfx);
     }
 
@@ -217,7 +215,6 @@ int32_t main()
     gfxDestroyKernel(gfx, reproject_kernel);
     gfxDestroyProgram(gfx, taa_program);
 
-    gfxImGuiTerminate();
     gfxDestroyScene(scene);
     ReleaseGpuScene(gfx, gpu_scene);
 
