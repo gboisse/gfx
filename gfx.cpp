@@ -603,7 +603,7 @@ class GfxInternal
                 data_.sampler_state_ = sampler_state;
             }
 
-            void set(GfxTopLevelAccelerationStructure const& acceleration_structure)
+            void set(GfxTopLevelAccelerationStructure const &acceleration_structure)
             {
                 if(type_ == kType_AccelerationStructure)
                     id_ += (acceleration_structure.handle != data_.acceleration_structure_.bvh_.handle);
@@ -2640,7 +2640,7 @@ public:
         return static_cast<uint32_t>(bottom_level_acceleration_structures_[blas].geometries_.size());
     }
 
-    GfxGeometry const* bottomLevelAccelerationStructureGetGeometries(GfxBottomLevelAccelerationStructure const &blas)
+    GfxGeometry const *bottomLevelAccelerationStructureGetGeometries(GfxBottomLevelAccelerationStructure const &blas)
     {
         if(!blas)
             return nullptr;
@@ -2691,7 +2691,7 @@ public:
         return kGfxResult_NoError;
     }
 
-    uint64_t getBottomLevelAccelerationStructureDataSize(GfxBottomLevelAccelerationStructure const& blas)
+    uint64_t getBottomLevelAccelerationStructureDataSize(GfxBottomLevelAccelerationStructure const &blas)
     {
         if(!blas.handle)
             return 0;
@@ -2922,14 +2922,14 @@ public:
             return kGfxResult_NoError;
         if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid top level acceleration structure instance object");
-        TopLevelAccelerationStructureInstance const& gfx_instance = top_level_acceleration_structure_instances_[instance];
+        TopLevelAccelerationStructureInstance const &gfx_instance = top_level_acceleration_structure_instances_[instance];
         collect(gfx_instance); // release resources
         top_level_acceleration_structure_instances_.erase(instance); // destroy blas
         top_level_acceleration_structure_instance_handles_.free_handle(instance.handle);
         return kGfxResult_NoError;
     }
 
-    GfxBottomLevelAccelerationStructure const* topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance)
+    GfxBottomLevelAccelerationStructure const *topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance)
     {
         if(!instance)
             return nullptr;
@@ -3091,7 +3091,7 @@ public:
             if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
                 continue;   // invalid tlas instance object
             auto const &gfx_instance = top_level_acceleration_structure_instances_[instance];
-            GfxBuffer const& buffer = getTopLevelAccelerationStructureInstanceBuffer(gfx_instance);
+            GfxBuffer const &buffer = getTopLevelAccelerationStructureInstanceBuffer(gfx_instance);
             if(!buffer_handles_.has_handle(buffer.handle))
                 continue;   // no valid BVH memory, probably wasn't built
             D3D12_RAYTRACING_INSTANCE_DESC instance_desc = {};
@@ -6283,7 +6283,7 @@ private:
         freeSamplerDescriptor(sampler_state.descriptor_slot_);
     }
 
-    void collect(Geometry const& geometry)
+    void collect(Geometry const &geometry)
     {
         switch(geometry.type_)
         {
