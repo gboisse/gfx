@@ -124,7 +124,7 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
 
         std::vector<GfxVertex> const &vertex_buffer = mesh_ref->vertices;
 
-        for(GfxVertex vertex : vertex_buffer)
+        for(const GfxVertex &vertex : vertex_buffer)
         {
             Vertex gpu_vertex = {};
 
@@ -139,28 +139,30 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
     gpu_scene.index_buffer  = gfxCreateBuffer<uint32_t>(gfx, (uint32_t)indices.size(), indices.data());
     gpu_scene.vertex_buffer = gfxCreateBuffer<Vertex>(gfx, (uint32_t)vertices.size(), vertices.data());
 
+    uint32_t const render_instance_count = gfxSceneGetRenderInstanceCount(scene);
     // Load our instances
     std::vector<Instance>  instances;
+    instances.reserve(render_instance_count);
     std::vector<glm::mat4> transforms;
+    transforms.reserve(render_instance_count);
 
-    for(uint32_t i = 0; i < gfxSceneGetInstanceCount(scene); ++i)
+    for(uint32_t i = 0; i < render_instance_count; ++i)
     {
-        GfxConstRef<GfxInstance> const instance_ref = gfxSceneGetInstanceHandle(scene, i);
-
-        Instance instance    = {};
-        instance.mesh_id     = (uint32_t)instance_ref->mesh;
-        instance.material_id = (uint32_t)instance_ref->material;
-
-        uint32_t const instance_id = (uint32_t)instance_ref;
-
-        if(instance_id >= instances.size())
+        GfxConstRef<GfxRenderInstance> const render_instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
+        if(render_instance_ref->instances.empty())
         {
-            instances.resize(instance_id + 1);
-            transforms.resize(instance_id + 1);
+            continue;
         }
 
-        instances[instance_id]  = instance;
-        transforms[instance_id] = instance_ref->transform;
+        transforms.push_back(render_instance_ref->transform);
+
+        for(GfxRef<GfxMeshInstance> const &mesh_instance : render_instance_ref->instances)
+        {
+            Instance instance    = {};
+            instance.mesh_id     = (uint32_t)mesh_instance->mesh;
+            instance.material_id = (uint32_t)mesh_instance->material;
+            instances.push_back(instance);
+        }
     }
 
     gpu_scene.instance_buffer           = gfxCreateBuffer<Instance>(gfx, (uint32_t)instances.size(), instances.data());
@@ -211,12 +213,12 @@ void ReleaseGpuScene(GfxContext gfx, GpuScene const &gpu_scene)
     gfxDestroyBuffer(gfx, gpu_scene.transform_buffer);
     gfxDestroyBuffer(gfx, gpu_scene.previous_transform_buffer);
 
-    for(GfxBuffer upload_transform_buffer : gpu_scene.upload_transform_buffers)
+    for(const GfxBuffer &upload_transform_buffer : gpu_scene.upload_transform_buffers)
     {
         gfxDestroyBuffer(gfx, upload_transform_buffer);
     }
 
-    for(GfxTexture texture : gpu_scene.textures)
+    for(const GfxTexture &texture : gpu_scene.textures)
     {
         gfxDestroyTexture(gfx, texture);
     }
@@ -230,15 +232,15 @@ void UpdateGpuScene(GfxContext gfx, GfxScene scene, GpuScene &gpu_scene)
 
     glm::mat4 *transforms = gfxBufferGetData<glm::mat4>(gfx, upload_transform_buffer);
 
-    uint32_t const instance_count = gfxSceneGetInstanceCount(scene);
-
-    for(uint32_t i = 0; i < instance_count; ++i)
+    for(uint32_t i = 0, instance_id = 0; i < gfxSceneGetRenderInstanceCount(scene); ++i)
     {
-        GfxConstRef<GfxInstance> const instance_ref = gfxSceneGetInstanceHandle(scene, i);
+        GfxConstRef<GfxRenderInstance> const render_instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
+        if(render_instance_ref->instances.empty())
+        {
+            continue;
+        }
 
-        uint32_t const instance_id = (uint32_t)instance_ref;
-
-        transforms[instance_id] = instance_ref->transform;
+        transforms[instance_id++] = render_instance_ref->transform;
     }
 
     gfxCommandCopyBuffer(gfx, gpu_scene.previous_transform_buffer, gpu_scene.transform_buffer);

@@ -142,7 +142,7 @@ int32_t main()
         gfxCommandClearTexture(gfx, depth_buffer);
 
         // Draw all the meshes in the scene
-        uint32_t const instance_count = gfxSceneGetInstanceCount(scene);
+        uint32_t const instance_count = gfxSceneGetRenderInstanceCount(scene);
 
         gfxCommandBindColorTarget(gfx, 0, color_buffer);
         gfxCommandBindColorTarget(gfx, 1, velocity_buffer);
@@ -151,20 +151,28 @@ int32_t main()
         gfxCommandBindIndexBuffer(gfx, gpu_scene.index_buffer);
         gfxCommandBindVertexBuffer(gfx, gpu_scene.vertex_buffer);
 
-        for(uint32_t i = 0; i < instance_count; ++i)
+        for(uint32_t i = 0, instance_id = 0; i < instance_count; ++i)
         {
-            GfxConstRef<GfxInstance> const instance_ref = gfxSceneGetInstanceHandle(scene, i);
+            GfxConstRef<GfxRenderInstance> const instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
+            if(instance_ref->instances.empty())
+            {
+                continue;
+            }
 
-            uint32_t const instance_id = (uint32_t)instance_ref;
-            uint32_t const mesh_id     = (uint32_t)instance_ref->mesh;
+            for(GfxRef<GfxMeshInstance> const &mesh_instance : instance_ref->instances)
+            {
+                uint32_t const mesh_id = (uint32_t)mesh_instance->mesh;
+                Mesh const &mesh       = gpu_scene.meshes[mesh_id];
 
-            Mesh const mesh = gpu_scene.meshes[mesh_id];
+                gfxProgramSetParameter(gfx, pbr_program, "g_InstanceId", instance_id);
+                gfxProgramSetParameter(gfx, pbr_program, "g_ViewProjection", fly_camera.view_proj);
+                gfxProgramSetParameter(
+                    gfx, pbr_program, "g_PreviousViewProjection", fly_camera.prev_view_proj);
 
-            gfxProgramSetParameter(gfx, pbr_program, "g_InstanceId", instance_id);
-            gfxProgramSetParameter(gfx, pbr_program, "g_ViewProjection", fly_camera.view_proj);
-            gfxProgramSetParameter(gfx, pbr_program, "g_PreviousViewProjection", fly_camera.prev_view_proj);
+                gfxCommandDrawIndexed(gfx, mesh.count, 1, mesh.first_index, mesh.base_vertex);
+            }
 
-            gfxCommandDrawIndexed(gfx, mesh.count, 1, mesh.first_index, mesh.base_vertex);
+            ++instance_id;
         }
 
         // Draw our skybox
