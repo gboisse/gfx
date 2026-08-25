@@ -3078,7 +3078,7 @@ public:
             return kGfxResult_NoError;
         if(!top_level_acceleration_structure_handles_.has_handle(tlas.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update an invalid top level acceleration structure object");
-        void* data = nullptr;
+        void *data = nullptr;
         TopLevelAccelerationStructure &gfx_acceleration_structure = top_level_acceleration_structures_[tlas];
         D3D12_GPU_VIRTUAL_ADDRESS const gpu_addr = allocateConstantMemory(gfx_acceleration_structure.instances_.size() * sizeof(D3D12_RAYTRACING_INSTANCE_DESC), data);
         D3D12_RAYTRACING_INSTANCE_DESC *instance_descs = (D3D12_RAYTRACING_INSTANCE_DESC *)data;
