@@ -2929,16 +2929,17 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxBottomLevelAccelerationStructure const *topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance)
+    GfxBottomLevelAccelerationStructure topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance)
     {
+        GfxBottomLevelAccelerationStructure blas = {};
         if(!instance)
-            return nullptr;
+            return blas;
         if(!top_level_acceleration_structure_instance_handles_.has_handle(instance.handle))
         {
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot get blas from invalid top level acceleration structure instance object");
-            return nullptr;
+            return blas;
         }
-        return &top_level_acceleration_structure_instances_[instance].blas_;
+        return top_level_acceleration_structure_instances_[instance].blas_;
     }
 
     GfxResult topLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(GfxTopLevelAccelerationStructureInstance const &instance, GfxBottomLevelAccelerationStructure const &blas)
@@ -10581,10 +10582,11 @@ GfxResult gfxDestroyTopLevelAccelerationStructureInstance(GfxContext context, Gf
     return gfx->destroyTopLevelAccelerationStructureInstance(instance);
 }
 
-GfxBottomLevelAccelerationStructure const *gfxTopLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance)
+GfxBottomLevelAccelerationStructure gfxTopLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance)
 {
+    GfxBottomLevelAccelerationStructure const blas = {};
     GfxInternal *gfx = GfxInternal::GetGfx(context);
-    if(!gfx) return nullptr;
+    if(!gfx) return blas;   // invalid context
     return gfx->topLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(instance);
 }
 
