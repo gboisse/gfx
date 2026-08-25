@@ -2859,6 +2859,7 @@ public:
             BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
             GfxBuffer &bvh_buffer = gfx_blas.bvh_buffer_;
             Buffer &gfx_buffer = buffers_[bvh_buffer];
+            SetObjectName(gfx_buffer, blas.getName());
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS const &blas_inputs = batch_build_inputs_[i];
             D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC build_desc = {};
             build_desc.DestAccelerationStructureData = gfx_buffer.resource_->GetGPUVirtualAddress() + gfx_buffer.data_offset_;
