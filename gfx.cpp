@@ -469,7 +469,7 @@ class GfxInternal
                 GfxBuffer procedural_buffer_ = {};
             } procedural_;
         } data_ = {};
-        bool opaque = false;
+        bool opaque_ = false;
     };
     GfxArray<Geometry> geometries_;
     GfxHandles geometry_handles_;
@@ -2495,7 +2495,7 @@ public:
         if(!geometry_handles_.has_handle(geometry.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot set opaque flag on an invalid geometry object");
         Geometry &gfx_geometry = geometries_[geometry];
-        gfx_geometry.opaque = opaque;
+        gfx_geometry.opaque_ = opaque;
         return kGfxResult_NoError;
     }
     
@@ -2753,7 +2753,7 @@ public:
                 {
                     D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-                    if(gfx_geometry.opaque)
+                    if(gfx_geometry.opaque_)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
                     Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.data_.triangles_.vertex_buffer_];
                     Buffer *gfx_index_buffer = gfx_geometry.data_.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.data_.triangles_.index_buffer_] : nullptr;
@@ -2775,7 +2775,7 @@ public:
                 {
                     D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
                     desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_PROCEDURAL_PRIMITIVE_AABBS;
-                    if(gfx_geometry.opaque)
+                    if(gfx_geometry.opaque_)
                         desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
                     Buffer &gfx_aabb_buffer = buffers_[gfx_geometry.data_.procedural_.procedural_buffer_];
                     desc.AABBs.AABBCount = 1;
@@ -2923,7 +2923,7 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot destroy invalid top level acceleration structure instance object");
         TopLevelAccelerationStructureInstance const &gfx_instance = top_level_acceleration_structure_instances_[instance];
         collect(gfx_instance); // release resources
-        top_level_acceleration_structure_instances_.erase(instance); // destroy blas
+        top_level_acceleration_structure_instances_.erase(instance); // destroy tlas instance
         top_level_acceleration_structure_instance_handles_.free_handle(instance.handle);
         return kGfxResult_NoError;
     }

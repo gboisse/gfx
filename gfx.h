@@ -526,7 +526,7 @@ GfxTopLevelAccelerationStructure gfxCreateTopLevelAccelerationStructure(GfxConte
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer);
 ID3D12Resource *gfxTextureGetResource(GfxContext context, GfxTexture texture);
-ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext context, GfxTopLevelAccelerationStructure tlas);
+ID3D12Resource *gfxTopLevelAccelerationStructureGetResource(GfxContext context, GfxTopLevelAccelerationStructure tlas);
 
 D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer buffer);
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
