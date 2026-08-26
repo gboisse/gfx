@@ -2669,13 +2669,13 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Compaction is not allowed for this bottom level acceleration structure object");
         uint32_t const *compaction_index = blas_compaction_indices_.at(blas);
         if(compaction_index == nullptr || *compaction_index != blas_compaction_sentinel)
-            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet.");
+            return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Post-build information is not available yet");
         Buffer &dst = buffers_[gfx_blas.bvh_compact_size_readback_buffer_];
         D3D12_RAYTRACING_ACCELERATION_STRUCTURE_POSTBUILD_INFO_COMPACTED_SIZE_DESC compacted_size_desc = {};
         memcpy(&compacted_size_desc, dst.data_, sizeof(compacted_size_desc));
         size_t const old_size = gfx_blas.bvh_buffer_.getSize();
         if(compacted_size_desc.CompactedSizeInBytes == 0 || compacted_size_desc.CompactedSizeInBytes > old_size)
-            return GFX_SET_ERROR(kGfxResult_InternalError, "Can't readback compacted bottom level acceleration structure size. Possible sync issue");
+            return GFX_SET_ERROR(kGfxResult_InternalError, "Can't readback compacted bottom level acceleration structure size; possible sync issue");
         GfxBuffer compacted_buffer = createBuffer(compacted_size_desc.CompactedSizeInBytes, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
         Buffer const &gfx_compacted_buffer = buffers_[compacted_buffer];
         Buffer const &gfx_original_bvh = buffers_[gfx_blas.bvh_buffer_];

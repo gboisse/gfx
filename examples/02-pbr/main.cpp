@@ -165,8 +165,7 @@ int32_t main()
 
                 gfxProgramSetParameter(gfx, pbr_program, "g_InstanceId", instance_id);
                 gfxProgramSetParameter(gfx, pbr_program, "g_ViewProjection", fly_camera.view_proj);
-                gfxProgramSetParameter(
-                    gfx, pbr_program, "g_PreviousViewProjection", fly_camera.prev_view_proj);
+                gfxProgramSetParameter(gfx, pbr_program, "g_PreviousViewProjection", fly_camera.prev_view_proj);
 
                 gfxCommandDrawIndexed(gfx, mesh.count, 1, mesh.first_index, mesh.base_vertex);
             }
