@@ -131,6 +131,7 @@ class GfxInternal
     D3D12MA::Allocation **back_buffer_allocations_ = nullptr;
     DXGI_FORMAT back_buffer_format_ = DXGI_FORMAT_R8G8B8A8_UNORM;
     DXGI_COLOR_SPACE_TYPE color_space_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
+    D3D12_HEAP_TYPE upload_heap_type_ = D3D12_HEAP_TYPE_UPLOAD;
     uint32_t *back_buffer_rtvs_ = nullptr;
     bool is_interop_ = false;
     uint32_t back_buffer_index_ = 0;
@@ -1360,6 +1361,15 @@ public:
         if(mesh_features.MeshShaderTier < D3D12_MESH_SHADER_TIER_1) { if(mesh_device_ != nullptr) mesh_device_->Release(); mesh_device_ = nullptr; }
         if(mesh_device_ == nullptr && mesh_command_list_ != nullptr) { mesh_command_list_->Release(); mesh_command_list_ = nullptr; }
 
+        D3D12_FEATURE_DATA_D3D12_OPTIONS16 gpu_upload_heap_features = {};
+        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS16, &gpu_upload_heap_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS16));
+        bool const gpu_upload_heap_supported = gpu_upload_heap_features.GPUUploadHeapSupported;
+        GFX_PRINTLN("GPU upload heap is supported: %s", gpu_upload_heap_supported ? "true" : "false");
+        // Prefer the GPU Upload Heap when available. it's CPU-writable heap like a regular upload heap, but resides in VRAM instead of system memory.
+        // So the GPU can read it back at full bandwidth. https://microsoft.github.io/DirectX-Specs/d3d/D3D12GPUUploadHeaps.html
+        // Note: probably you'll need to enable `ReBAR` in the BIOS
+        upload_heap_type_ = (gpu_upload_heap_supported ? D3D12_HEAP_TYPE_GPU_UPLOAD : D3D12_HEAP_TYPE_UPLOAD);
+
         D3D12MA::ALLOCATOR_DESC
         allocator_desc          = {};
         allocator_desc.Flags =
@@ -1902,7 +1912,7 @@ public:
             resource_state = D3D12_RESOURCE_STATE_COPY_DEST;
             break;
         case kGfxCpuAccess_Write:
-            allocation_desc.HeapType = D3D12_HEAP_TYPE_UPLOAD;
+            allocation_desc.HeapType = upload_heap_type_;
             resource_state = D3D12_RESOURCE_STATE_GENERIC_READ;
             break;
         default:    // kGfxCpuAccess_None
