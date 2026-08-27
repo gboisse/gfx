@@ -2101,12 +2101,15 @@ private:
                 skin.joints_[j] = node_handles.at(gltf_skin.joints[j]);
             }
             skin.inverse_bind_matrices_.resize(gltf_skin.inverse_bind_matrices->count);
-            assert(gltf_skin.inverse_bind_matrices->count * sizeof(glm::mat4)
-                   == gltf_skin.inverse_bind_matrices->buffer_view->size);
+
+            auto const offset = gltf_skin.inverse_bind_matrices->buffer_view->offset // offset to the view
+                              + gltf_skin.inverse_bind_matrices->offset;             // offset inside the view
+            auto const size   = gltf_skin.inverse_bind_matrices->count * sizeof(glm::mat4);
+
+            assert((gltf_skin.inverse_bind_matrices->offset + size)
+                   <= gltf_skin.inverse_bind_matrices->buffer_view->size);
             memcpy(skin.inverse_bind_matrices_.data(),
-                (uint8_t *)gltf_skin.inverse_bind_matrices->buffer_view->buffer->data
-                    + gltf_skin.inverse_bind_matrices->buffer_view->offset,
-                gltf_skin.inverse_bind_matrices->buffer_view->size);
+                (uint8_t *)gltf_skin.inverse_bind_matrices->buffer_view->buffer->data + offset, size);
         }
         for(auto const &animation : animations)
         {
