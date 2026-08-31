@@ -32,6 +32,9 @@ SOFTWARE.
 #include <d3d12shader.h>        // shader reflection
 #include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 #include <filesystem>
+#include <atomic>               // std::atomic
+#include <mutex>                // std::mutex
+#include <thread>               // std::thread
 
 #ifdef __clang__
 #    pragma clang diagnostic push
@@ -114,9 +117,29 @@ class GfxInternal
     bool debug_shaders_ = false;
     bool cache_shaders_ = false;
     bool experimental_shaders_ = false;
-    IDxcUtils *dxc_utils_ = nullptr;
-    IDxcCompiler3 *dxc_compiler_ = nullptr;
-    IDxcIncludeHandler *dxc_include_handler_ = nullptr;
+    struct ShaderCompiler
+    {
+        IDxcUtils *utils_ = nullptr;
+        IDxcCompiler3 *compiler_ = nullptr;
+        IDxcIncludeHandler *include_handler_ = nullptr;
+
+        bool create()
+        {
+            return SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&utils_)))
+                && SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&compiler_)))
+                && SUCCEEDED(utils_->CreateDefaultIncludeHandler(&include_handler_));
+        }
+
+        void release()
+        {
+            if(include_handler_ != nullptr) { include_handler_->Release(); include_handler_ = nullptr; }
+            if(compiler_ != nullptr) { compiler_->Release(); compiler_ = nullptr; }
+            if(utils_ != nullptr) { utils_->Release(); utils_ = nullptr; }
+        }
+
+        ~ShaderCompiler() { release(); }
+    };
+    ShaderCompiler shader_compiler_;
 
     IDXGISwapChain4 *swap_chain_ = nullptr;
     D3D12MA::Allocator *mem_allocator_ = nullptr;
@@ -788,13 +811,22 @@ class GfxInternal
             GfxShaderGroupType shader_group_type = kGfxShaderGroupType_Count;
         };
 
+        struct Library
+        {
+            GfxProgram program_ = {};
+            std::vector<String> defines_;
+            std::vector<String> exports_;
+            std::vector<String> subobjects_;
+            IDxcBlob *bytecode_ = nullptr;
+            ID3D12LibraryReflection *reflection_ = nullptr;
+        };
+
         String entry_point_;
         GfxProgram program_ = {};
         Type type_ = kType_Count;
         DrawState::Data draw_state_;
         std::vector<String> defines_;
-        std::vector<String> exports_;
-        std::vector<String> subobjects_;
+        std::vector<Library> libraries_;
         std::map<std::wstring, LocalRootSignatureAssociation> local_root_signature_associations_;
         uint64_t descriptor_heap_id_ = 0;
         uint32_t *num_threads_ = nullptr;
@@ -804,14 +836,12 @@ class GfxInternal
         IDxcBlob *vs_bytecode_ = nullptr;
         IDxcBlob *gs_bytecode_ = nullptr;
         IDxcBlob *ps_bytecode_ = nullptr;
-        IDxcBlob *lib_bytecode_ = nullptr;
         ID3D12ShaderReflection *cs_reflection_ = nullptr;
         ID3D12ShaderReflection *as_reflection_ = nullptr;
         ID3D12ShaderReflection *ms_reflection_ = nullptr;
         ID3D12ShaderReflection *vs_reflection_ = nullptr;
         ID3D12ShaderReflection *gs_reflection_ = nullptr;
         ID3D12ShaderReflection *ps_reflection_ = nullptr;
-        ID3D12LibraryReflection *lib_reflection_ = nullptr;
         ID3D12RootSignature *root_signature_ = nullptr;
         std::map<uint32_t, LocalParameter> local_parameters_;
         size_t sbt_record_stride_[kGfxShaderGroupType_Count] = {};
@@ -1396,9 +1426,7 @@ public:
             new(&constant_buffer_pool_[i]) GfxBuffer();
             new(&timestamp_query_heaps_[i]) TimestampQueryHeap();
         }
-        if(!SUCCEEDED(DxcCreateInstance(CLSID_DxcUtils, IID_PPV_ARGS(&dxc_utils_))) ||
-           !SUCCEEDED(DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&dxc_compiler_))) ||
-           !SUCCEEDED(dxc_utils_->CreateDefaultIncludeHandler(&dxc_include_handler_)))
+        if(!shader_compiler_.create())
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXC compiler");
 
         D3D12_INDIRECT_ARGUMENT_DESC dispatch_argument_desc = {};
@@ -1665,21 +1693,7 @@ public:
         gfxFree(fences_);
         fences_ = nullptr;
 
-        if(dxc_utils_ != nullptr)
-        {
-            dxc_utils_->Release();
-            dxc_utils_ = nullptr;
-        }
-        if(dxc_compiler_ != nullptr)
-        {
-            dxc_compiler_->Release();
-            dxc_compiler_ = nullptr;
-        }
-        if(dxc_include_handler_ != nullptr)
-        {
-            dxc_include_handler_->Release();
-            dxc_include_handler_ = nullptr;
-        }
+        shader_compiler_.release();
 
         if(back_buffer_allocations_ != nullptr)
             for(uint32_t i = 0; i < max_frames_in_flight_; ++i)
@@ -3303,11 +3317,8 @@ public:
         return graphics_kernel;
     }
 
-    GfxKernel createRaytracingKernel(GfxProgram const &program,
-        GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
-        char const **exports, uint32_t export_count,
-        char const **subobjects, uint32_t subobject_count,
-        char const **defines, uint32_t define_count)
+    GfxKernel createRaytracingKernel(GfxRaytracingLibrary const *libraries, uint32_t library_count,
+        GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count)
     {
         GfxKernel raytracing_kernel = {};
         if(dxr_device_ == nullptr)
@@ -3315,24 +3326,41 @@ public:
             GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Raytracing isn't supported on the selected device; cannot create raytracing kernel");
             return raytracing_kernel;   // invalid operation
         }
-        if(!program_handles_.has_handle(program.handle))
+        if(library_count == 0 || libraries == nullptr)
         {
-            GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a compute kernel using an invalid program object");
+            GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot create a raytracing kernel without a library");
             return raytracing_kernel;
         }
+        for(uint32_t i = 0; i < library_count; ++i)
+        {
+            if(!program_handles_.has_handle(libraries[i].program.handle))
+            {
+                GFX_PRINT_ERROR(kGfxResult_InvalidOperation, "Cannot create a raytracing kernel using an invalid program object");
+                return raytracing_kernel;
+            }
+        }
         raytracing_kernel.type = GfxKernel::kType_Raytracing;
-        Program const &gfx_program = programs_[program];
+        Program const &gfx_program = programs_[libraries[0].program];
         GFX_SNPRINTF(raytracing_kernel.name, sizeof(raytracing_kernel.name), "%s", "");
         raytracing_kernel.handle = kernel_handles_.allocate_handle();
         Kernel &gfx_kernel = kernels_.insert(raytracing_kernel);
-        gfx_kernel.program_ = program;
+        gfx_kernel.program_ = libraries[0].program;
         gfx_kernel.entry_point_ = "";
         gfx_kernel.type_ = Kernel::kType_Raytracing;
-        GFX_ASSERT(define_count == 0 || defines != nullptr);
         GFX_ASSERT(local_root_signature_association_count == 0 || local_root_signature_associations != nullptr);
-        for(uint32_t i = 0; i < define_count; ++i) gfx_kernel.defines_.push_back(defines[i]);
-        for(uint32_t i = 0; i < export_count; ++i) gfx_kernel.exports_.push_back(exports[i]);
-        for(uint32_t i = 0; i < subobject_count; ++i) gfx_kernel.subobjects_.push_back(subobjects[i]);
+        gfx_kernel.libraries_.resize(library_count);
+        for(uint32_t i = 0; i < library_count; ++i)
+        {
+            GfxRaytracingLibrary const &library = libraries[i];
+            Kernel::Library &gfx_library = gfx_kernel.libraries_[i];
+            GFX_ASSERT(library.define_count == 0 || library.defines != nullptr);
+            GFX_ASSERT(library.export_count == 0 || library.exports != nullptr);
+            GFX_ASSERT(library.subobject_count == 0 || library.subobjects != nullptr);
+            gfx_library.program_ = library.program;
+            for(uint32_t j = 0; j < library.define_count; ++j) gfx_library.defines_.push_back(library.defines[j]);
+            for(uint32_t j = 0; j < library.export_count; ++j) gfx_library.exports_.push_back(library.exports[j]);
+            for(uint32_t j = 0; j < library.subobject_count; ++j) gfx_library.subobjects_.push_back(library.subobjects[j]);
+        }
         std::wstring wgroup_name;
         for(uint32_t i = 0; i < local_root_signature_association_count; ++i)
         {
@@ -3351,6 +3379,20 @@ public:
             return raytracing_kernel;
         }
         return raytracing_kernel;
+    }
+
+    GfxKernel createRaytracingKernel(GfxProgram const &program,
+        GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count,
+        char const **exports, uint32_t export_count,
+        char const **subobjects, uint32_t subobject_count,
+        char const **defines, uint32_t define_count)
+    {
+        GfxRaytracingLibrary library = {};
+        library.program = program;
+        library.exports = exports; library.export_count = export_count;
+        library.subobjects = subobjects; library.subobject_count = subobject_count;
+        library.defines = defines; library.define_count = define_count;
+        return createRaytracingKernel(&library, 1, local_root_signature_associations, local_root_signature_association_count);
     }
 
     GfxResult destroyKernel(GfxKernel const &kernel)
@@ -6228,8 +6270,11 @@ private:
     void collect(Kernel const &kernel)
     {
         gfxFree(kernel.num_threads_);
-        collect(kernel.lib_bytecode_);
-        collect(kernel.lib_reflection_);
+        for(Kernel::Library const &library : kernel.libraries_)
+        {
+            collect(library.bytecode_);
+            collect(library.reflection_);
+        }
         collect(kernel.root_signature_);
         for(std::map<uint32_t, Kernel::LocalParameter>::const_iterator it = kernel.local_parameters_.begin(); it != kernel.local_parameters_.end(); ++it)
             collect((*it).second.local_root_signature_);
@@ -6442,7 +6487,7 @@ private:
         {
             D3D12_ROOT_PARAMETER root_parameter = {};
             ID3D12ShaderReflection *shader = nullptr;
-            ID3D12LibraryReflection *library = nullptr;
+            std::vector<ID3D12LibraryReflection *> libraries;
             switch(i)
             {
             case kShaderType_CS:
@@ -6469,7 +6514,8 @@ private:
                 root_parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_PIXEL;
                 break;
             case kShaderType_LIB:
-                library = kernel.lib_reflection_;
+                for(Kernel::Library const &kernel_library : kernel.libraries_)
+                    if(kernel_library.reflection_ != nullptr) libraries.push_back(kernel_library.reflection_);
                 root_parameter.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
                 break;
             default:
@@ -6633,20 +6679,23 @@ private:
                 root_signature_parameters.kernel_parameters.push_back(kernel_parameter);
             };
 
-            if(library != nullptr)
+            if(!libraries.empty())
             {
-                D3D12_LIBRARY_DESC library_desc;
-                library->GetDesc(&library_desc);
-                for(uint32_t k = 0; k < library_desc.FunctionCount; k++)
+                for(ID3D12LibraryReflection *library : libraries)
                 {
-                    ID3D12FunctionReflection *function = library->GetFunctionByIndex(k);
-                    D3D12_FUNCTION_DESC function_desc = {};
-                    function->GetDesc(&function_desc);
-                    for(uint32_t j = 0; j < function_desc.BoundResources; ++j)
+                    D3D12_LIBRARY_DESC library_desc;
+                    library->GetDesc(&library_desc);
+                    for(uint32_t k = 0; k < library_desc.FunctionCount; k++)
                     {
-                        D3D12_SHADER_INPUT_BIND_DESC resource_desc = {};
-                        function->GetResourceBindingDesc(j, &resource_desc);
-                        process_resource_binding(function, resource_desc);
+                        ID3D12FunctionReflection *function = library->GetFunctionByIndex(k);
+                        D3D12_FUNCTION_DESC function_desc = {};
+                        function->GetDesc(&function_desc);
+                        for(uint32_t j = 0; j < function_desc.BoundResources; ++j)
+                        {
+                            D3D12_SHADER_INPUT_BIND_DESC resource_desc = {};
+                            function->GetResourceBindingDesc(j, &resource_desc);
+                            process_resource_binding(function, resource_desc);
+                        }
                     }
                 }
             }
@@ -6983,40 +7032,59 @@ private:
     GfxResult createRaytracingPipelineState(Kernel &kernel)
     {
         GFX_ASSERT(kernel.state_object_ == nullptr);
+
+        for(Kernel::Library const &library : kernel.libraries_)
+        {
+            if(library.bytecode_ == nullptr)
+            {
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Cannot create the state object of a raytracing kernel; one of its libraries did not compile");
+            }
+        }
+
         D3D12_GLOBAL_ROOT_SIGNATURE
         global_root_signature = { kernel.root_signature_ };
-        std::vector<D3D12_EXPORT_DESC> export_descs;
-        std::vector<std::wstring> exports;
-        size_t max_export_length = 0;
-        for(size_t i = 0; i < kernel.exports_.size(); ++i)
-            max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
-        for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
-            max_export_length = GFX_MAX(max_export_length, strlen(kernel.subobjects_[i].c_str()));
-        max_export_length += 1;
-        std::vector<char> lib_export(max_export_length);
-        std::vector<WCHAR> wexport(max_export_length);
-        for(size_t i = 0; i < kernel.exports_.size(); ++i)
+        size_t const library_count = kernel.libraries_.size();
+        std::vector<std::vector<std::wstring>> library_exports(library_count);
+        std::vector<std::vector<D3D12_EXPORT_DESC>> library_export_descs(library_count);
+        std::vector<D3D12_DXIL_LIBRARY_DESC> lib_descs(library_count);
+        for(size_t i = 0; i < library_count; ++i)
         {
-            GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", kernel.exports_[i].c_str());
-            mbstowcs(wexport.data(), lib_export.data(), max_export_length);
-            exports.push_back(wexport.data());
+            Kernel::Library const &library = kernel.libraries_[i];
+            std::vector<std::wstring> &exports = library_exports[i];
+            size_t max_export_length = 0;
+            for(size_t j = 0; j < library.exports_.size(); ++j)
+                max_export_length = GFX_MAX(max_export_length, strlen(library.exports_[j].c_str()));
+            for(size_t j = 0; j < library.subobjects_.size(); ++j)
+                max_export_length = GFX_MAX(max_export_length, strlen(library.subobjects_[j].c_str()));
+            max_export_length += 1;
+            std::vector<char> lib_export(max_export_length);
+            std::vector<WCHAR> wexport(max_export_length);
+            for(size_t j = 0; j < library.exports_.size(); ++j)
+            {
+                GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", library.exports_[j].c_str());
+                mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+                exports.push_back(wexport.data());
+            }
+            for(size_t j = 0; j < library.subobjects_.size(); ++j)
+            {
+                GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", library.subobjects_[j].c_str());
+                mbstowcs(wexport.data(), lib_export.data(), max_export_length);
+                exports.push_back(wexport.data());
+            }
+            std::vector<D3D12_EXPORT_DESC> &export_descs = library_export_descs[i];
+            export_descs.reserve(exports.size());
+            for(size_t j = 0; j < exports.size(); ++j)
+            {
+                export_descs.push_back({ exports[j].c_str(), nullptr, D3D12_EXPORT_FLAG_NONE});
+            }
+            // An empty export list publishes the whole library
+            lib_descs[i] = { GetShaderBytecode(library.bytecode_), (UINT)export_descs.size(), export_descs.empty() ? nullptr : export_descs.data()};
         }
-        for(size_t i = 0; i < kernel.subobjects_.size(); ++i)
-        {
-            GFX_SNPRINTF(lib_export.data(), max_export_length, "%s", kernel.subobjects_[i].c_str());
-            mbstowcs(wexport.data(), lib_export.data(), max_export_length);
-            exports.push_back(wexport.data());
-        }
-        for(size_t i = 0; i < exports.size(); ++i)
-        {
-            export_descs.push_back({ exports[i].c_str(), nullptr, D3D12_EXPORT_FLAG_NONE});
-        }
-        D3D12_DXIL_LIBRARY_DESC
-        lib_desc = { GetShaderBytecode(kernel.lib_bytecode_), (UINT)export_descs.size(), export_descs.data()};
         std::vector<D3D12_STATE_SUBOBJECT> subobjects;
-        subobjects.reserve(kernel.local_root_signature_associations_.size() + 2);
+        subobjects.reserve(kernel.local_root_signature_associations_.size() + library_count + 1);
         subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_GLOBAL_ROOT_SIGNATURE, &global_root_signature});
-        subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_desc });
+        for(size_t i = 0; i < library_count; ++i)
+            subobjects.push_back({D3D12_STATE_SUBOBJECT_TYPE_DXIL_LIBRARY, &lib_descs[i] });
         std::vector<D3D12_SUBOBJECT_TO_EXPORTS_ASSOCIATION> local_root_signature_associations;
         std::vector<D3D12_LOCAL_ROOT_SIGNATURE> local_root_signatures;
         std::vector<LPCWSTR> local_root_signature_associated_exports;
@@ -7368,6 +7436,13 @@ private:
                         sbt_buffer.resource_->GetGPUVirtualAddress() + sbt_index * kernel.sbt_record_stride_[i];
                     uint64_t const src_offset = upload_buffer_offset;
                     void *shader_identifier = state_object_properties->GetShaderIdentifier(sbt_record.shader_identifier_.c_str());
+                    if(shader_identifier == nullptr)
+                    {
+                        destroyBuffer(upload_gfx_buffer);
+                        state_object_properties->Release();
+                        return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Shader group `%ls' of the shader binding table is not exported by the raytracing kernel; cannot dispatch",
+                            sbt_record.shader_identifier_.c_str());
+                    }
                     memcpy((uint8_t *)upload_buffer.data_ + upload_buffer_offset, shader_identifier, D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES);
                     upload_buffer_offset += D3D12_SHADER_IDENTIFIER_SIZE_IN_BYTES;
                     auto local_root_signature_association = kernel.local_root_signature_associations_.find(sbt_record.shader_identifier_);
@@ -9425,16 +9500,17 @@ private:
         GFX_ASSERT(kernel.vs_bytecode_ == nullptr && kernel.vs_reflection_ == nullptr);
         GFX_ASSERT(kernel.gs_bytecode_ == nullptr && kernel.gs_reflection_ == nullptr);
         GFX_ASSERT(kernel.ps_bytecode_ == nullptr && kernel.ps_reflection_ == nullptr);
-        GFX_ASSERT(kernel.lib_bytecode_ == nullptr && kernel.lib_reflection_ == nullptr);
+        GFX_ASSERT(std::all_of(kernel.libraries_.begin(), kernel.libraries_.end(),
+            [](Kernel::Library const &library) { return library.bytecode_ == nullptr && library.reflection_ == nullptr; }));
         GFX_ASSERT(kernel.root_signature_ == nullptr);
         GFX_ASSERT(kernel.pipeline_state_ == nullptr);
         GFX_ASSERT(kernel.parameters_ == nullptr);
         if(kernel.isMesh())
         {
             kernel_type = "Mesh";
-            compileShader(program, kernel, kShaderType_AS, kernel.as_bytecode_, kernel.as_reflection_);
-            compileShader(program, kernel, kShaderType_MS, kernel.ms_bytecode_, kernel.ms_reflection_);
-            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            compileShader(program, kernel, kShaderType_AS, kernel.as_bytecode_, kernel.as_reflection_, kernel.defines_, shader_compiler_);
+            compileShader(program, kernel, kShaderType_MS, kernel.ms_bytecode_, kernel.ms_reflection_, kernel.defines_, shader_compiler_);
+            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_, kernel.defines_, shader_compiler_);
             createRootSignature(kernel);
             result = createMeshPipelineState(kernel, kernel.draw_state_);
             if(kernel.as_reflection_ != nullptr)
@@ -9447,7 +9523,7 @@ private:
         else if(kernel.isCompute())
         {
             kernel_type = "Compute";
-            compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_);
+            compileShader(program, kernel, kShaderType_CS, kernel.cs_bytecode_, kernel.cs_reflection_, kernel.defines_, shader_compiler_);
             createRootSignature(kernel);
             createComputePipelineState(kernel);
             if(kernel.cs_reflection_ != nullptr)
@@ -9458,16 +9534,16 @@ private:
         else if(kernel.isGraphics())
         {
             kernel_type = "Graphics";
-            compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_);
-            compileShader(program, kernel, kShaderType_GS, kernel.gs_bytecode_, kernel.gs_reflection_);
-            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_);
+            compileShader(program, kernel, kShaderType_VS, kernel.vs_bytecode_, kernel.vs_reflection_, kernel.defines_, shader_compiler_);
+            compileShader(program, kernel, kShaderType_GS, kernel.gs_bytecode_, kernel.gs_reflection_, kernel.defines_, shader_compiler_);
+            compileShader(program, kernel, kShaderType_PS, kernel.ps_bytecode_, kernel.ps_reflection_, kernel.defines_, shader_compiler_);
             createRootSignature(kernel);
             result = createGraphicsPipelineState(kernel, kernel.draw_state_);
         }
         else if(kernel.isRaytracing())
         {
             kernel_type = "Raytracing";
-            compileShader(program, kernel, kShaderType_LIB, kernel.lib_bytecode_, kernel.lib_reflection_);
+            compileLibraries(kernel);
             createRootSignature(kernel);
             createRaytracingPipelineState(kernel);
         }
@@ -9498,14 +9574,17 @@ private:
         if(kernel.vs_bytecode_ != nullptr) { kernel.vs_bytecode_->Release(); kernel.vs_bytecode_ = nullptr; }
         if(kernel.gs_bytecode_ != nullptr) { kernel.gs_bytecode_->Release(); kernel.gs_bytecode_ = nullptr; }
         if(kernel.ps_bytecode_ != nullptr) { kernel.ps_bytecode_->Release(); kernel.ps_bytecode_ = nullptr; }
-        if(kernel.lib_bytecode_ != nullptr) { kernel.lib_bytecode_->Release(); kernel.lib_bytecode_ = nullptr; }
         if(kernel.cs_reflection_ != nullptr) { kernel.cs_reflection_->Release(); kernel.cs_reflection_ = nullptr; }
         if(kernel.as_reflection_ != nullptr) { kernel.as_reflection_->Release(); kernel.as_reflection_ = nullptr; }
         if(kernel.ms_reflection_ != nullptr) { kernel.ms_reflection_->Release(); kernel.ms_reflection_ = nullptr; }
         if(kernel.vs_reflection_ != nullptr) { kernel.vs_reflection_->Release(); kernel.vs_reflection_ = nullptr; }
         if(kernel.gs_reflection_ != nullptr) { kernel.gs_reflection_->Release(); kernel.gs_reflection_ = nullptr; }
         if(kernel.ps_reflection_ != nullptr) { kernel.ps_reflection_->Release(); kernel.ps_reflection_ = nullptr; }
-        if(kernel.lib_reflection_ != nullptr) { kernel.lib_reflection_->Release(); kernel.lib_reflection_ = nullptr; }
+        for(Kernel::Library &library : kernel.libraries_)
+        {
+            if(library.bytecode_ != nullptr) { library.bytecode_->Release(); library.bytecode_ = nullptr; }
+            if(library.reflection_ != nullptr) { library.reflection_->Release(); library.reflection_ = nullptr; }
+        }
         if(kernel.root_signature_ != nullptr) { collect(kernel.root_signature_); kernel.root_signature_ = nullptr; }
         if(kernel.pipeline_state_ != nullptr) { collect(kernel.pipeline_state_); kernel.pipeline_state_ = nullptr; }
         if(kernel.state_object_ != nullptr) { collect(kernel.state_object_); kernel.state_object_ = nullptr; }
@@ -9530,9 +9609,59 @@ private:
         ID3D12ShaderReflection *shader_reflection_ = nullptr;
     };
     std::map<uint64_t, Shader> shaders_;
+    std::mutex shaders_mutex_;        // guards `shaders_'
+    std::mutex shader_files_mutex_;   // guards the shader cache and PDB directories
+
+    // Compiles the libraries of a raytracing kernel in parallel
+    void compileLibraries(Kernel &kernel)
+    {
+        size_t const library_count = kernel.libraries_.size();
+        if(library_count == 0) return;
+
+        auto const compile_library = [&](Kernel::Library &library, ShaderCompiler const &shader_compiler)
+        {
+            if(!program_handles_.has_handle(library.program_.handle)) return;
+            compileShader(programs_[library.program_], kernel, kShaderType_LIB, library.bytecode_, library.reflection_, library.defines_, shader_compiler);
+        };
+
+        uint32_t const thread_count = GFX_MIN((uint32_t)library_count, GFX_MAX(std::thread::hardware_concurrency(), 1u));
+        if(thread_count < 2)
+        {
+            for(Kernel::Library &library : kernel.libraries_)
+                compile_library(library, shader_compiler_);
+            return;
+        }
+
+        std::atomic<size_t>   next_library = 0;
+        std::atomic<uint32_t> compiling_threads = 0;
+        auto const worker = [&]()
+        {
+            ShaderCompiler shader_compiler;
+            if(!shader_compiler.create())
+            {
+                GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to create DXC compiler; cannot compile the libraries of a raytracing kernel in parallel");
+                return;
+            }
+            ++compiling_threads;
+            for(size_t i = next_library++; i < library_count; i = next_library++)
+                compile_library(kernel.libraries_[i], shader_compiler);
+        };
+
+        std::vector<std::thread> threads;
+        threads.reserve(thread_count);
+        for(uint32_t i = 0; i < thread_count; ++i)
+            threads.emplace_back(worker);
+        for(std::thread &thread : threads)
+            thread.join();
+
+        if(compiling_threads == 0)
+            for(Kernel::Library &library : kernel.libraries_)
+                compile_library(library, shader_compiler_);
+    }
 
     template<typename REFLECTION_TYPE>
-    void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, REFLECTION_TYPE *&reflection)
+    void compileShader(Program const &program, Kernel const &kernel, ShaderType shader_type, IDxcBlob *&shader_bytecode, REFLECTION_TYPE *&reflection,
+        std::vector<String> const &defines, ShaderCompiler const &shader_compiler)
     {
         DxcBuffer shader_source = {};
         IDxcBlobEncoding *dxc_source = nullptr;
@@ -9547,7 +9676,7 @@ private:
             mbstowcs(wshader_file.data(), shader_file.data(), shader_file.size());
             // Check file existence before LoadFile call. LoadFile spams hlsl::Exception messages if file not found.
             if(GetFileAttributesW(wshader_file.data()) == INVALID_FILE_ATTRIBUTES) return;
-            dxc_utils_->LoadFile(wshader_file.data(), nullptr, &dxc_source);
+            shader_compiler.utils_->LoadFile(wshader_file.data(), nullptr, &dxc_source);
             if(!dxc_source) return; // failed to load source file
             shader_source.Ptr = dxc_source->GetBufferPointer();
             shader_source.Size = dxc_source->GetBufferSize();
@@ -9624,29 +9753,8 @@ private:
             shader_args.push_back(L"-select-validator internal");
         }
 
-        std::vector<std::wstring> exports;
         if(shader_type == kShaderType_LIB)
         {
-            if(!kernel.exports_.empty())
-            {
-                size_t max_export_length = 0;
-                for(size_t i = 0; i < kernel.exports_.size(); ++i)
-                    max_export_length = GFX_MAX(max_export_length, strlen(kernel.exports_[i].c_str()));
-                max_export_length += 1;
-                std::vector<char> lib_export(max_export_length);
-                std::vector<WCHAR> wexport(max_export_length);
-                for(size_t i = 0; i < kernel.exports_.size(); ++i)
-                {
-                    GFX_SNPRINTF(lib_export.data(), lib_export.size(), "%s", kernel.exports_[i].c_str());
-                    mbstowcs(wexport.data(), lib_export.data(), max_export_length);
-                    exports.push_back(wexport.data());
-                }
-                for(size_t i = 0; i < exports.size(); ++i)
-                {
-                    shader_args.push_back(L"-exports");
-                    shader_args.push_back(exports[i].c_str());
-                }
-            }
             shader_args.push_back(L"-auto-binding-space 0");
         }
         else
@@ -9663,17 +9771,17 @@ private:
         }
 
         std::vector<std::wstring> user_defines;
-        if(!kernel.defines_.empty())
+        if(!defines.empty())
         {
             size_t max_define_length = 0;
-            for(size_t i = 0; i < kernel.defines_.size(); ++i)
-                max_define_length = GFX_MAX(max_define_length, strlen(kernel.defines_[i].c_str()));
+            for(size_t i = 0; i < defines.size(); ++i)
+                max_define_length = GFX_MAX(max_define_length, strlen(defines[i].c_str()));
             max_define_length += 3; // `//' + null terminator: https://github.com/gboisse/gfx/issues/41
             std::vector<WCHAR> wdefine(max_define_length << 1);
             std::vector<char> define(max_define_length);
-            for(size_t i = 0; i < kernel.defines_.size(); ++i)
+            for(size_t i = 0; i < defines.size(); ++i)
             {
-                GFX_SNPRINTF(define.data(), max_define_length, "%s//", kernel.defines_[i].c_str());
+                GFX_SNPRINTF(define.data(), max_define_length, "%s//", defines[i].c_str());
                 mbstowcs(wdefine.data(), define.data(), max_define_length);
                 user_defines.push_back(wdefine.data());
             }
@@ -9714,7 +9822,7 @@ private:
         {
             IDxcResult *dxc_preprocess = nullptr;
             shader_args.push_back(L"-P");   // run DXC as preprocessor
-            dxc_compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), dxc_include_handler_, IID_PPV_ARGS(&dxc_preprocess));
+            shader_compiler.compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), shader_compiler.include_handler_, IID_PPV_ARGS(&dxc_preprocess));
             if(dxc_preprocess != nullptr)
             {
                 IDxcBlob *dxc_hlsl = nullptr;
@@ -9730,7 +9838,7 @@ private:
                         buffer[GFX_MIN(ret, std::size(buffer) - 1)] = '\0'; // make sure we have a null terminator since Hash function expects it
                         HashCombine(shader_key, Hash(buffer));
                     }
-                    for(String const &define : kernel.defines_)
+                    for(String const &define : defines)
                         HashCombine(shader_key, Hash(define.c_str()));
                     HashCombine(shader_key, Hash(hlsl.c_str()));
                     HashCombine(shader_key, shader_type);
@@ -9741,14 +9849,17 @@ private:
             shader_args.pop_back();
             if(shader_key != 0)
             {
-                std::map<uint64_t, Shader>::const_iterator const it = shaders_.find(shader_key);
-                if(it != shaders_.end())
                 {
-                    shader_bytecode = (*it).second.shader_bytecode_;
-                    reflection = (*it).second.shader_reflection_;
-                    GFX_ASSERT(shader_bytecode != nullptr && reflection != nullptr);
-                    if(dxc_source) dxc_source->Release();
-                    return; // done
+                    std::lock_guard<std::mutex> const cache_lock(shaders_mutex_);
+                    std::map<uint64_t, Shader>::const_iterator const it = shaders_.find(shader_key);
+                    if(it != shaders_.end())
+                    {
+                        shader_bytecode = (*it).second.shader_bytecode_;
+                        reflection = (*it).second.shader_reflection_;
+                        GFX_ASSERT(shader_bytecode != nullptr && reflection != nullptr);
+                        if(dxc_source) dxc_source->Release();
+                        return; // done
+                    }
                 }
                 std::filesystem::path file_path(program.file_path_.c_str(), std::locale("en_US.UTF-8"));
                 if(is_directory(file_path))
@@ -9777,7 +9888,7 @@ private:
                 shader_key_dir += '/';
                 if(cache_shaders_)
                 {
-                    static bool created_shader_cache_directory;
+                    static std::atomic<bool> created_shader_cache_directory;
                     if(!created_shader_cache_directory)
                     {
                         int32_t const result = _wmkdir(shader_cache_dir.c_str());
@@ -9793,16 +9904,17 @@ private:
                     shader_key_bytecode = shader_key_file + L".bytecode";
                     shader_key_reflection = shader_key_file + L".reflection";
                     IDxcBlobEncoding *bytecode_blob = nullptr, *reflection_blob = nullptr;
-                    dxc_utils_->LoadFile(shader_key_bytecode.data(), nullptr, &bytecode_blob);
-                    dxc_utils_->LoadFile(shader_key_reflection.data(), nullptr, &reflection_blob);
+                    shader_compiler.utils_->LoadFile(shader_key_bytecode.data(), nullptr, &bytecode_blob);
+                    shader_compiler.utils_->LoadFile(shader_key_reflection.data(), nullptr, &reflection_blob);
                     if(bytecode_blob != nullptr && reflection_blob != nullptr)
                     {
                         DxcBuffer reflection_data = {};
                         reflection_data.Size = reflection_blob->GetBufferSize();
                         reflection_data.Ptr = reflection_blob->GetBufferPointer();
-                        dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
+                        shader_compiler.utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
                         if(reflection != nullptr)
                         {
+                            std::lock_guard<std::mutex> const cache_lock(shaders_mutex_);
                             Shader &shader = shaders_[shader_key];
                             shader.shader_bytecode_ = bytecode_blob;
                             shader.shader_reflection_ = reflection;
@@ -9818,7 +9930,7 @@ private:
         }
 
         IDxcResult *dxc_result = nullptr;
-        dxc_compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), dxc_include_handler_, IID_PPV_ARGS(&dxc_result));
+        shader_compiler.compiler_->Compile(&shader_source, shader_args.data(), (uint32_t)shader_args.size(), shader_compiler.include_handler_, IID_PPV_ARGS(&dxc_result));
         if(dxc_source) dxc_source->Release();
         if(!dxc_result) return; // should never happen?
 
@@ -9860,7 +9972,7 @@ private:
         }
         if(dxc_pdb != nullptr && dxc_pdb_name != nullptr)
         {
-            static bool created_shader_pdb_directory;
+            static std::atomic<bool> created_shader_pdb_directory;   // written by every thread that compiles a library
             if(!created_shader_pdb_directory)
             {
                 int32_t const result = _wmkdir(shader_pdb_dir.c_str());
@@ -9880,6 +9992,7 @@ private:
                 fclose(fd); // write out PDB for shader debugging
             }
             // Delete older pdb files
+            std::lock_guard<std::mutex> const files_lock(shader_files_mutex_);
             std::filesystem::directory_iterator const end;
             std::vector<std::filesystem::path>        pdb_files;
             for(std::filesystem::directory_iterator iter{std::filesystem::path(shader_pdb_dir + shader_key_dir)}; iter != end; ++iter)
@@ -9898,16 +10011,18 @@ private:
         DxcBuffer reflection_data = {};
         reflection_data.Size = dxc_reflection->GetBufferSize();
         reflection_data.Ptr = dxc_reflection->GetBufferPointer();
-        dxc_utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
+        shader_compiler.utils_->CreateReflection(&reflection_data, IID_PPV_ARGS(&reflection));
 
         if(shader_key != 0 && dxc_bytecode != nullptr && reflection != nullptr)
         {
             if constexpr(std::is_same<ID3D12ShaderReflection, REFLECTION_TYPE>::value)
             {
-                GFX_ASSERT(shaders_.find(shader_key) == shaders_.end());
-                Shader &shader = shaders_[shader_key];
-                shader.shader_bytecode_ = dxc_bytecode;
-                shader.shader_reflection_ = reflection;
+                {
+                    std::lock_guard<std::mutex> const cache_lock(shaders_mutex_);
+                    Shader &shader = shaders_[shader_key];
+                    shader.shader_bytecode_ = dxc_bytecode;
+                    shader.shader_reflection_ = reflection;
+                }
                 if(cache_shaders_)
                 {
                     FILE *fd = _wfopen(shader_key_bytecode.c_str(), L"wb");
@@ -9923,6 +10038,7 @@ private:
                         fclose(fd); // write out reflection for shader caching
                     }
                     // Delete older cached files
+                    std::lock_guard<std::mutex> const files_lock(shader_files_mutex_);
                     std::filesystem::directory_iterator const end;
                     std::vector<std::filesystem::path>        bytecode_files;
                     std::vector<std::filesystem::path>        reflection_files;
@@ -10906,6 +11022,15 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return raytracing_kernel;    // invalid context
     return gfx->createRaytracingKernel(program, local_root_signature_associations, local_root_signature_association_count, exports, export_count, subobjects, subobject_count, defines, define_count);
+}
+
+GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxRaytracingLibrary const *libraries, uint32_t library_count,
+    GfxLocalRootSignatureAssociation const *local_root_signature_associations, uint32_t local_root_signature_association_count)
+{
+    GfxKernel const raytracing_kernel = {};
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return raytracing_kernel;    // invalid context
+    return gfx->createRaytracingKernel(libraries, library_count, local_root_signature_associations, local_root_signature_association_count);
 }
 
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel)

@@ -352,6 +352,18 @@ struct GfxLocalRootSignatureAssociation
     char const *shader_group_name = nullptr;
 };
 
+// One DXIL library of a raytracing kernel
+struct GfxRaytracingLibrary
+{
+    GfxProgram program = {};
+    char const **exports = nullptr;
+    uint32_t export_count = 0;
+    char const **subobjects = nullptr;
+    uint32_t subobject_count = 0;
+    char const **defines = nullptr;
+    uint32_t define_count = 0;
+};
+
 GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);    // draws to back buffer
 GfxKernel gfxCreateMeshKernel(GfxContext context, GfxProgram program, GfxDrawState draw_state, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
 GfxKernel gfxCreateComputeKernel(GfxContext context, GfxProgram program, char const *entry_point = nullptr, char const **defines = nullptr, uint32_t define_count = 0);
@@ -362,6 +374,8 @@ GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxProgram program,
     char const **exports = nullptr, uint32_t export_count = 0,
     char const **subobjects = nullptr, uint32_t subobject_count = 0,
     char const **defines = nullptr, uint32_t define_count = 0);
+GfxKernel gfxCreateRaytracingKernel(GfxContext context, GfxRaytracingLibrary const *libraries, uint32_t library_count,
+    GfxLocalRootSignatureAssociation const *local_root_signature_associations = nullptr, uint32_t local_root_signature_association_count = 0);
 GfxResult gfxDestroyKernel(GfxContext context, GfxKernel kernel);
 
 uint32_t const *gfxKernelGetNumThreads(GfxContext context, GfxKernel kernel);
