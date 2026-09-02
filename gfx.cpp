@@ -502,7 +502,7 @@ class GfxInternal
     struct TopLevelAccelerationStructureInstance
     {
         uint32_t index_ = 0;
-        float transform_[12] = {};
+        float transform_[12] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f };
         uint32_t instance_id_ = 0;
         uint8_t instance_mask_ = 0xFFu;
         uint32_t instance_contribution_to_hit_group_index_ = 0;
