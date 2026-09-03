@@ -2725,8 +2725,25 @@ public:
             if(update && gfx_blas.state_ != BottomLevelAccelerationStructure::kState_Built)
                 return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot update a bottom level acceleration structure object that has not yet been built");
             for(GfxGeometry const &geometry : gfx_blas.geometries_)
+            {
                 if(!geometry_handles_.has_handle(geometry.handle))
                     return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build an invalid bottom level acceleration structure object");
+                Geometry const &gfx_geometry = geometries_[geometry];
+                if(gfx_geometry.type_ == Geometry::kType_Triangles)
+                {
+                    if(!buffer_handles_.has_handle(gfx_geometry.data_.triangles_.vertex_buffer_.handle))
+                        return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build bottom level acceleration structure with invalid geometry");
+                    if(gfx_geometry.data_.triangles_.index_stride_ != 0 && !buffer_handles_.has_handle(gfx_geometry.data_.triangles_.index_buffer_.handle))
+                        return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build bottom level acceleration structure with invalid geometry");
+                }
+                else if(gfx_geometry.type_ == Geometry::kType_Procedural)
+                {
+                    if(!buffer_handles_.has_handle(gfx_geometry.data_.procedural_.procedural_buffer_.handle))
+                        return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build bottom level acceleration structure with invalid geometry");
+                }
+                else
+                    return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot build bottom level acceleration structure with unknown geometry type");
+            }
         }
         batch_descs_.reserve(blas_count);
         batch_descs_.clear();
