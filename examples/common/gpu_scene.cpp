@@ -139,34 +139,29 @@ GpuScene UploadSceneToGpuMemory(GfxContext gfx, GfxScene scene)
     gpu_scene.index_buffer  = gfxCreateBuffer<uint32_t>(gfx, (uint32_t)indices.size(), indices.data());
     gpu_scene.vertex_buffer = gfxCreateBuffer<Vertex>(gfx, (uint32_t)vertices.size(), vertices.data());
 
+    uint32_t const render_instance_count = gfxSceneGetRenderInstanceCount(scene);
     // Load our instances
     std::vector<Instance>  instances;
+    instances.reserve(render_instance_count);
     std::vector<glm::mat4> transforms;
+    transforms.reserve(render_instance_count);
 
-    for(uint32_t i = 0; i < gfxSceneGetRenderInstanceCount(scene); ++i)
+    for(uint32_t i = 0; i < render_instance_count; ++i)
     {
         GfxConstRef<GfxRenderInstance> const render_instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
-
-        uint32_t const instance_count = (uint32_t)render_instance_ref->instances.size();
-
-        for(uint32_t j = 0; j < instance_count; ++j)
+        if(render_instance_ref->instances.empty())
         {
-            GfxConstRef<GfxMeshInstance> const instance_ref = render_instance_ref->instances[j];
+            continue;
+        }
 
+        transforms.push_back(render_instance_ref->transform);
+
+        for(GfxRef<GfxMeshInstance> const &mesh_instance : render_instance_ref->instances)
+        {
             Instance instance    = {};
-            instance.mesh_id     = (uint32_t)instance_ref->mesh;
-            instance.material_id = (uint32_t)instance_ref->material;
-
-            uint32_t const instance_id = (uint32_t)instance_ref;
-
-            if(instance_id >= instances.size())
-            {
-                instances.resize(instance_id + 1);
-                transforms.resize(instance_id + 1);
-            }
-
-            instances[instance_id]  = instance;
-            transforms[instance_id] = render_instance_ref->transform;
+            instance.mesh_id     = (uint32_t)mesh_instance->mesh;
+            instance.material_id = (uint32_t)mesh_instance->material;
+            instances.push_back(instance);
         }
     }
 
@@ -237,24 +232,15 @@ void UpdateGpuScene(GfxContext gfx, GfxScene scene, GpuScene &gpu_scene)
 
     glm::mat4 *transforms = gfxBufferGetData<glm::mat4>(gfx, upload_transform_buffer);
 
-    uint32_t const render_instance_count = gfxSceneGetRenderInstanceCount(scene);
-
-    for(uint32_t i = 0; i < render_instance_count; ++i)
+    for(uint32_t i = 0, instance_id = 0; i < gfxSceneGetRenderInstanceCount(scene); ++i)
     {
-        GfxRef<GfxRenderInstance> render_instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
-
-        std::vector<GfxRef<GfxMeshInstance>> const &instances = render_instance_ref->instances;
-
-        uint32_t const instance_count = (uint32_t)instances.size();
-
-        for(uint32_t j = 0; j < instance_count; ++j)
+        GfxConstRef<GfxRenderInstance> const render_instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
+        if(render_instance_ref->instances.empty())
         {
-            GfxConstRef<GfxMeshInstance> const instance_ref = instances[j];
-
-            uint32_t const instance_id = (uint32_t)instance_ref;
-
-            transforms[instance_id] = render_instance_ref->transform;
+            continue;
         }
+
+        transforms[instance_id++] = render_instance_ref->transform;
     }
 
     gfxCommandCopyBuffer(gfx, gpu_scene.previous_transform_buffer, gpu_scene.transform_buffer);

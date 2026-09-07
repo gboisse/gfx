@@ -141,7 +141,7 @@ int32_t main()
         gfxCommandClearTexture(gfx, depth_buffer);
 
         // Draw all the meshes in the scene
-        uint32_t const render_instance_count = gfxSceneGetRenderInstanceCount(scene);
+        uint32_t const instance_count = gfxSceneGetRenderInstanceCount(scene);
 
         gfxCommandBindColorTarget(gfx, 0, color_buffer);
         gfxCommandBindColorTarget(gfx, 1, velocity_buffer);
@@ -150,22 +150,18 @@ int32_t main()
         gfxCommandBindIndexBuffer(gfx, gpu_scene.index_buffer);
         gfxCommandBindVertexBuffer(gfx, gpu_scene.vertex_buffer);
 
-        for(uint32_t i = 0; i < render_instance_count; ++i)
+        for(uint32_t i = 0, instance_id = 0; i < instance_count; ++i)
         {
-            GfxConstRef<GfxRenderInstance> const render_instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
-
-            std::vector<GfxRef<GfxMeshInstance>> const &instances = render_instance_ref->instances;
-
-            uint32_t const instance_count = (uint32_t)instances.size();
-
-            for(uint32_t j = 0; j < instance_count; ++j)
+            GfxConstRef<GfxRenderInstance> const instance_ref = gfxSceneGetRenderInstanceHandle(scene, i);
+            if(instance_ref->instances.empty())
             {
-                GfxConstRef<GfxMeshInstance> const instance_ref = instances[j];
+                continue;
+            }
 
-                uint32_t const instance_id = (uint32_t)instance_ref;
-                uint32_t const mesh_id     = (uint32_t)instance_ref->mesh;
-
-                Mesh const mesh = gpu_scene.meshes[mesh_id];
+            for(GfxRef<GfxMeshInstance> const &mesh_instance : instance_ref->instances)
+            {
+                uint32_t const mesh_id = (uint32_t)mesh_instance->mesh;
+                Mesh const &mesh       = gpu_scene.meshes[mesh_id];
 
                 gfxProgramSetParameter(gfx, pbr_program, "g_InstanceId", instance_id);
                 gfxProgramSetParameter(gfx, pbr_program, "g_ViewProjection", fly_camera.view_proj);
@@ -173,6 +169,8 @@ int32_t main()
 
                 gfxCommandDrawIndexed(gfx, mesh.count, 1, mesh.first_index, mesh.base_vertex);
             }
+
+            ++instance_id;
         }
 
         // Draw our skybox

@@ -68,7 +68,7 @@ int32_t main()
 
     uint32_t const mesh_count     = gfxSceneGetMeshCount(scene);
     uint32_t const material_count = gfxSceneGetMaterialCount(scene);
-    uint32_t const instance_count = gfxSceneGetMeshInstanceCount(scene);
+    uint32_t const instance_count = gfxSceneGetRenderInstanceCount(scene);
 
     for(uint32_t i = 0; i < mesh_count; ++i)
     {
@@ -130,20 +130,52 @@ int32_t main()
     GfxTexture dummy_albedo = gfxCreateTexture2D(gfx, 1, 1, DXGI_FORMAT_R8G8B8A8_UNORM, 1, albedo_value);
     gfxCommandClearTexture(gfx, dummy_albedo);
 
-    GfxAccelerationStructure rt_scene = gfxCreateAccelerationStructure(gfx);
-    std::vector<GfxRaytracingPrimitive> rt_meshes(instance_count);
+    GfxTopLevelAccelerationStructure rt_scene = gfxCreateTopLevelAccelerationStructure(gfx);
+    std::vector<GfxTopLevelAccelerationStructureInstance> tlas_instances;
+    tlas_instances.reserve(instance_count);
+    std::vector<GfxBottomLevelAccelerationStructure> blases;
+    blases.reserve(instance_count);
+    std::vector<GfxBuildBottomLevelASFlags> build_flags;
+    build_flags.reserve(instance_count);
+    std::vector<GfxGeometry> geometries;
+    geometries.reserve(instance_count);
 
     for(uint32_t i = 0; i < instance_count; ++i)
     {
-        rt_meshes[i] = gfxCreateRaytracingPrimitive(gfx, rt_scene);
+        GfxRef<GfxRenderInstance> render_instance = gfxSceneGetRenderInstanceHandle(scene, i);
+        if(render_instance->instances.empty())
+        {
+            continue;
+        }
 
-        GfxConstRef<GfxMeshInstance> instance_ref = gfxSceneGetMeshInstanceHandle(scene, i);
+        // Create tlas instance
+        tlas_instances.push_back(gfxCreateTopLevelAccelerationStructureInstance(gfx));
+        GfxTopLevelAccelerationStructureInstance &instance = tlas_instances.back();
+        gfxTopLevelAccelerationStructureAddInstance(gfx, rt_scene, instance);
+        // Create blas
+        blases.push_back(gfxCreateBottomLevelAccelerationStructure(gfx));
+        GfxBottomLevelAccelerationStructure &blas = blases.back();
+        gfxTopLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(gfx, instance, blas);
+        build_flags.push_back(kGfxBuildBottomLevelASFlag_FastTrace);
 
-        uint32_t const mesh_id = (uint32_t)instance_ref->mesh;
-        gfxRaytracingPrimitiveBuild(gfx, rt_meshes[i], index_buffers[mesh_id], vertex_buffers[mesh_id]);
+        for(GfxRef<GfxMeshInstance> const &mesh_instance : render_instance->instances)
+        {
+            uint32_t const mesh_id = (uint32_t)mesh_instance->mesh;
+
+            GfxBuffer const &index_buffer  = index_buffers[mesh_id];
+            GfxBuffer        index         = gfxCreateBufferRange(gfx, index_buffer, 0, index_buffer.getSize());
+            GfxBuffer const &vertex_buffer = vertex_buffers[mesh_id];
+            GfxBuffer        vertex        = gfxCreateBufferRange(gfx, vertex_buffer, 0, vertex_buffer.getSize());
+
+            // Create geometry
+            geometries.push_back(gfxCreateGeometryTriangles(gfx, index, vertex, sizeof(Vertex)));
+            gfxGeometrySetOpaque(gfx, geometries.back(), true);
+            gfxBottomLevelAccelerationStructureAddGeometry(gfx, blas, geometries.back());
+        }
     }
 
-    gfxAccelerationStructureUpdate(gfx, rt_scene);
+    gfxBuildBottomLevelAccelerationStructures(gfx, blases.data(), build_flags.data(), blases.size());
+    gfxTopLevelAccelerationStructureBuild(gfx, rt_scene);
 
     // Create our raytracing render targets
     GfxTexture color_buffer = gfxCreateTexture2D(gfx, DXGI_FORMAT_R16G16B16A16_FLOAT);
@@ -244,17 +276,24 @@ int32_t main()
 
         for(uint32_t i = 0; i < instance_count; ++i)
         {
-            GfxMeshInstance const &instance = gfxSceneGetMeshInstances(scene)[i];
+            GfxRenderInstance const &instance = gfxSceneGetRenderInstances(scene)[i];
+            if(instance.instances.empty())
+            {
+                continue;
+            }
 
-            if(instance.material)
-                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[(uint32_t)instance.material]);
-            else
-                gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", dummy_albedo);    // dummy albedo map
+            for(GfxRef<GfxMeshInstance> const &mesh_instance : instance.instances)
+            {
+                if(mesh_instance->material)
+                    gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", albedo_buffers[(uint32_t)mesh_instance->material]);
+                else
+                    gfxProgramSetParameter(gfx, rtao_program, "AlbedoBuffer", dummy_albedo);    // dummy albedo map
 
-            gfxCommandBindIndexBuffer(gfx, index_buffers[(uint32_t)instance.mesh]);
-            gfxCommandBindVertexBuffer(gfx, vertex_buffers[(uint32_t)instance.mesh]);
+                gfxCommandBindIndexBuffer(gfx, index_buffers[(uint32_t)mesh_instance->mesh]);
+                gfxCommandBindVertexBuffer(gfx, vertex_buffers[(uint32_t)mesh_instance->mesh]);
 
-            gfxCommandDrawIndexed(gfx, (uint32_t)instance.mesh->indices.size());
+                gfxCommandDrawIndexed(gfx, (uint32_t)mesh_instance->mesh->indices.size());
+            }
         }
 
         // Accumulate the occlusion values
@@ -288,10 +327,13 @@ int32_t main()
     gfxDestroyProgram(gfx, rtao_program);
 
     gfxDestroySamplerState(gfx, texture_sampler);
-    gfxDestroyAccelerationStructure(gfx, rt_scene);
-    for(GfxRaytracingPrimitive &rt_mesh : rt_meshes)
-        gfxDestroyRaytracingPrimitive(gfx, rt_mesh);
-
+    gfxDestroyTopLevelAccelerationStructure(gfx, rt_scene);
+    for(GfxTopLevelAccelerationStructureInstance &instance : tlas_instances)
+        gfxDestroyTopLevelAccelerationStructureInstance(gfx, instance);
+    for(GfxBottomLevelAccelerationStructure &blas : blases)
+        gfxDestroyBottomLevelAccelerationStructure(gfx, blas);
+    for(GfxGeometry &geometry : geometries)
+        gfxDestroyGeometry(gfx, geometry);
     for(uint32_t i = 0; i < index_buffers.size(); ++i)
         gfxDestroyBuffer(gfx, index_buffers.data()[i]);
     for(uint32_t i = 0; i < vertex_buffers.size(); ++i)

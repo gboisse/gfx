@@ -194,63 +194,88 @@ GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D
 GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_state);
 
 //!
-//! Acceleration structures.
+//! Geometry
 //!
 
-class GfxAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxAccelerationStructure); public: };
+class GfxGeometry { GFX_INTERNAL_HANDLE(GfxGeometry); enum { kType_Triangles, kType_Procedural } type; public:
+                    inline bool isTriangles() const { return type == kType_Triangles; }
+                    inline bool isProcedural() const { return type == kType_Procedural; } };
 
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context);
-GfxResult gfxDestroyAccelerationStructure(GfxContext context, GfxAccelerationStructure acceleration_structure);
+GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
+GfxGeometry gfxCreateGeometryTriangles(GfxContext context, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
+GfxGeometry gfxCreateGeometryProcedural(GfxContext context, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
+GfxResult gfxDestroyGeometry(GfxContext context, GfxGeometry geometry);
 
-GfxResult gfxAccelerationStructureUpdate(GfxContext context, GfxAccelerationStructure acceleration_structure);
-uint64_t gfxAccelerationStructureGetDataSize(GfxContext context, GfxAccelerationStructure acceleration_structure);  // in bytes
+GfxResult gfxGeometrySetOpaque(GfxContext context, GfxGeometry geometry, bool opaque);
+
+GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
+GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
+GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 
 //!
-//! Raytracing primitives.
+//! Bottom level acceleration structure
 //!
 
-enum GfxBuildRaytracingPrimitiveFlag
+enum GfxBuildBottomLevelASFlag
 {
-    kGfxBuildRaytracingPrimitiveFlag_Opaque = 1 << 0
+    kGfxBuildBottomLevelASFlag_None = 0,
+    kGfxBuildBottomLevelASFlag_Compact = 1 << 0, // It's recommended to avoid compaction for dynamic geometry since compaction requires extra CPU-GPU sync
+    kGfxBuildBottomLevelASFlag_Updateable = 1 << 1,
+    kGfxBuildBottomLevelASFlag_FastTrace = 1 << 2,
+    kGfxBuildBottomLevelASFlag_FastBuild = 1 << 3,
+    kGfxBuildBottomLevelASFlag_MinMemory = 1 << 4,
 };
-typedef uint32_t GfxBuildRaytracingPrimitiveFlags;
+typedef uint32_t GfxBuildBottomLevelASFlags;
 
-class GfxRaytracingPrimitive { GFX_INTERNAL_NAMED_HANDLE(GfxRaytracingPrimitive); enum { kType_Triangles, kType_Instance, kType_Procedural } type; public:
-                               inline bool isTriangles() const { return type == kType_Triangles; }
-                               inline bool isInstance() const { return type == kType_Instance; }
-                               inline bool isProcedural() const { return type == kType_Procedural; } };
+class GfxBottomLevelAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxBottomLevelAccelerationStructure); public: };
 
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitive(GfxContext context, GfxAccelerationStructure acceleration_structure);
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveInstance(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
-GfxRaytracingPrimitive gfxCreateRaytracingPrimitiveProcedural(GfxContext context, GfxAccelerationStructure acceleration_structure);
-GfxResult gfxDestroyRaytracingPrimitive(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
+GfxBottomLevelAccelerationStructure gfxCreateBottomLevelAccelerationStructure(GfxContext context);
+GfxResult gfxDestroyBottomLevelAccelerationStructure(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
-GfxResult gfxRaytracingPrimitiveBuild(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
-GfxResult gfxRaytracingPrimitiveBuildProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0, GfxBuildRaytracingPrimitiveFlags build_flags = 0);
+GfxResult gfxBottomLevelAccelerationStructureAddGeometry(GfxContext context, GfxBottomLevelAccelerationStructure blas, GfxGeometry geometry);
+GfxResult gfxBottomLevelAccelerationStructureRemoveGeometry(GfxContext context, GfxBottomLevelAccelerationStructure blas, GfxGeometry geometry);
+uint32_t gfxBottomLevelAccelerationStructureGetGeometryCount(GfxContext context, GfxBottomLevelAccelerationStructure blas);
+GfxGeometry const *gfxBottomLevelAccelerationStructureGetGeometries(GfxContext context, GfxBottomLevelAccelerationStructure blas);
 
-struct GfxRaytracingPrimitiveBatchElement
-{
-    GfxRaytracingPrimitive primitive;
-    GfxBuffer index_buffer;
-    GfxBuffer vertex_buffer;
-    uint32_t vertex_stride = 0;
-    GfxBuildRaytracingPrimitiveFlags flags = 0;
-};
+GfxResult gfxBottomLevelAccelerationStructureCompact(GfxContext context, GfxBottomLevelAccelerationStructure blas);
+uint64_t gfxBottomLevelAccelerationStructureGetDataSize(GfxContext context, GfxBottomLevelAccelerationStructure blas); // in bytes
 
-GfxResult gfxRaytracingPrimitiveBuildBatch(GfxContext context, GfxRaytracingPrimitiveBatchElement const* batch, size_t batch_size);
-GfxResult gfxRaytracingPrimitiveUpdateBatch(GfxContext context, GfxRaytracingPrimitiveBatchElement const* batch, size_t batch_size);
+GfxResult gfxBuildBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, GfxBuildBottomLevelASFlags const *flags, uint32_t blas_count);
+GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t blas_count);
 
-GfxResult gfxRaytracingPrimitiveSetTransform(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, float const *row_major_4x4_transform);
-GfxResult gfxRaytracingPrimitiveSetInstanceID(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_id);   // retrieved through `ray_query.CommittedInstanceID()`
-GfxResult gfxRaytracingPrimitiveSetInstanceMask(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint8_t instance_mask);
-GfxResult gfxRaytracingPrimitiveSetInstanceContributionToHitGroupIndex(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, uint32_t instance_contribution_to_hit_group_index);
-uint64_t gfxRaytracingPrimitiveGetDataSize(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);    // in bytes
+//!
+//! Top level acceleration structure instance
+//!
 
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive);
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
-GfxResult gfxRaytracingPrimitiveUpdate(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
-GfxResult gfxRaytracingPrimitiveUpdateProcedural(GfxContext context, GfxRaytracingPrimitive raytracing_primitive, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
+class GfxTopLevelAccelerationStructureInstance { GFX_INTERNAL_HANDLE(GfxTopLevelAccelerationStructureInstance); public: };
+
+GfxTopLevelAccelerationStructureInstance gfxCreateTopLevelAccelerationStructureInstance(GfxContext context);
+GfxResult gfxDestroyTopLevelAccelerationStructureInstance(GfxContext context, GfxTopLevelAccelerationStructureInstance instance);
+
+GfxBottomLevelAccelerationStructure gfxTopLevelAccelerationStructureInstanceGetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance);
+GfxResult gfxTopLevelAccelerationStructureInstanceSetBottomLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, GfxBottomLevelAccelerationStructure blas);
+GfxResult gfxTopLevelAccelerationStructureInstanceSetTransform(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, float const *row_major_3x4_transform);
+GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceID(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_id); // retrieved through `ray_query.CommittedInstanceID()`
+GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceMask(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint8_t instance_mask);
+GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_contribution_to_hit_group_index);
+
+//!
+//! Top level acceleration structure
+//!
+
+class GfxTopLevelAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxTopLevelAccelerationStructure); public: };
+
+GfxTopLevelAccelerationStructure gfxCreateTopLevelAccelerationStructure(GfxContext context);
+GfxResult gfxDestroyTopLevelAccelerationStructure(GfxContext context, GfxTopLevelAccelerationStructure tlas);
+
+GfxResult gfxTopLevelAccelerationStructureAddInstance(GfxContext context, GfxTopLevelAccelerationStructure tlas, GfxTopLevelAccelerationStructureInstance instance);
+GfxResult gfxTopLevelAccelerationStructureRemoveInstance(GfxContext context, GfxTopLevelAccelerationStructure tlas, GfxTopLevelAccelerationStructureInstance instance);
+uint32_t gfxTopLevelAccelerationStructureGetInstanceCount(GfxContext context, GfxTopLevelAccelerationStructure tlas);
+GfxTopLevelAccelerationStructureInstance const *gfxTopLevelAccelerationStructureGetInstances(GfxContext context, GfxTopLevelAccelerationStructure tlas);
+
+GfxResult gfxTopLevelAccelerationStructureBuild(GfxContext context, GfxTopLevelAccelerationStructure tlas);
+GfxResult gfxTopLevelAccelerationStructureUpdate(GfxContext context, GfxTopLevelAccelerationStructure tlas);
+uint64_t gfxTopLevelAccelerationStructureGetDataSize(GfxContext context, GfxTopLevelAccelerationStructure tlas); // in bytes
 
 //!
 //! Draw state manipulation.
@@ -300,7 +325,7 @@ GfxResult gfxProgramSetTexture(GfxContext context, GfxProgram program, char cons
 GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t texture_count);
 GfxResult gfxProgramSetTextures(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const *textures, uint32_t const *mip_levels, uint32_t texture_count);
 GfxResult gfxProgramSetSamplerState(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState sampler_state);
-GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure acceleration_structure);
+GfxResult gfxProgramSetAccelerationStructure(GfxContext context, GfxProgram program, char const *parameter_name, GfxTopLevelAccelerationStructure tlas);
 GfxResult gfxProgramSetConstants(GfxContext context, GfxProgram program, char const *parameter_name, void const *data, uint32_t data_size);
 
 //!
@@ -317,7 +342,7 @@ inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, 
 template<> inline GfxResult gfxProgramSetParameter<GfxBuffer>(GfxContext context, GfxProgram program, char const *parameter_name, GfxBuffer const &value) { return gfxProgramSetBuffer(context, program, parameter_name, value); }
 template<> inline GfxResult gfxProgramSetParameter<GfxTexture>(GfxContext context, GfxProgram program, char const *parameter_name, GfxTexture const &value) { return gfxProgramSetTexture(context, program, parameter_name, value); }
 template<> inline GfxResult gfxProgramSetParameter<GfxSamplerState>(GfxContext context, GfxProgram program, char const *parameter_name, GfxSamplerState const &value) { return gfxProgramSetSamplerState(context, program, parameter_name, value); }
-template<> inline GfxResult gfxProgramSetParameter<GfxAccelerationStructure>(GfxContext context, GfxProgram program, char const *parameter_name, GfxAccelerationStructure const &value) { return gfxProgramSetAccelerationStructure(context, program, parameter_name, value); }
+template<> inline GfxResult gfxProgramSetParameter<GfxTopLevelAccelerationStructure>(GfxContext context, GfxProgram program, char const *parameter_name, GfxTopLevelAccelerationStructure const &value) { return gfxProgramSetAccelerationStructure(context, program, parameter_name, value); }
 template<typename TYPE> inline GfxResult gfxProgramSetParameter(GfxContext context, GfxProgram program, char const *parameter_name, TYPE const &value)
 {
     static_assert(!std::is_pointer<TYPE>::value, "Program parameters must be passed by value, not by pointer");
@@ -497,11 +522,11 @@ GfxResult gfxResetCommandListState(GfxContext context); // call this function be
 
 GfxBuffer gfxCreateBuffer(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
 GfxTexture gfxCreateTexture(GfxContext context, ID3D12Resource *resource, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
-GfxAccelerationStructure gfxCreateAccelerationStructure(GfxContext context, ID3D12Resource *resource, uint64_t byte_offset = 0);    // resource must be in D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE state
+GfxTopLevelAccelerationStructure gfxCreateTopLevelAccelerationStructure(GfxContext context, ID3D12Resource *resource, uint64_t byte_offset = 0);    // resource must be in D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE state
 
 ID3D12Resource *gfxBufferGetResource(GfxContext context, GfxBuffer buffer);
 ID3D12Resource *gfxTextureGetResource(GfxContext context, GfxTexture texture);
-ID3D12Resource *gfxAccelerationStructureGetResource(GfxContext context, GfxAccelerationStructure acceleration_structure);
+ID3D12Resource *gfxTopLevelAccelerationStructureGetResource(GfxContext context, GfxTopLevelAccelerationStructure tlas);
 
 D3D12_RESOURCE_STATES gfxBufferGetResourceState(GfxContext context, GfxBuffer buffer);
 D3D12_RESOURCE_STATES gfxTextureGetResourceState(GfxContext context, GfxTexture texture);
