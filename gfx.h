@@ -194,7 +194,7 @@ GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D
 GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_state);
 
 //!
-//! Geometry
+//! Geometry objects.
 //!
 
 class GfxGeometry { GFX_INTERNAL_HANDLE(GfxGeometry); enum { kType_Triangles, kType_Procedural } type; public:
@@ -213,7 +213,7 @@ GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, G
 GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 
 //!
-//! Bottom level acceleration structure
+//! Bottom level acceleration structures.
 //!
 
 enum GfxBuildBottomLevelASFlag
@@ -244,7 +244,7 @@ GfxResult gfxBuildBottomLevelAccelerationStructures(GfxContext context, GfxBotto
 GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t blas_count);
 
 //!
-//! Top level acceleration structure instance
+//! Top level acceleration structure instances.
 //!
 
 class GfxTopLevelAccelerationStructureInstance { GFX_INTERNAL_HANDLE(GfxTopLevelAccelerationStructureInstance); public: };
@@ -260,7 +260,7 @@ GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceMask(GfxContext con
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_contribution_to_hit_group_index);
 
 //!
-//! Top level acceleration structure
+//! Top level acceleration structures.
 //!
 
 class GfxTopLevelAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxTopLevelAccelerationStructure); public: };
