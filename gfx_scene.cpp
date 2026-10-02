@@ -1811,15 +1811,18 @@ private:
                     };
                     if(accessors.indices != nullptr)
                     {
-                        std::map<cgltf_uint, uint32_t> indices;
-                        for(size_t k = 0; k < accessors.indices->count; ++k)
+                        constexpr uint32_t invalid_index = 0xFFFFFFFFu;
+                        cgltf_size const vertex_count = accessors.positions->count;
+                        std::vector<uint32_t> indices(vertex_count, invalid_index);
+                        mesh.indices.reserve(accessors.indices->count);
+                        for(cgltf_size k = 0; k < accessors.indices->count; ++k)
                         {
                             cgltf_uint gltf_index = 0;
                             cgltf_bool read = cgltf_accessor_read_uint(accessors.indices, k, &gltf_index, 1);
                             GFX_ASSERT(read); (void)read;
-                            std::map<cgltf_uint, uint32_t>::const_iterator const it2 = indices.find(gltf_index);
-                            if(it2 != indices.end())
-                                mesh.indices.push_back((*it2).second);
+                            GFX_ASSERT(gltf_index < vertex_count);
+                            if(indices[gltf_index] != invalid_index)
+                                mesh.indices.push_back(indices[gltf_index]);
                             else
                             {
                                 unpack_vertex(gltf_index);

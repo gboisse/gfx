@@ -1157,7 +1157,8 @@ public:
             else
             {
                 debug_controller->EnableDebugLayer();
-                //debug_controller->SetEnableGPUBasedValidation(true);
+                if((flags & kGfxCreateContextFlag_EnableGPUBasedValidation) != 0)
+                    debug_controller->SetEnableGPUBasedValidation(true);
                 debug_controller->SetEnableSynchronizedCommandQueueValidation(true);
                 debug_controller->Release();
             }

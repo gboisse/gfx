@@ -47,12 +47,13 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 enum GfxCreateContextFlag
 {
     kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
-    kGfxCreateContextFlag_EnableShaderCache         = 1 << 1,
-    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 2,
-    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 3,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 4,
-    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 5,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
-    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 6    // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
+    kGfxCreateContextFlag_EnableGPUBasedValidation  = 1 << 1, // Enables GPU-based validation (requires kGfxCreateContextFlag_EnableDebugLayer)
+    kGfxCreateContextFlag_EnableShaderCache         = 1 << 2,
+    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 3,   // Enables shader PDB generation for debugging in tools such as PIX
+    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 4,
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 5,
+    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 6,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
+    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 7    // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -194,7 +195,7 @@ GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D
 GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_state);
 
 //!
-//! Geometry
+//! Geometry objects.
 //!
 
 class GfxGeometry { GFX_INTERNAL_HANDLE(GfxGeometry); enum { kType_Triangles, kType_Procedural } type; public:
@@ -213,7 +214,7 @@ GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, G
 GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 
 //!
-//! Bottom level acceleration structure
+//! Bottom level acceleration structures.
 //!
 
 enum GfxBuildBottomLevelASFlag
@@ -244,7 +245,7 @@ GfxResult gfxBuildBottomLevelAccelerationStructures(GfxContext context, GfxBotto
 GfxResult gfxUpdateBottomLevelAccelerationStructures(GfxContext context, GfxBottomLevelAccelerationStructure const *blases, uint32_t blas_count);
 
 //!
-//! Top level acceleration structure instance
+//! Top level acceleration structure instances.
 //!
 
 class GfxTopLevelAccelerationStructureInstance { GFX_INTERNAL_HANDLE(GfxTopLevelAccelerationStructureInstance); public: };
@@ -260,7 +261,7 @@ GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceMask(GfxContext con
 GfxResult gfxTopLevelAccelerationStructureInstanceSetInstanceContributionToHitGroupIndex(GfxContext context, GfxTopLevelAccelerationStructureInstance instance, uint32_t instance_contribution_to_hit_group_index);
 
 //!
-//! Top level acceleration structure
+//! Top level acceleration structures.
 //!
 
 class GfxTopLevelAccelerationStructure { GFX_INTERNAL_NAMED_HANDLE(GfxTopLevelAccelerationStructure); public: };
