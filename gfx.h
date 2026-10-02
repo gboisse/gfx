@@ -47,12 +47,13 @@ class GfxContext { friend class GfxInternal; uint64_t handle; char name[kGfxCons
 enum GfxCreateContextFlag
 {
     kGfxCreateContextFlag_EnableDebugLayer          = 1 << 0,
-    kGfxCreateContextFlag_EnableShaderCache         = 1 << 1,
-    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 2,
-    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 3,
-    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 4,
-    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 5,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
-    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 6    // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
+    kGfxCreateContextFlag_EnableGPUBasedValidation  = 1 << 1, // Enables GPU-based validation (requires kGfxCreateContextFlag_EnableDebugLayer)
+    kGfxCreateContextFlag_EnableShaderCache         = 1 << 2,
+    kGfxCreateContextFlag_EnableShaderDebugging     = 1 << 3,   // Enables shader PDB generation for debugging in tools such as PIX
+    kGfxCreateContextFlag_EnableStablePowerState    = 1 << 4,
+    kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 5,
+    kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 6,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
+    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 7    // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
 };
 typedef uint32_t GfxCreateContextFlags;
 
