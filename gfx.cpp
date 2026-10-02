@@ -117,6 +117,7 @@ class GfxInternal
     bool debug_shaders_ = false;
     bool cache_shaders_ = false;
     bool experimental_shaders_ = false;
+    bool dred_enabled_ = false;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -1145,6 +1146,32 @@ public:
         return kGfxResult_NoError;
     }
 
+    // Must be called prior to device creation; DRED settings are latched when the device is created.
+    void enableDRED()
+    {
+        ID3D12DeviceRemovedExtendedDataSettings *dred_settings = nullptr;
+        if(!SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&dred_settings))))
+        {
+            GFX_PRINT_WARNING("Unable to get D3D12 DRED interface, no device removal information will be available");
+            return;
+        }
+        dred_settings->SetAutoBreadcrumbsEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+        dred_settings->SetPageFaultEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+
+        // Breadcrumb contexts annotate each breadcrumb with its enclosing PIX event, which makes the
+        // breadcrumb output far easier to interpret; it is only available from DRED 1.2 onwards.
+        ID3D12DeviceRemovedExtendedDataSettings1 *dred_settings1 = nullptr;
+        if(SUCCEEDED(dred_settings->QueryInterface(IID_PPV_ARGS(&dred_settings1))))
+        {
+            dred_settings1->SetBreadcrumbContextEnablement(D3D12_DRED_ENABLEMENT_FORCED_ON);
+            dred_settings1->Release();
+        }
+        else
+            GFX_PRINT_WARNING("DRED breadcrumb contexts are unavailable, breadcrumbs will not be annotated with PIX events");
+        dred_settings->Release();
+        dred_enabled_ = true;
+    }
+
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != GFX_AGILITY_VERSION)
@@ -1163,6 +1190,9 @@ public:
                 debug_controller->Release();
             }
         }
+
+        if((flags & kGfxCreateContextFlag_EnableDRED) != 0)
+            enableDRED();
 
         if(adapter != nullptr)
         {
@@ -10196,12 +10226,256 @@ private:
         return kGfxResult_NoError;
     }
 
+    static char const *getDREDBreadcrumbOpString(D3D12_AUTO_BREADCRUMB_OP op)
+    {
+        switch(op)
+        {
+        case D3D12_AUTO_BREADCRUMB_OP_SETMARKER: return "SetMarker";
+        case D3D12_AUTO_BREADCRUMB_OP_BEGINEVENT: return "BeginEvent";
+        case D3D12_AUTO_BREADCRUMB_OP_ENDEVENT: return "EndEvent";
+        case D3D12_AUTO_BREADCRUMB_OP_DRAWINSTANCED: return "DrawInstanced";
+        case D3D12_AUTO_BREADCRUMB_OP_DRAWINDEXEDINSTANCED: return "DrawIndexedInstanced";
+        case D3D12_AUTO_BREADCRUMB_OP_EXECUTEINDIRECT: return "ExecuteIndirect";
+        case D3D12_AUTO_BREADCRUMB_OP_DISPATCH: return "Dispatch";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYBUFFERREGION: return "CopyBufferRegion";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYTEXTUREREGION: return "CopyTextureRegion";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYRESOURCE: return "CopyResource";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYTILES: return "CopyTiles";
+        case D3D12_AUTO_BREADCRUMB_OP_RESOLVESUBRESOURCE: return "ResolveSubresource";
+        case D3D12_AUTO_BREADCRUMB_OP_CLEARRENDERTARGETVIEW: return "ClearRenderTargetView";
+        case D3D12_AUTO_BREADCRUMB_OP_CLEARUNORDEREDACCESSVIEW: return "ClearUnorderedAccessView";
+        case D3D12_AUTO_BREADCRUMB_OP_CLEARDEPTHSTENCILVIEW: return "ClearDepthStencilView";
+        case D3D12_AUTO_BREADCRUMB_OP_RESOURCEBARRIER: return "ResourceBarrier";
+        case D3D12_AUTO_BREADCRUMB_OP_EXECUTEBUNDLE: return "ExecuteBundle";
+        case D3D12_AUTO_BREADCRUMB_OP_PRESENT: return "Present";
+        case D3D12_AUTO_BREADCRUMB_OP_RESOLVEQUERYDATA: return "ResolveQueryData";
+        case D3D12_AUTO_BREADCRUMB_OP_BEGINSUBMISSION: return "BeginSubmission";
+        case D3D12_AUTO_BREADCRUMB_OP_ENDSUBMISSION: return "EndSubmission";
+        case D3D12_AUTO_BREADCRUMB_OP_WRITEBUFFERIMMEDIATE: return "WriteBufferImmediate";
+        case D3D12_AUTO_BREADCRUMB_OP_BUILDRAYTRACINGACCELERATIONSTRUCTURE: return "BuildRaytracingAccelerationStructure";
+        case D3D12_AUTO_BREADCRUMB_OP_EMITRAYTRACINGACCELERATIONSTRUCTUREPOSTBUILDINFO: return "EmitRaytracingAccelerationStructurePostBuildInfo";
+        case D3D12_AUTO_BREADCRUMB_OP_COPYRAYTRACINGACCELERATIONSTRUCTURE: return "CopyRaytracingAccelerationStructure";
+        case D3D12_AUTO_BREADCRUMB_OP_DISPATCHRAYS: return "DispatchRays";
+        case D3D12_AUTO_BREADCRUMB_OP_INITIALIZEMETACOMMAND: return "InitializeMetaCommand";
+        case D3D12_AUTO_BREADCRUMB_OP_EXECUTEMETACOMMAND: return "ExecuteMetaCommand";
+        case D3D12_AUTO_BREADCRUMB_OP_SETPIPELINESTATE1: return "SetPipelineState1";
+        case D3D12_AUTO_BREADCRUMB_OP_DISPATCHMESH: return "DispatchMesh";
+        case D3D12_AUTO_BREADCRUMB_OP_BARRIER: return "Barrier";
+        case D3D12_AUTO_BREADCRUMB_OP_BEGIN_COMMAND_LIST: return "BeginCommandList";
+        case D3D12_AUTO_BREADCRUMB_OP_DISPATCHGRAPH: return "DispatchGraph";
+        case D3D12_AUTO_BREADCRUMB_OP_SETPROGRAM: return "SetProgram";
+        default: break;
+        }
+        return "Unknown";
+    }
+
+    static char const *getDREDAllocationTypeString(D3D12_DRED_ALLOCATION_TYPE type)
+    {
+        switch(type)
+        {
+        case D3D12_DRED_ALLOCATION_TYPE_COMMAND_QUEUE: return "CommandQueue";
+        case D3D12_DRED_ALLOCATION_TYPE_COMMAND_ALLOCATOR: return "CommandAllocator";
+        case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_STATE: return "PipelineState";
+        case D3D12_DRED_ALLOCATION_TYPE_COMMAND_LIST: return "CommandList";
+        case D3D12_DRED_ALLOCATION_TYPE_FENCE: return "Fence";
+        case D3D12_DRED_ALLOCATION_TYPE_DESCRIPTOR_HEAP: return "DescriptorHeap";
+        case D3D12_DRED_ALLOCATION_TYPE_HEAP: return "Heap";
+        case D3D12_DRED_ALLOCATION_TYPE_QUERY_HEAP: return "QueryHeap";
+        case D3D12_DRED_ALLOCATION_TYPE_COMMAND_SIGNATURE: return "CommandSignature";
+        case D3D12_DRED_ALLOCATION_TYPE_PIPELINE_LIBRARY: return "PipelineLibrary";
+        case D3D12_DRED_ALLOCATION_TYPE_RESOURCE: return "Resource";
+        case D3D12_DRED_ALLOCATION_TYPE_PASS: return "Pass";
+        case D3D12_DRED_ALLOCATION_TYPE_STATE_OBJECT: return "StateObject";
+        case D3D12_DRED_ALLOCATION_TYPE_METACOMMAND: return "MetaCommand";
+        case D3D12_DRED_ALLOCATION_TYPE_SCHEDULINGGROUP: return "SchedulingGroup";
+        case D3D12_DRED_ALLOCATION_TYPE_INVALID: return "Invalid";
+        default: break;
+        }
+        return "Unknown";
+    }
+
+    static char const *getDREDDeviceStateString(D3D12_DRED_DEVICE_STATE state)
+    {
+        switch(state)
+        {
+        case D3D12_DRED_DEVICE_STATE_HUNG: return "Hung";
+        case D3D12_DRED_DEVICE_STATE_FAULT: return "Fault";
+        case D3D12_DRED_DEVICE_STATE_PAGEFAULT: return "PageFault";
+        case D3D12_DRED_DEVICE_STATE_UNKNOWN: return "Unknown";
+        default: break;
+        }
+        return "Unknown";
+    }
+
+    // DRED object names are reported as wide strings; narrow them into a bounded buffer so a
+    // corrupt pointer cannot produce unbounded output.
+    static std::string getDREDObjectName(char const *name_a, wchar_t const *name_w)
+    {
+        if(name_a != nullptr && *name_a != '\0')
+            return std::string(name_a);
+        if(name_w == nullptr || *name_w == L'\0')
+            return std::string("<unnamed>");
+        char buffer[kGfxConstant_MaxNameLength + 1] = {};
+        int32_t const written = WideCharToMultiByte(CP_UTF8, 0, name_w, -1, buffer, sizeof(buffer) - 1, nullptr, nullptr);
+        if(written <= 0)
+            return std::string("<unnamed>");
+        return std::string(buffer);
+    }
+
+    // Bound the reported DRED data; breadcrumb and allocation lists can hold thousands of entries
+    // and only the ones surrounding the failure point carry any diagnostic value.
+    static constexpr uint32_t kDREDMaxReportedOps = 32;
+    static constexpr uint32_t kDREDMaxReportedAllocations = 32;
+
+    // Reports the command history of a single breadcrumb node; `contexts` is only populated from
+    // DRED 1.2 onwards and annotates individual operations with their enclosing PIX event.
+    void reportDREDBreadcrumbNode(char const *queue_name_a, wchar_t const *queue_name_w,
+        char const *list_name_a, wchar_t const *list_name_w, uint32_t breadcrumb_count,
+        uint32_t const *last_breadcrumb_value, D3D12_AUTO_BREADCRUMB_OP const *command_history,
+        uint32_t context_count, D3D12_DRED_BREADCRUMB_CONTEXT const *contexts)
+    {
+        if(command_history == nullptr || breadcrumb_count == 0)
+            return;
+        uint32_t const last_breadcrumb = (last_breadcrumb_value != nullptr ? *last_breadcrumb_value : 0);
+        if(last_breadcrumb >= breadcrumb_count)
+            return; // every operation completed on this command list, it cannot be the culprit
+        GFX_PRINTLN("DRED:   command queue `%s', command list `%s': %u of %u operations completed",
+            getDREDObjectName(queue_name_a, queue_name_w).c_str(),
+            getDREDObjectName(list_name_a, list_name_w).c_str(), last_breadcrumb, breadcrumb_count);
+        uint32_t const first_op = (last_breadcrumb > kDREDMaxReportedOps ? last_breadcrumb - kDREDMaxReportedOps : 0);
+        uint32_t const end_op = GFX_MIN(breadcrumb_count, last_breadcrumb + kDREDMaxReportedOps);
+        for(uint32_t i = first_op; i < end_op; ++i)
+        {
+            char const *status = (i < last_breadcrumb ? "completed" : (i == last_breadcrumb ? "IN FLIGHT" : "not begun"));
+            char const *context = nullptr;
+            char context_buffer[kGfxConstant_MaxNameLength + 1] = {};
+            for(uint32_t j = 0; contexts != nullptr && j < context_count; ++j)
+                if(contexts[j].BreadcrumbIndex == i && contexts[j].pContextString != nullptr)
+                {
+                    if(WideCharToMultiByte(CP_UTF8, 0, contexts[j].pContextString, -1, context_buffer,
+                           sizeof(context_buffer) - 1, nullptr, nullptr) > 0)
+                        context = context_buffer;
+                    break;
+                }
+            if(context != nullptr)
+                GFX_PRINTLN("DRED:     [%s] op %u: %s (%s)", status, i, getDREDBreadcrumbOpString(command_history[i]), context);
+            else
+                GFX_PRINTLN("DRED:     [%s] op %u: %s", status, i, getDREDBreadcrumbOpString(command_history[i]));
+        }
+    }
+
+    template<typename NODE_TYPE>
+    void reportDREDAllocationNodes(char const *list_name, NODE_TYPE const *node)
+    {
+        if(node == nullptr)
+            return;
+        GFX_PRINTLN("DRED:   %s allocations:", list_name);
+        for(uint32_t i = 0; node != nullptr && i < kDREDMaxReportedAllocations; node = node->pNext, ++i)
+            GFX_PRINTLN("DRED:     [%s] %s", getDREDAllocationTypeString(node->AllocationType),
+                getDREDObjectName(node->ObjectNameA, node->ObjectNameW).c_str());
+    }
+
+    // Must be called before the device and its command lists are released; DRED data lives on the
+    // removed device object and is lost along with it.
+    void reportDREDOutput()
+    {
+        if(!dred_enabled_ || device_ == nullptr)
+            return;
+        ID3D12DeviceRemovedExtendedData *dred = nullptr;
+        if(!SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&dred))))
+        {
+            GFX_PRINT_WARNING("Unable to retrieve DRED information from the removed device");
+            return;
+        }
+        ID3D12DeviceRemovedExtendedData1 *dred1 = nullptr;
+        ID3D12DeviceRemovedExtendedData2 *dred2 = nullptr;
+        device_->QueryInterface(IID_PPV_ARGS(&dred1));
+        device_->QueryInterface(IID_PPV_ARGS(&dred2));
+
+        GFX_PRINTLN("DRED: device removal diagnostics:");
+        if(dred2 != nullptr)
+            GFX_PRINTLN("DRED:   device state: %s", getDREDDeviceStateString(dred2->GetDeviceState()));
+
+        bool reported_breadcrumbs = false;
+        if(dred1 != nullptr)
+        {
+            D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT1 breadcrumbs = {};
+            if(SUCCEEDED(dred1->GetAutoBreadcrumbsOutput1(&breadcrumbs)))
+            {
+                reported_breadcrumbs = true;
+                for(D3D12_AUTO_BREADCRUMB_NODE1 const *node = breadcrumbs.pHeadAutoBreadcrumbNode; node != nullptr; node = node->pNext)
+                    reportDREDBreadcrumbNode(node->pCommandQueueDebugNameA, node->pCommandQueueDebugNameW,
+                        node->pCommandListDebugNameA, node->pCommandListDebugNameW, node->BreadcrumbCount,
+                        node->pLastBreadcrumbValue, node->pCommandHistory, node->BreadcrumbContextsCount,
+                        node->pBreadcrumbContexts);
+            }
+        }
+        if(!reported_breadcrumbs)
+        {
+            D3D12_DRED_AUTO_BREADCRUMBS_OUTPUT breadcrumbs = {};
+            if(SUCCEEDED(dred->GetAutoBreadcrumbsOutput(&breadcrumbs)))
+                for(D3D12_AUTO_BREADCRUMB_NODE const *node = breadcrumbs.pHeadAutoBreadcrumbNode; node != nullptr; node = node->pNext)
+                    reportDREDBreadcrumbNode(node->pCommandQueueDebugNameA, node->pCommandQueueDebugNameW,
+                        node->pCommandListDebugNameA, node->pCommandListDebugNameW, node->BreadcrumbCount,
+                        node->pLastBreadcrumbValue, node->pCommandHistory, 0, nullptr);
+            else
+                GFX_PRINT_WARNING("DRED auto-breadcrumb data is unavailable");
+        }
+
+        bool reported_page_fault = false;
+        if(dred2 != nullptr)
+        {
+            D3D12_DRED_PAGE_FAULT_OUTPUT2 page_fault = {};
+            if(SUCCEEDED(dred2->GetPageFaultAllocationOutput2(&page_fault)))
+            {
+                reported_page_fault = true;
+                reportDREDPageFault(page_fault.PageFaultVA, page_fault.pHeadExistingAllocationNode,
+                    page_fault.pHeadRecentFreedAllocationNode);
+            }
+        }
+        if(!reported_page_fault && dred1 != nullptr)
+        {
+            D3D12_DRED_PAGE_FAULT_OUTPUT1 page_fault = {};
+            if(SUCCEEDED(dred1->GetPageFaultAllocationOutput1(&page_fault)))
+            {
+                reported_page_fault = true;
+                reportDREDPageFault(page_fault.PageFaultVA, page_fault.pHeadExistingAllocationNode,
+                    page_fault.pHeadRecentFreedAllocationNode);
+            }
+        }
+        if(!reported_page_fault)
+        {
+            D3D12_DRED_PAGE_FAULT_OUTPUT page_fault = {};
+            if(SUCCEEDED(dred->GetPageFaultAllocationOutput(&page_fault)))
+                reportDREDPageFault(page_fault.PageFaultVA, page_fault.pHeadExistingAllocationNode,
+                    page_fault.pHeadRecentFreedAllocationNode);
+            else
+                GFX_PRINT_WARNING("DRED page fault data is unavailable");
+        }
+
+        if(dred2 != nullptr) dred2->Release();
+        if(dred1 != nullptr) dred1->Release();
+        dred->Release();
+    }
+
+    template<typename NODE_TYPE>
+    void reportDREDPageFault(D3D12_GPU_VIRTUAL_ADDRESS page_fault_va, NODE_TYPE const *existing_allocations,
+        NODE_TYPE const *freed_allocations)
+    {
+        if(page_fault_va == 0 && existing_allocations == nullptr && freed_allocations == nullptr)
+            return; // device removal was not caused by a page fault
+        GFX_PRINTLN("DRED:   page fault at GPU virtual address 0x%llX", static_cast<unsigned long long>(page_fault_va));
+        reportDREDAllocationNodes("existing", existing_allocations);
+        reportDREDAllocationNodes("recently freed", freed_allocations);
+    }
+
     GfxResult handleDeviceLost()
     {
         HRESULT const reason = device_->GetDeviceRemovedReason();
         LPSTR error_text = nullptr;
         DWORD const result = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, nullptr, reason,
                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&error_text), 0, nullptr);
+        reportDREDOutput();
         if(command_list_ != nullptr)
         {
             command_list_->Release();

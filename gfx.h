@@ -53,7 +53,8 @@ enum GfxCreateContextFlag
     kGfxCreateContextFlag_EnableStablePowerState    = 1 << 4,
     kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 5,
     kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 6,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
-    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 7    // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
+    kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 7,   // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
+    kGfxCreateContextFlag_EnableDRED                = 1 << 8    // Enables Device Removed Extended Data; auto-breadcrumbs and page fault data are logged on device loss (has a performance cost)
 };
 typedef uint32_t GfxCreateContextFlags;
 
