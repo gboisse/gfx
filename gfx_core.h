@@ -101,9 +101,9 @@ enum GfxVerbosity
         GFX_PRINTLN_IMPL(__FILE__, __LINE__, __VA_ARGS__);  \
     GFX_MULTI_LINE_MACRO_END
 
-#define GFX_PRINT_WARNING(RESULT, ...)                               \
+#define GFX_PRINT_WARNING(...)                               \
     GFX_MULTI_LINE_MACRO_BEGIN                                       \
-    GFX_PRINT_WARNING_IMPL(RESULT, __FILE__, __LINE__, __VA_ARGS__); \
+    GFX_PRINT_WARNING_IMPL(__FILE__, __LINE__, __VA_ARGS__); \
     GFX_MULTI_LINE_MACRO_END
 
 #define GFX_PRINT_ERROR(RESULT, ...)                                    \
@@ -192,7 +192,7 @@ char const *gfxResultGetString(GfxResult result);
 void GFX_PRINTLN_IMPL(char const *file_name, uint32_t line_number, char const *format, ...);
 
 void GFX_PRINT_WARNING_IMPL(
-    GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...);
+    char const *file_name, uint32_t line_number, char const *format, ...);
 
 void GFX_PRINT_ERROR_IMPL(
     GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...);

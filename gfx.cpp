@@ -1153,7 +1153,7 @@ public:
         {
             ID3D12Debug1 *debug_controller = nullptr;
             if(!SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debug_controller))))
-                GFX_PRINT_WARNING(kGfxResult_InternalError, "Unable to get D3D12 debug interface, no debugging information will be available");
+                GFX_PRINT_WARNING("Unable to get D3D12 debug interface, no debugging information will be available");
             else
             {
                 debug_controller->EnableDebugLayer();
@@ -1286,7 +1286,7 @@ public:
                         GFX_BREAKPOINT;
                     }
                     else if(severity == D3D12_MESSAGE_SEVERITY_WARNING)
-                        GFX_PRINT_WARNING(kGfxResult_InternalError, "D3D12 warning: %s", description);
+                        GFX_PRINT_WARNING("D3D12 warning: %s", description);
                 };
                 debug_callback->RegisterMessageCallback(callback, D3D12_MESSAGE_CALLBACK_FLAG_NONE, nullptr, &cookie);
                 debug_callback->Release();
@@ -1499,7 +1499,7 @@ public:
         GFX_SNPRINTF(context.name, sizeof(context.name), "%ws", adapter_desc.Description);
         GFX_PRINTLN("Created %s `%ws'", isInterop() ? "interop context" : "Direct3D12 device", adapter_desc.Description);
         if(dxr_device_ == nullptr)
-            GFX_PRINT_WARNING(kGfxResult_InvalidOperation, "DXR-1.1 is not supported on the selected device; no raytracing will be available");
+            GFX_PRINT_WARNING("DXR-1.1 is not supported on the selected device; no raytracing will be available");
         bound_viewport_.invalidate(); bound_scissor_rect_.invalidate();
 
         return kGfxResult_NoError;
@@ -3734,7 +3734,7 @@ public:
                 if(data == nullptr)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to clear buffer object");
                 if(!issued_clear_buffer_warning_)
-                    GFX_PRINT_WARNING(kGfxResult_InvalidOperation, "It is inefficient to clear a buffer object with read CPU access; prefer a copy instead");
+                    GFX_PRINT_WARNING("It is inefficient to clear a buffer object with read CPU access; prefer a copy instead");
                 issued_clear_buffer_warning_ = true;    // we've now warned the user...
                 for(uint64_t i = 0; i < num_uints; ++i) ((uint32_t *)data)[i] = clear_value;
                 Buffer &dst_buffer = buffers_[buffer], &src_buffer = buffers_[constant_buffer_pool_[fence_index_]];
@@ -4433,7 +4433,7 @@ public:
         {
             static bool warned;
             if(!warned)
-                GFX_PRINT_WARNING(kGfxResult_InvalidOperation, "Unable to locate `gfx_DispatchID' root constant for multi-dispatch call");
+                GFX_PRINT_WARNING("Unable to locate `gfx_DispatchID' root constant for multi-dispatch call");
             warned = true;  // user was warned
         }
         for(uint32_t dispatch_id = 0; dispatch_id < args_count; ++dispatch_id)
@@ -8498,7 +8498,7 @@ private:
                             transitionResource(gfx_buffer, GetShaderVisibleResourceState(kernel), kTransitionType_Implicit);
                         if(!invalidate_descriptor) continue;    // already up to date
                         if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
-                            GFX_PRINT_WARNING(kGfxResult_InvalidOperation, "Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            GFX_PRINT_WARNING("Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                         D3D12_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
                         srv_desc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
                         srv_desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
@@ -8567,7 +8567,7 @@ private:
                         transitionResource(gfx_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
                         if(!invalidate_descriptor) continue;    // already up to date
                         if(buffer.stride != GFX_ALIGN(buffer.stride, 4))
-                            GFX_PRINT_WARNING(kGfxResult_InvalidOperation, "Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
+                            GFX_PRINT_WARNING("Encountered a buffer stride of %u that isn't 4-byte aligned for parameter `%s' of program `%s/%s'; is this intentional?", buffer.stride, parameter.parameter_->name_.c_str(), program.file_path_.c_str(), program.file_name_.c_str());
                         D3D12_UNORDERED_ACCESS_VIEW_DESC uav_desc = {};
                         uav_desc.ViewDimension = D3D12_UAV_DIMENSION_BUFFER;
                         if(parameter.raw_access_)
@@ -9731,7 +9731,7 @@ private:
         {
             bool const has_warnings = (dxc_error->GetBufferPointer() != nullptr);
             if(has_warnings)
-                GFX_PRINT_WARNING(kGfxResult_InvalidOperation, "Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file.data(), kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
+                GFX_PRINT_WARNING("Compiled `%s' for entry point `%s' with warning(s):\r\n%s", shader_file.data(), kernel.entry_point_.c_str(), (char const *)dxc_error->GetBufferPointer());
             dxc_error->Release();
         }
 

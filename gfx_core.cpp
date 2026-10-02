@@ -89,16 +89,14 @@ void GFX_PRINTLN_IMPL(char const *file_name, uint32_t line_number, char const *f
 }
 
 void GFX_PRINT_WARNING_IMPL(
-    GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...)
+    char const *file_name, uint32_t line_number, char const *format, ...)
 {
     va_list args;
     va_start(args, format);
     GFX_ASSERT(file_name != nullptr);
-    int32_t size = snprintf(nullptr, 0, "%s(%-4u): warning: %s (0x%x: %s)", file_name, line_number, format,
-        (uint32_t)result, gfxResultGetString(result));
+    int32_t size = snprintf(nullptr, 0, "%s(%-4u): warning: %s", file_name, line_number, format);
     std::vector<char> body(size + 1);
-    snprintf(body.data(), body.size(), "%s(%-4u): warning: %s (0x%x: %s)", file_name, line_number, format,
-        (uint32_t)result, gfxResultGetString(result));
+    snprintf(body.data(), body.size(), "%s(%-4u): warning: %s", file_name, line_number, format);
     size = vsnprintf(nullptr, 0, body.data(), args);
     std::vector<char> message(size + 2);
     vsnprintf(message.data(), message.size(), body.data(), args);
