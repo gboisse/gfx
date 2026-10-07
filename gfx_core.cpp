@@ -88,6 +88,23 @@ void GFX_PRINTLN_IMPL(char const *file_name, uint32_t line_number, char const *f
     OutputMessage(message.data(), kGfxVerbosity_Info);
 }
 
+void GFX_PRINT_WARNING_IMPL(
+    char const *file_name, uint32_t line_number, char const *format, ...)
+{
+    va_list args;
+    va_start(args, format);
+    GFX_ASSERT(file_name != nullptr);
+    int32_t size = snprintf(nullptr, 0, "%s(%-4u): warning: %s", file_name, line_number, format);
+    std::vector<char> body(size + 1);
+    snprintf(body.data(), body.size(), "%s(%-4u): warning: %s", file_name, line_number, format);
+    size = vsnprintf(nullptr, 0, body.data(), args);
+    std::vector<char> message(size + 2);
+    vsnprintf(message.data(), message.size(), body.data(), args);
+    va_end(args);
+    message[message.size() - 2] = '\n';
+    OutputMessage(message.data(), kGfxVerbosity_Warning);
+}
+
 void GFX_PRINT_ERROR_IMPL(GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...)
 {
     va_list args;

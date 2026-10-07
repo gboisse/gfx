@@ -101,13 +101,17 @@ enum GfxVerbosity
         GFX_PRINTLN_IMPL(__FILE__, __LINE__, __VA_ARGS__);  \
     GFX_MULTI_LINE_MACRO_END
 
-#define GFX_SET_ERROR(RESULT, ...)  \
-    GFX_SET_ERROR_IMPL(RESULT, __FILE__, __LINE__, __VA_ARGS__)
+#define GFX_PRINT_WARNING(...)                               \
+    GFX_MULTI_LINE_MACRO_BEGIN                                       \
+    GFX_PRINT_WARNING_IMPL(__FILE__, __LINE__, __VA_ARGS__); \
+    GFX_MULTI_LINE_MACRO_END
 
 #define GFX_PRINT_ERROR(RESULT, ...)                                    \
     GFX_MULTI_LINE_MACRO_BEGIN                                          \
         GFX_PRINT_ERROR_IMPL(RESULT, __FILE__, __LINE__, __VA_ARGS__);  \
     GFX_MULTI_LINE_MACRO_END
+
+#define GFX_SET_ERROR(RESULT, ...) GFX_SET_ERROR_IMPL(RESULT, __FILE__, __LINE__, __VA_ARGS__)
 
 //!
 //! Debug macros.
@@ -186,6 +190,9 @@ void gfxMessageSetCallback(GfxMessageCallback callback);
 char const *gfxResultGetString(GfxResult result);
 
 void GFX_PRINTLN_IMPL(char const *file_name, uint32_t line_number, char const *format, ...);
+
+void GFX_PRINT_WARNING_IMPL(
+    char const *file_name, uint32_t line_number, char const *format, ...);
 
 void GFX_PRINT_ERROR_IMPL(
     GfxResult result, char const *file_name, uint32_t line_number, char const *format, ...);
