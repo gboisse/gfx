@@ -1506,7 +1506,9 @@ public:
         }
 
         GfxProgramDesc clear_buffer_program_desc = {};
-        clear_buffer_program_desc.cs = "RWStructuredBuffer<uint> OutputBuffer; uint ClearValue; [numthreads(128, 1, 1)] void main(in uint gidx : SV_DispatchThreadID) { OutputBuffer[gidx] = ClearValue; }";
+        clear_buffer_program_desc.cs = "RWStructuredBuffer<uint> OutputBuffer; uint ClearValue; uint ClearOffset; uint ClearCount; uint ClearGroupsX; "
+                                       "[numthreads(128, 1, 1)] void main(in uint3 gidx : SV_DispatchThreadID) "
+                                       "{ uint index = gidx.y * (ClearGroupsX * 128) + gidx.x; if(index >= ClearCount) return; OutputBuffer[ClearOffset + index] = ClearValue; }";
         clear_buffer_program_ = createProgram(clear_buffer_program_desc, "gfx_ClearBufferProgram", nullptr, nullptr, 0);
         clear_buffer_kernel_ = createComputeKernel(clear_buffer_program_, "main", nullptr, 0);
         if(!clear_buffer_kernel_)
@@ -3737,16 +3739,18 @@ public:
         return kGfxResult_NoError;
     }
 
-    GfxResult encodeClearBuffer(GfxBuffer buffer, uint32_t clear_value)
+    GfxResult encodeClearBuffer(GfxBuffer buffer, uint32_t element_offset, uint32_t element_count, uint32_t clear_value)
     {
         GfxResult result = kGfxResult_NoError;
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         if(!buffer_handles_.has_handle(buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear an invalid buffer object");
-        if(buffer.size == 0) return kGfxResult_NoError; // nothing to clear
-        uint64_t const data_size = GFX_ALIGN(buffer.size, 4);
-        uint64_t const num_uints = data_size / sizeof(uint32_t);
+        uint64_t const byte_offset = (uint64_t)element_offset * sizeof(uint32_t);
+        uint64_t const byte_size   = (uint64_t)element_count * sizeof(uint32_t);
+        if(byte_offset + byte_size > buffer.size)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot clear a buffer range that is larger than the buffer object");
+        if(element_count == 0) return kGfxResult_NoError; // nothing to clear
         buffer.setStride(sizeof(uint32_t));
         switch(buffer.cpu_access)
         {
@@ -3754,24 +3758,24 @@ public:
             {
                 Buffer &gfx_buffer = buffers_[buffer];
                 SetObjectName(gfx_buffer, buffer.name);
-                uint32_t *data = (uint32_t *)gfx_buffer.data_;
-                for(uint64_t i = 0; i < num_uints; ++i) data[i] = clear_value;
+                uint32_t *data = (uint32_t *)gfx_buffer.data_ + element_offset;
+                for(uint32_t i = 0; i < element_count; ++i) data[i] = clear_value;
             }
             break;
         case kGfxCpuAccess_Read:
             {
                 void *data = nullptr;
-                D3D12_GPU_VIRTUAL_ADDRESS const gpu_addr = allocateConstantMemory(data_size, data);
+                D3D12_GPU_VIRTUAL_ADDRESS const gpu_addr = allocateConstantMemory(byte_size, data);
                 if(data == nullptr)
                     return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to clear buffer object");
                 if(!issued_clear_buffer_warning_)
                     GFX_PRINT_WARNING("It is inefficient to clear a buffer object with read CPU access; prefer a copy instead");
                 issued_clear_buffer_warning_ = true;    // we've now warned the user...
-                for(uint64_t i = 0; i < num_uints; ++i) ((uint32_t *)data)[i] = clear_value;
+                for(uint32_t i = 0; i < element_count; ++i) ((uint32_t *)data)[i] = clear_value;
                 Buffer &dst_buffer = buffers_[buffer], &src_buffer = buffers_[constant_buffer_pool_[fence_index_]];
                 SetObjectName(dst_buffer, buffer.name);
-                command_list_->CopyBufferRegion(dst_buffer.resource_, dst_buffer.data_offset_,
-                    src_buffer.resource_, gpu_addr - src_buffer.resource_->GetGPUVirtualAddress(), data_size);
+                command_list_->CopyBufferRegion(dst_buffer.resource_, dst_buffer.data_offset_ + byte_offset,
+                    src_buffer.resource_, gpu_addr - src_buffer.resource_->GetGPUVirtualAddress(), byte_size);
             }
             break;
         default:    // kGfxCpuAccess_None
@@ -3779,10 +3783,18 @@ public:
                 GfxKernel const bound_kernel = bound_kernel_;
                 setProgramBuffer(clear_buffer_program_, "OutputBuffer", buffer);
                 setProgramConstants(clear_buffer_program_, "ClearValue", &clear_value, sizeof(clear_value));
-                uint32_t const group_size = *getKernelNumThreads(clear_buffer_kernel_);
-                uint32_t const num_groups = (uint32_t)((num_uints + group_size - 1) / group_size);
+                setProgramConstants(clear_buffer_program_, "ClearOffset", &element_offset, sizeof(element_offset));
+                setProgramConstants(clear_buffer_program_, "ClearCount", &element_count, sizeof(element_count));
+                uint32_t const group_size   = *getKernelNumThreads(clear_buffer_kernel_);
+                uint32_t const total_groups = (element_count + group_size - 1) / group_size;
+                // D3D12 caps a single dispatch dimension at 65535 thread groups; spread large
+                // clears across X/Y instead of risking a silently truncated (and therefore
+                // partially-uninitialized) clear.
+                uint32_t const num_groups_x = GFX_MIN(total_groups, 65535U);
+                uint32_t const num_groups_y = (total_groups + num_groups_x - 1) / num_groups_x;
+                setProgramConstants(clear_buffer_program_, "ClearGroupsX", &num_groups_x, sizeof(num_groups_x));
                 GFX_TRY(encodeBindKernel(clear_buffer_kernel_));
-                result = encodeDispatch(num_groups, 1, 1);
+                result = encodeDispatch(num_groups_x, num_groups_y, 1);
                 if(kernel_handles_.has_handle(bound_kernel.handle))
                     encodeBindKernel(bound_kernel);
                 else
@@ -11282,7 +11294,14 @@ GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t c
 {
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return kGfxResult_InvalidParameter;
-    return gfx->encodeClearBuffer(buffer, clear_value);
+    return gfx->encodeClearBuffer(buffer, 0, GFX_ALIGN(buffer.getSize(), 4u) / 4u, clear_value);
+}
+
+GfxResult gfxCommandClearBuffer(GfxContext context, GfxBuffer buffer, uint32_t element_offset, uint32_t element_count, uint32_t clear_value)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return kGfxResult_InvalidParameter;
+    return gfx->encodeClearBuffer(buffer, element_offset, element_count, clear_value);
 }
 
 GfxResult gfxCommandClearBackBuffer(GfxContext context)
