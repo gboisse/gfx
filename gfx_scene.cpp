@@ -1589,8 +1589,9 @@ private:
                         temp->format = ConvertImageFormatSRGB(temp->format);
                     material.specular_map = (*it).second;
                 }
-                if(gltf_material.specular.specular_texture.texture != nullptr &&
-                   gltf_material.specular.specular_texture.texture != specular_map_text)
+                if(gltf_material.specular.specular_texture.texture != nullptr
+                    && gltf_material.specular.specular_texture.texture->image != nullptr
+                    && gltf_material.specular.specular_texture.texture != specular_map_text)
                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation,
                         "Specular factor texture should be stored in Specular color texture alpha channel");
             }
@@ -1624,8 +1625,9 @@ private:
                         temp->format = ConvertImageFormatSRGB(temp->format);
                     material.sheen_map = (*it).second;
                 }
-                if(gltf_material.sheen.sheen_roughness_texture.texture != nullptr &&
-                   gltf_material.sheen.sheen_roughness_texture.texture != sheen_map_text)
+                if(gltf_material.sheen.sheen_roughness_texture.texture != nullptr
+                    && gltf_material.sheen.sheen_roughness_texture.texture->image != nullptr
+                    && gltf_material.sheen.sheen_roughness_texture.texture != sheen_map_text)
                     GFX_PRINT_ERROR(kGfxResult_InvalidOperation,
                         "Sheen roughness texture should be stored in Sheen color texture alpha channel");
             }
