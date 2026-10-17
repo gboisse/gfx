@@ -54,7 +54,7 @@ enum GfxCreateContextFlag
     kGfxCreateContextFlag_EnableExperimentalShaders = 1 << 5,
     kGfxCreateContextFlag_EnableHDRSwapChain        = 1 << 6,   // Creates an HDR swapchain format (requires an HDR-capable device+display to have an effect)
     kGfxCreateContextFlag_EnableLinearSwapChain     = 1 << 7,   // Prefers a linear gamma swapchain format (uses half-precision float scRGB instead of 10b Rec2100 for HDR)
-    kGfxCreateContextFlag_EnableDRED                = 1 << 8    // Enables Device Removed Extended Data; auto-breadcrumbs and page fault data are logged on device loss (has a performance cost)
+    kGfxCreateContextFlag_EnableDRED                = 1 << 8    // Enables Device Removed Extended Data; auto-breadcrumbs and page fault data are logged on device loss, with page faults matched against resources captured through ETW (has a performance cost)
 };
 typedef uint32_t GfxCreateContextFlags;
 
@@ -87,6 +87,7 @@ HWND           gfxGetWindowHandle(GfxContext context);
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
 bool gfxIsInteropContext(GfxContext context);
+bool gfxIsDxTimingCaptureEnabled(GfxContext context);   // whether DRED is capturing resources through ETW (requires administrator or Performance Log Users rights)
 
 //!
 //! Buffer resources.
