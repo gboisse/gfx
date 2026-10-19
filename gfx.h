@@ -86,6 +86,7 @@ HWND           gfxGetWindowHandle(GfxContext context);
 
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
+bool gfxIsOpacityMicromapSupported(GfxContext context);
 bool gfxIsInteropContext(GfxContext context);
 
 //!
@@ -196,21 +197,6 @@ GfxSamplerState gfxCreateSamplerState(GfxContext context, D3D12_FILTER filter, D
 GfxResult gfxDestroySamplerState(GfxContext context, GfxSamplerState sampler_state);
 
 //!
-//! Opacity micromaps.
-//!
-
-enum GfxOpacityMicromapFormat
-{
-    kGfxOpacityMicromapFormat_2State, // 1-bit micromap, each microtriangle is either opaque or transparent
-    kGfxOpacityMicromapFormat_4State  // 2-bit micromap, some parts of opacity are need to be resolved in shader
-};
-
-class GfxOpacityMicromap { GFX_INTERNAL_HANDLE(GfxOpacityMicromap); public: };
-
-GfxOpacityMicromap gfxCreateOpacityMicromap(GfxContext context, GfxBuffer data_buffer, GfxBuffer index_buffer, GfxOpacityMicromapFormat format, uint32_t const *offsets, uint8_t const *levels, uint32_t count);
-GfxResult gfxDestroyOpacityMicromap(GfxContext context, GfxOpacityMicromap opacity_micromap);
-
-//!
 //! Geometry objects.
 //!
 
@@ -229,7 +215,7 @@ GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, G
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
 
-GfxResult gfxGeometryTrianglesAddOpacityMicromap(GfxContext context, GfxGeometry triangles, GfxOpacityMicromap opacity_micromap);
+GfxResult gfxGeometryTrianglesAddOpacityMicromap(GfxContext context, GfxGeometry triangles, GfxBuffer data_buffer, GfxBuffer index_buffer, GfxBuffer desc_buffer, uint32_t const *counts, uint32_t const *levels, D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT const *formats, uint32_t count);
 
 //!
 //! Bottom level acceleration structures.
