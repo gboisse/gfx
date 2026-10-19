@@ -958,16 +958,6 @@ public:
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
 
-        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
-        {
-            IID const features[] = { D3D12ExperimentalShaderModels };
-            if(!IsDeveloperModeEnabled())
-                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
-            if(!SUCCEEDED(D3D12EnableExperimentalFeatures(ARRAYSIZE(features), features, nullptr, nullptr)))
-                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
-            experimental_shaders_ = true;
-        }
-
         struct DXGIFactoryReleaser
         {
             IDXGIFactory4 *factory;
@@ -988,7 +978,8 @@ public:
         UINT output_i  = 0;
         LONG best_area = -1;
         IDXGIOutput *current_output;
-        while(adapter_->EnumOutputs(output_i, &current_output) != DXGI_ERROR_NOT_FOUND)
+        // Any failure (not only DXGI_ERROR_NOT_FOUND) leaves current_output unset, e.g. in a session without a display.
+        while(SUCCEEDED(adapter_->EnumOutputs(output_i, &current_output)))
         {
             DXGI_OUTPUT_DESC output_desc;
             if(SUCCEEDED(current_output->GetDesc(&output_desc))) {
@@ -1113,6 +1104,16 @@ public:
     {
         if(GetD3D12SDKVersion() != GFX_AGILITY_VERSION)
             return GFX_SET_ERROR(kGfxResult_InternalError, "Agility SDK version not exported correctly");
+        // Must precede D3D12CreateDevice; shared by the windowed and headless paths.
+        if((flags & kGfxCreateContextFlag_EnableExperimentalShaders) != 0)
+        {
+            IID const features[] = { D3D12ExperimentalShaderModels };
+            if(!IsDeveloperModeEnabled())
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders without Windows developer mode");
+            if(!SUCCEEDED(D3D12EnableExperimentalFeatures(ARRAYSIZE(features), features, nullptr, nullptr)))
+                return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to enable experimental shaders");
+            experimental_shaders_ = true;
+        }
         if((flags & kGfxCreateContextFlag_EnableDebugLayer) != 0)
         {
             ID3D12Debug1 *debug_controller = nullptr;
@@ -1780,7 +1781,8 @@ public:
         UINT           output_i  = 0;
         LONG           best_area = -1;
         IDXGIOutput   *current_output;
-        while(adapter_->EnumOutputs(output_i, &current_output) != DXGI_ERROR_NOT_FOUND)
+        // Any failure (not only DXGI_ERROR_NOT_FOUND) leaves current_output unset, e.g. in a session without a display.
+        while(SUCCEEDED(adapter_->EnumOutputs(output_i, &current_output)))
         {
             DXGI_OUTPUT_DESC output_desc;
             if(SUCCEEDED(current_output->GetDesc(&output_desc))) {
