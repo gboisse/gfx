@@ -2865,14 +2865,19 @@ public:
                     entry.Format = opacity_micromap.formats_[j];
                     histogram.push_back(entry);
                 }
-                Buffer const &gfx_omm_data_buffer = buffers_[opacity_micromap.data_buffer_];
-                Buffer const &gfx_omm_desc_buffer = buffers_[opacity_micromap.desc_buffer_];
+                Buffer &gfx_omm_data_buffer = buffers_[opacity_micromap.data_buffer_];
+                Buffer &gfx_omm_desc_buffer = buffers_[opacity_micromap.desc_buffer_];
+                // The OMM data and per-OMM descriptor buffers are read by the builder
+                transition |= transitionResource(gfx_omm_data_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+                transition |= transitionResource(gfx_omm_desc_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+                if(transition)
+                    submitPipelineBarriers();
                 // Create input descriptor
                 D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_DESC omm_array_desc = {};
                 omm_array_desc.NumOmmHistogramEntries = static_cast<UINT>(histogram.size());
                 omm_array_desc.pOmmHistogram = histogram.data();
-                omm_array_desc.InputBuffer = gfx_omm_data_buffer.resource_->GetGPUVirtualAddress();
-                omm_array_desc.PerOmmDescs.StartAddress = gfx_omm_desc_buffer.resource_->GetGPUVirtualAddress();
+                omm_array_desc.InputBuffer = gfx_omm_data_buffer.resource_->GetGPUVirtualAddress() + gfx_omm_data_buffer.data_offset_;
+                omm_array_desc.PerOmmDescs.StartAddress = gfx_omm_desc_buffer.resource_->GetGPUVirtualAddress() + gfx_omm_desc_buffer.data_offset_;
                 omm_array_desc.PerOmmDescs.StrideInBytes = sizeof(D3D12_RAYTRACING_OPACITY_MICROMAP_DESC);
                 D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS omm_build_inputs = {};
                 omm_build_inputs.Type  = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY;
@@ -2956,12 +2961,14 @@ public:
                     else
                     {
                         OpacityMicromap const &opacity_micromap = *triangles.opacity_micromap_;
-                        Buffer const &omm_index_buffer = buffers_[opacity_micromap.index_buffer_];
+                        Buffer &omm_index_buffer = buffers_[opacity_micromap.index_buffer_];
                         Buffer const &omm_array = buffers_[opacity_micromap.omm_array_buffer_];
+                        // The OMM index buffer is read as acceleration structure geometry index data
+                        transition |= transitionResource(omm_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                         D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC omm_linkage = {};
                         omm_linkage.OpacityMicromapIndexBuffer.StartAddress = omm_index_buffer.resource_->GetGPUVirtualAddress() + omm_index_buffer.data_offset_;
                         omm_linkage.OpacityMicromapIndexBuffer.StrideInBytes = sizeof(int32_t);
-                        omm_linkage.OpacityMicromapIndexFormat = DXGI_FORMAT_R32_SINT;
+                        omm_linkage.OpacityMicromapIndexFormat               = DXGI_FORMAT_R32_UINT;
                         omm_linkage.OpacityMicromapBaseLocation = 0;
                         omm_linkage.OpacityMicromapArray = omm_array.resource_->GetGPUVirtualAddress() + omm_array.data_offset_;
                         omm_links.push_back(omm_linkage);
