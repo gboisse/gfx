@@ -2888,7 +2888,12 @@ public:
                 omm_build_inputs.pOpacityMicromapArrayDesc = &omm_array_desc;
                 D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO omm_prebuild_info = {};
                 dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&omm_build_inputs, &omm_prebuild_info);
-                constexpr uint64_t omm_byte_alignment = 128; // Same as D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_BYTE_ALIGNMENT
+                // WARNING: temporary workaround.
+                // We make the OMM array buffer at least 65536 bytes (64 KiB) despite the spec
+                // alignment being 128 (D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_BYTE_ALIGNMENT).
+                // For some unknown reason this fixes a device lost.
+                // Temporary workaround — investigate and drop back to 128 once the root cause is known.
+                constexpr uint64_t omm_byte_alignment = 65536;
                 uint64_t const data_size = GFX_ALIGN(omm_prebuild_info.ResultDataMaxSizeInBytes, omm_byte_alignment);
                 // Allocate omm array
                 GfxBuffer &omm_array = opacity_micromap.omm_array_buffer_;
