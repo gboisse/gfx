@@ -33,6 +33,7 @@ SOFTWARE.
 #include <dxgi1_6.h>            // IDXGIFactory6 + IDXGIOutput6
 #include <filesystem>
 #include <mutex>
+#include <thread>
 
 #ifdef __clang__
 #    pragma clang diagnostic push
@@ -64,6 +65,9 @@ SOFTWARE.
 #include <D3D12MemAlloc.h>      // D3D12 memory allocator
 #include <pix3.h>
 #include <AmdPix3.h>
+#include <DxTimingCaptureLibrary/DxTimingCaptureEventHandler.h>
+#include <DxTimingCaptureLibrary/EtwProviders.h>
+#include <DxTimingCaptureLibrary/NoOpCallbacks.h>
 #ifdef __clang__
 #    pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -87,6 +91,423 @@ __declspec(dllexport) UINT GetD3D12SDKVersion()
 }
 
 constexpr uint32_t const blas_compaction_sentinel = 0xFFFFFFFFu;
+
+// Captures the D3D12 and graphics kernel ETW events of the process while DRED is enabled, so that a page
+// fault address can be matched against the GPU virtual address ranges of named resources and heaps.
+// Records are only written by the consumer thread and must not be read before stop() has joined it.
+class GfxDxTimingCapture
+    : public DirectX::Etw::NoOpApiObjectCallbacks
+    , public DirectX::Etw::NoOpResidencyEventCallbacks
+    , public DirectX::Etw::NoOpRuntimeFailureCallbacks
+    , public DirectX::Etw::DiagnosticsSink
+{
+    GFX_NON_COPYABLE(GfxDxTimingCapture);
+
+    struct Resource
+    {
+        uint64_t address_ = 0;
+        uint64_t size_ = 0;
+        int64_t created_ = 0;
+        int64_t destroyed_ = 0;
+        bool is_heap_ = false;
+        D3D12_RESOURCE_DESC desc_ = {};
+        std::wstring name_;
+        char const *residency_ = "unknown";
+
+        inline bool contains(uint64_t address) const
+        {
+            return address_ != 0 && address >= address_ && address - address_ < size_;    // cannot overflow
+        }
+    };
+
+    struct RuntimeFailure
+    {
+        int64_t timestamp_ = 0;
+        uint32_t code_ = 0;
+        uint32_t thread_id_ = 0;
+        uint32_t count_ = 0;
+        std::string message_;
+    };
+
+    struct SessionProperties
+    {
+        EVENT_TRACE_PROPERTIES properties_;
+        wchar_t logger_name_[64];
+    };
+
+    // Live resources are always retained, only the history is bounded
+    static constexpr uint32_t kMaxFreedResources = 4096;
+    static constexpr uint32_t kMaxRuntimeFailures = 64;
+
+    std::map<uint64_t, Resource> live_resources_;
+    std::deque<Resource> freed_resources_;
+    std::deque<RuntimeFailure> runtime_failures_;
+    uint64_t discarded_resources_ = 0;
+    uint64_t decoding_errors_ = 0;
+
+    std::unique_ptr<DirectX::Etw::DxTimingCaptureEventHandler> handler_;
+    wchar_t session_name_[64] = {};
+    SessionProperties session_properties_ = {};
+    TRACEHANDLE session_handle_ = 0;
+    TRACEHANDLE trace_handle_ = INVALID_PROCESSTRACE_HANDLE;
+    ULONG trace_result_ = ERROR_SUCCESS;
+    std::thread consumer_;
+
+public:
+    GfxDxTimingCapture() {}
+    ~GfxDxTimingCapture() { stop(); }
+
+    bool start()
+    {
+        StopOrphanedSessions();
+        static std::atomic<uint32_t> session_count;
+        swprintf(session_name_, ARRAYSIZE(session_name_), L"gfx.DxTimingCapture.%lu.%u", GetCurrentProcessId(), ++session_count);
+
+        DirectX::Etw::DxTimingCaptureLibraryOptions options = {};
+        options.TrackApiObjects = true;
+        DirectX::Etw::DxTimingCaptureEventCallbacks callbacks = {};
+        callbacks.ApiObjectCallbacks = this;
+        callbacks.ResidencyEventCallbacks = this;
+        callbacks.RuntimeFailureCallbacks = this;
+        callbacks.DiagnosticsSink = this;
+        try
+        {
+            handler_ = DirectX::Etw::DxTimingCaptureEventHandler::Create(GetCurrentProcessId(), options, callbacks);
+        }
+        catch(...)
+        {
+            GFX_PRINT_WARNING("Unable to create DxTimingCapture event handler, DRED page faults will not be matched against resources");
+            return false;
+        }
+
+        session_properties_.properties_.Wnode.BufferSize = sizeof(session_properties_);
+        session_properties_.properties_.Wnode.ClientContext = 1;   // raw QPC timestamps, as expected by the decoder
+        session_properties_.properties_.Wnode.Flags = WNODE_FLAG_TRACED_GUID;
+        session_properties_.properties_.LogFileMode = EVENT_TRACE_REAL_TIME_MODE;
+        session_properties_.properties_.BufferSize = 256;  // in KB
+        session_properties_.properties_.MinimumBuffers = 16;
+        session_properties_.properties_.MaximumBuffers = 128;
+        session_properties_.properties_.FlushTimer = 1;
+        session_properties_.properties_.LoggerNameOffset = offsetof(SessionProperties, logger_name_);
+        ULONG result = StartTraceW(&session_handle_, session_name_, &session_properties_.properties_);
+        if(result != ERROR_SUCCESS)
+        {
+            session_handle_ = 0;
+            GFX_PRINT_WARNING("Unable to start DxTimingCapture ETW session (error %lu), DRED page faults will not be matched against resources%s", result,
+                result == ERROR_ACCESS_DENIED ? "; administrator rights or membership of the Performance Log Users group are required" : "");
+            return false;
+        }
+        EVENT_TRACE_LOGFILEW trace = {};
+        trace.LoggerName = session_name_;
+        trace.ProcessTraceMode = PROCESS_TRACE_MODE_REAL_TIME | PROCESS_TRACE_MODE_EVENT_RECORD | PROCESS_TRACE_MODE_RAW_TIMESTAMP;
+        trace.EventRecordCallback = OnEventRecord;
+        trace.Context = this;
+        trace_handle_ = OpenTraceW(&trace);
+        if(trace_handle_ == INVALID_PROCESSTRACE_HANDLE)
+        {
+            GFX_PRINT_WARNING("Unable to open DxTimingCapture ETW session (error %lu), DRED page faults will not be matched against resources", GetLastError());
+            return false;
+        }
+        consumer_ = std::thread([this, trace_handle = trace_handle_]() mutable
+        {
+            trace_result_ = ProcessTrace(&trace_handle, 1, nullptr, nullptr);
+            try { handler_->OnDataComplete(); } catch(...) { ++decoding_errors_; }
+        });
+
+        // Only user-mode providers can be filtered by process, the graphics kernel provider cannot
+        ULONG process_id = GetCurrentProcessId();
+        EVENT_FILTER_DESCRIPTOR process_filter = {};
+        process_filter.Ptr = (ULONGLONG)&process_id;
+        process_filter.Size = sizeof(process_id);
+        process_filter.Type = EVENT_FILTER_TYPE_PID;
+        ENABLE_TRACE_PARAMETERS parameters = {};
+        parameters.Version = ENABLE_TRACE_PARAMETERS_VERSION_2;
+        parameters.EnableFilterDesc = &process_filter;
+        parameters.FilterDescCount = 1;
+        result = EnableTraceEx2(session_handle_, &Direct3D12EtwProviderGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_RESERVED6,
+            D3D12_ETW_LOG_FLAGS_NAMES | D3D12_ETW_LOG_FLAGS_DEVICES | D3D12_ETW_LOG_FLAGS_RESOURCES | D3D12_ETW_LOG_FLAGS_OBJECT_LIFETIME |
+            D3D12_ETW_LOG_FLAGS_JOURNAL_ENTRIES, 0, 5000, &parameters);
+        if(result == ERROR_SUCCESS)
+        {
+            parameters.EnableFilterDesc = nullptr;
+            parameters.FilterDescCount = 0;
+            result = EnableTraceEx2(session_handle_, &DxgkControlGuid, EVENT_CONTROL_CODE_ENABLE_PROVIDER, TRACE_LEVEL_VERBOSE,
+                DXGK_KEYWORD_LOG_FLAGS_BASE | DXGK_KEYWORD_LOG_FLAGS_PROFILER | DXGK_KEYWORD_LOG_FLAGS_ALLOCATIONS_REFERENCES |
+                DXGK_KEYWORD_LOG_FLAGS_RESOURCE | DXGK_KEYWORD_LOG_FLAGS_LONG_HAUL, 0, 5000, &parameters);
+        }
+        if(result != ERROR_SUCCESS)
+        {
+            GFX_PRINT_WARNING("Unable to enable DxTimingCapture ETW providers (error %lu), DRED page faults will not be matched against resources%s", result,
+                result == ERROR_ACCESS_DENIED ? "; administrator rights or membership of the Performance Log Users group are required" : "");
+            return false;
+        }
+        return true;
+    }
+
+    void stop()
+    {
+        if(session_handle_ != 0)
+        {
+            // Stopping the session delivers its remaining events to the consumer, which then returns
+            ULONG const result = ControlTraceW(session_handle_, nullptr, &session_properties_.properties_, EVENT_TRACE_CONTROL_STOP);
+            session_handle_ = 0;
+            if(result != ERROR_SUCCESS)
+            {
+                GFX_PRINT_WARNING("Unable to stop DxTimingCapture ETW session `%ls' (error %lu)", session_name_, result);
+                CloseTrace(trace_handle_);  // cancel the consumer instead
+                trace_handle_ = INVALID_PROCESSTRACE_HANDLE;
+            }
+        }
+        if(consumer_.joinable())
+            consumer_.join();
+        if(trace_handle_ != INVALID_PROCESSTRACE_HANDLE)
+        {
+            CloseTrace(trace_handle_);
+            trace_handle_ = INVALID_PROCESSTRACE_HANDLE;
+        }
+    }
+
+    void reportPageFault(uint64_t page_fault_va, uint32_t max_reported_resources) const
+    {
+        int64_t const timestamp = GetTimestamp();
+        uint32_t resource_count = 0;
+        auto const report_resource = [&](Resource const &resource)
+        {
+            if(!resource.contains(page_fault_va) || resource_count++ >= max_reported_resources)
+                return;
+            static char const *const dimension_names[] = { "resource", "buffer", "texture1d", "texture2d", "texture3d" };
+            char details[128];
+            if(resource.is_heap_)
+                GFX_SNPRINTF(details, sizeof(details), "%llu bytes", resource.size_);
+            else if(resource.desc_.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
+                GFX_SNPRINTF(details, sizeof(details), "%llu bytes, flags 0x%X", resource.desc_.Width, (uint32_t)resource.desc_.Flags);
+            else
+                GFX_SNPRINTF(details, sizeof(details), "%llux%ux%u, %u mips, format %u, flags 0x%X", resource.desc_.Width,
+                    resource.desc_.Height, (uint32_t)resource.desc_.DepthOrArraySize, (uint32_t)resource.desc_.MipLevels,
+                    (uint32_t)resource.desc_.Format, (uint32_t)resource.desc_.Flags);
+            std::string const name = ToUTF8(resource.name_);
+            GFX_PRINTLN("DRED:     [%s %s] `%s' at offset 0x%llX of [0x%llX, +0x%llX)", resource.destroyed_ != 0 ? "freed" : "live",
+                resource.is_heap_ ? "heap" : dimension_names[GFX_MIN((uint32_t)resource.desc_.Dimension, 4u)],
+                name.empty() ? "<unnamed>" : name.c_str(), page_fault_va - resource.address_, resource.address_, resource.size_);
+            if(resource.destroyed_ != 0)
+                GFX_PRINTLN("DRED:       %s; created %.3f s and freed %.3f s ago; last residency: %s", details,
+                    1e-9 * (double)(timestamp - resource.created_), 1e-9 * (double)(timestamp - resource.destroyed_), resource.residency_);
+            else
+                GFX_PRINTLN("DRED:       %s; created %.3f s ago; last residency: %s", details,
+                    1e-9 * (double)(timestamp - resource.created_), resource.residency_);
+        };
+        GFX_PRINTLN("DRED:   captured resources containing the page fault address (%zu live and %zu freed tracked):",
+            live_resources_.size(), freed_resources_.size());
+        for(auto const &live_resource : live_resources_)
+            report_resource(live_resource.second);
+        for(auto it = freed_resources_.rbegin(); it != freed_resources_.rend(); ++it)
+            report_resource(*it);   // most recently freed first
+        if(resource_count == 0)
+            GFX_PRINTLN("DRED:     none; the address may lie outside of any allocation, or belong to a resource that was not captured");
+        else if(resource_count > max_reported_resources)
+            GFX_PRINTLN("DRED:     ... and %u more", resource_count - max_reported_resources);
+        EVENT_TRACE_PROPERTIES const &properties = session_properties_.properties_;
+        if(decoding_errors_ != 0 || trace_result_ != ERROR_SUCCESS || properties.EventsLost != 0 || properties.RealTimeBuffersLost != 0)
+            GFX_PRINTLN("DRED:     capture is incomplete (%llu decoding errors, %lu events and %lu buffers lost, status %lu); resources may be missing or out of date",
+                decoding_errors_, properties.EventsLost, properties.RealTimeBuffersLost, trace_result_);
+        if(discarded_resources_ != 0)
+            GFX_PRINTLN("DRED:     the %llu oldest freed resources were discarded", discarded_resources_);
+    }
+
+    void reportRuntimeFailures() const
+    {
+        if(runtime_failures_.empty())
+            return;
+        int64_t const timestamp = GetTimestamp();
+        GFX_PRINTLN("DRED:   recent D3D12 runtime failures:");
+        for(RuntimeFailure const &failure : runtime_failures_)
+        {
+            char repeats[32] = "";
+            if(failure.count_ > 1)
+                GFX_SNPRINTF(repeats, sizeof(repeats), " (%u times)", failure.count_);
+            GFX_PRINTLN("DRED:     %.3f s ago, thread %u, code 0x%08X%s: %s", 1e-9 * (double)(timestamp - failure.timestamp_),
+                failure.thread_id_, failure.code_, repeats, failure.message_.c_str());
+        }
+    }
+
+private:
+    HRESULT addResource(UINT64 object_id, INT64 timestamp, D3D12_RESOURCE_DESC const *desc, DirectX::Etw::ObjectPlacementInfo const *placement)
+    {
+        Resource &resource = live_resources_[object_id];
+        resource.created_ = timestamp;
+        resource.is_heap_ = (desc == nullptr);
+        if(desc != nullptr)
+            resource.desc_ = *desc;
+        if(placement != nullptr)
+        {
+            resource.address_ = placement->GpuVirtualAddress;
+            resource.size_ = placement->GpuVirtualSize;
+        }
+        return S_OK;
+    }
+
+    // The base class assigns the object identifiers, which must be unique across all object types.
+    HRESULT OnCommittedResourceCreation(INT64 timestamp, UINT64 device, UINT32 process_id, UINT32 thread_id, D3D12_RESOURCE_DESC const *desc,
+        DirectX::Etw::ObjectPlacementInfo const *placement, D3D12_HEAP_PROPERTIES const *heap_properties, D3D12_HEAP_FLAGS heap_flags, UINT64 *object_id) override
+    {
+        NoOpApiObjectCallbacks::OnCommittedResourceCreation(timestamp, device, process_id, thread_id, desc, placement, heap_properties, heap_flags, object_id);
+        return addResource(*object_id, timestamp, desc, placement);
+    }
+
+    HRESULT OnPlacedResourceCreation(INT64 timestamp, UINT64 device, UINT32 process_id, UINT32 thread_id, D3D12_RESOURCE_DESC const *desc,
+        DirectX::Etw::ObjectPlacementInfo const *placement, UINT64 *object_id) override
+    {
+        NoOpApiObjectCallbacks::OnPlacedResourceCreation(timestamp, device, process_id, thread_id, desc, placement, object_id);
+        return addResource(*object_id, timestamp, desc, placement);
+    }
+
+    HRESULT OnReservedResourceCreation(INT64 timestamp, UINT64 device, UINT32 process_id, UINT32 thread_id, D3D12_RESOURCE_DESC const *desc,
+        DirectX::Etw::ReservedResourceInfo const *reserved_resource, UINT64 *object_id) override
+    {
+        NoOpApiObjectCallbacks::OnReservedResourceCreation(timestamp, device, process_id, thread_id, desc, reserved_resource, object_id);
+        return addResource(*object_id, timestamp, desc, nullptr);
+    }
+
+    HRESULT OnHeapCreation(INT64 timestamp, UINT64 device, UINT32 process_id, UINT32 thread_id, D3D12_HEAP_DESC const *desc,
+        DirectX::Etw::ObjectPlacementInfo const *placement, UINT64 *object_id) override
+    {
+        NoOpApiObjectCallbacks::OnHeapCreation(timestamp, device, process_id, thread_id, desc, placement, object_id);
+        return addResource(*object_id, timestamp, nullptr, placement);
+    }
+
+    HRESULT OnObjectDestruction(INT64 timestamp, DirectX::Etw::ApiObjectType, UINT64 object_id) override
+    {
+        auto const it = live_resources_.find(object_id);
+        if(it == live_resources_.end())
+            return S_OK;    // not a resource or heap
+        (*it).second.destroyed_ = timestamp;
+        freed_resources_.push_back(std::move((*it).second));
+        live_resources_.erase(it);
+        if(freed_resources_.size() > kMaxFreedResources)
+        {
+            freed_resources_.pop_front();
+            ++discarded_resources_;
+        }
+        return S_OK;
+    }
+
+    HRESULT OnApiObjectName(INT64, DirectX::Etw::ApiObjectType, UINT64 object_id, std::wstring_view name) override
+    {
+        auto const it = live_resources_.find(object_id);
+        if(it != live_resources_.end())
+            (*it).second.name_ = name;
+        return S_OK;
+    }
+
+    HRESULT OnApiObjectSizeAndAddress(INT64, DirectX::Etw::ApiObjectType, UINT64 object_id, UINT64 size, UINT64 address) override
+    {
+        auto const it = live_resources_.find(object_id);
+        if(it != live_resources_.end())
+        {
+            (*it).second.address_ = address;
+            (*it).second.size_ = size;
+        }
+        return S_OK;
+    }
+
+    HRESULT OnResidencyOperation(DirectX::Etw::ResidencyOperation const *operation) override
+    {
+        static char const *const operation_names[] = { "make resident", "evict", "page in", "page out" };
+        auto const it = live_resources_.find(operation->ObjectId);
+        uint32_t const operation_type = (uint32_t)operation->OperationType;
+        if(it != live_resources_.end() && operation_type < ARRAYSIZE(operation_names))
+            (*it).second.residency_ = operation_names[operation_type];
+        return S_OK;
+    }
+
+    // Benign failures recur, e.g., on every device creation; merge them so they do not evict the others.
+    HRESULT OnD3D12JournalEntry(INT64 timestamp, UINT32, UINT32 code, UINT32 thread_id, std::string_view message) override
+    {
+        RuntimeFailure failure = { timestamp, code, thread_id, 1, std::string(message) };
+        auto const it = std::find_if(runtime_failures_.begin(), runtime_failures_.end(),
+            [&](RuntimeFailure const &runtime_failure) { return runtime_failure.code_ == code && runtime_failure.message_ == message; });
+        if(it != runtime_failures_.end())
+        {
+            failure.count_ += (*it).count_;
+            runtime_failures_.erase(it);
+        }
+        runtime_failures_.push_back(std::move(failure));
+        if(runtime_failures_.size() > kMaxRuntimeFailures)
+            runtime_failures_.pop_front();
+        return S_OK;
+    }
+
+    void OnDiagnostic(DirectX::Etw::DiagnosticSeverity, DirectX::Etw::DiagnosticCode, std::wstring_view) override
+    {
+        ++decoding_errors_;
+    }
+
+    static void WINAPI OnEventRecord(EVENT_RECORD *event_record)
+    {
+        GfxDxTimingCapture *capture = (GfxDxTimingCapture *)event_record->UserContext;
+        try
+        {
+            capture->handler_->HandleEventRecord(event_record);
+        }
+        catch(...) // the decoder throws on malformed events, which must not unwind through ETW
+        {
+            ++capture->decoding_errors_;
+        }
+    }
+
+    // Matches the timeline of the decoder, i.e., the performance counter converted to nanoseconds.
+    static int64_t GetTimestamp()
+    {
+        LARGE_INTEGER counter = {}, frequency = {};
+        QueryPerformanceCounter(&counter);
+        QueryPerformanceFrequency(&frequency);
+        return counter.QuadPart / frequency.QuadPart * 1000000000 + counter.QuadPart % frequency.QuadPart * 1000000000 / frequency.QuadPart;
+    }
+
+    static std::string ToUTF8(std::wstring const &text)
+    {
+        std::string result((size_t)WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), nullptr, 0, nullptr, nullptr), '\0');
+        WideCharToMultiByte(CP_UTF8, 0, text.c_str(), (int)text.size(), result.data(), (int)result.size(), nullptr, nullptr);
+        return result;
+    }
+
+    // A session outlives its process if the latter gets terminated, which leaves the providers enabled
+    // system-wide; stop any session left behind by a terminated process before it exhausts the sessions.
+    static void StopOrphanedSessions()
+    {
+        struct Session
+        {
+            EVENT_TRACE_PROPERTIES properties_;
+            wchar_t logger_name_[1024];
+            wchar_t log_file_name_[1024];
+        };
+        std::vector<Session> sessions(64);
+        std::vector<EVENT_TRACE_PROPERTIES *> session_properties(sessions.size());
+        for(size_t i = 0; i < sessions.size(); ++i)
+        {
+            sessions[i].properties_.Wnode.BufferSize = sizeof(Session);
+            sessions[i].properties_.LoggerNameOffset = offsetof(Session, logger_name_);
+            sessions[i].properties_.LogFileNameOffset = offsetof(Session, log_file_name_);
+            session_properties[i] = &sessions[i].properties_;
+        }
+        ULONG session_count = 0;
+        ULONG const result = QueryAllTracesW(session_properties.data(), (ULONG)session_properties.size(), &session_count);
+        if(result != ERROR_SUCCESS && result != ERROR_MORE_DATA)
+            return;
+        for(ULONG i = 0; i < GFX_MIN(session_count, (ULONG)sessions.size()); ++i)
+        {
+            DWORD process_id = 0;
+            if(swscanf(sessions[i].logger_name_, L"gfx.DxTimingCapture.%lu.", &process_id) != 1 || process_id == GetCurrentProcessId())
+                continue;
+            HANDLE const process = OpenProcess(SYNCHRONIZE, FALSE, process_id);
+            bool const terminated = (process != nullptr ? WaitForSingleObject(process, 0) == WAIT_OBJECT_0 : GetLastError() == ERROR_INVALID_PARAMETER);
+            if(process != nullptr)
+                CloseHandle(process);
+            if(terminated && ControlTraceW(0, sessions[i].logger_name_, &sessions[i].properties_, EVENT_TRACE_CONTROL_STOP) == ERROR_SUCCESS)
+                GFX_PRINTLN("Stopped ETW session `%ls' left behind by terminated process %lu", sessions[i].logger_name_, process_id);
+        }
+    }
+};
 
 class GfxInternal
 {
@@ -118,6 +539,8 @@ class GfxInternal
     bool cache_shaders_ = false;
     bool experimental_shaders_ = false;
     bool dred_enabled_ = false;
+    bool device_lost_reported_ = false;
+    std::unique_ptr<GfxDxTimingCapture> dx_timing_capture_;
     IDxcUtils *dxc_utils_ = nullptr;
     IDxcCompiler3 *dxc_compiler_ = nullptr;
     IDxcIncludeHandler *dxc_include_handler_ = nullptr;
@@ -1170,6 +1593,11 @@ public:
             GFX_PRINT_WARNING("DRED breadcrumb contexts are unavailable, breadcrumbs will not be annotated with PIX events");
         dred_settings->Release();
         dred_enabled_ = true;
+
+        // Resources must be captured from their creation onwards to match page faults against them
+        dx_timing_capture_ = std::make_unique<GfxDxTimingCapture>();
+        if(!dx_timing_capture_->start())
+            dx_timing_capture_ = nullptr;
     }
 
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
@@ -1540,6 +1968,7 @@ public:
 
     GfxResult terminate()
     {
+        checkDeviceLost();  // report a device removal that went unnoticed, e.g., during initialization
         destroyBuffer(draw_id_buffer_);
         draw_id_buffer_ = {};
         destroyKernel(clear_buffer_kernel_);
@@ -1791,6 +2220,7 @@ public:
             draw_mesh_signature_->Release();
             draw_mesh_signature_ = nullptr;
         }
+        dx_timing_capture_ = nullptr;
 
 #ifdef PIX_AMD_EXT
         tls_pAmdExtDeviceObject = nullptr;
@@ -1800,9 +2230,14 @@ public:
         return kGfxResult_NoError;
     }
 
-    bool isValid() const
+    bool isValid()
     {
-        return device_ != nullptr && mem_allocator_ != nullptr && device_->GetDeviceRemovedReason() == S_OK;
+        if(device_ == nullptr || mem_allocator_ == nullptr)
+            return false;
+        if(device_->GetDeviceRemovedReason() == S_OK)
+            return true;
+        checkDeviceLost();  // report the device removal while its DRED data is still available
+        return false;
     }
 
     inline uint32_t getBackBufferWidth() const
@@ -1937,6 +2372,11 @@ public:
     inline bool isMeshShaderSupported() const
     {
         return (mesh_device_ != nullptr ? true : false);
+    }
+
+    inline bool isDxTimingCaptureEnabled() const
+    {
+        return (dx_timing_capture_ != nullptr ? true : false);
     }
 
     GfxBuffer createBuffer(uint64_t size, void const *data, GfxCpuAccess cpu_access, D3D12_RESOURCE_STATES resource_state = D3D12_RESOURCE_STATE_COMMON)
@@ -5091,6 +5531,7 @@ public:
 
     GfxResult frame(bool vsync)
     {
+        GFX_TRY(checkDeviceLost());
         GFX_ASSERT(max_frames_in_flight_ > 0);
         if(isInterop())
         {
@@ -5210,6 +5651,7 @@ public:
 
     GfxResult finish()
     {
+        GFX_TRY(checkDeviceLost());
         if(isInterop())
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot synchronize commands when using an interop context");
         command_list_->Close(); // close command list for submit
@@ -10151,6 +10593,7 @@ private:
                 WaitForSingleObject(fence_event_, INFINITE);    // wait for GPU to complete
             }
         }
+        GFX_TRY(checkDeviceLost()); // the device may have been removed while executing the pending work
         return forceGarbageCollection();
     }
 
@@ -10464,6 +10907,8 @@ private:
             else
                 GFX_PRINT_WARNING("DRED page fault data is unavailable");
         }
+        if(dx_timing_capture_ != nullptr)
+            dx_timing_capture_->reportRuntimeFailures();
 
         if(dred2 != nullptr) dred2->Release();
         if(dred1 != nullptr) dred1->Release();
@@ -10479,14 +10924,29 @@ private:
         GFX_PRINTLN("DRED:   page fault at GPU virtual address 0x%llX", static_cast<unsigned long long>(page_fault_va));
         reportDREDAllocationNodes("existing", existing_allocations);
         reportDREDAllocationNodes("recently freed", freed_allocations);
+        if(dx_timing_capture_ != nullptr)
+            dx_timing_capture_->reportPageFault(page_fault_va, kDREDMaxReportedAllocations);
+    }
+
+    // Device removal is otherwise only detected when presenting, which windowless contexts never do
+    GfxResult checkDeviceLost()
+    {
+        if(dred_enabled_ && device_ != nullptr && device_->GetDeviceRemovedReason() != S_OK)
+            return handleDeviceLost();
+        return kGfxResult_NoError;
     }
 
     GfxResult handleDeviceLost()
     {
+        if(device_lost_reported_)
+            return kGfxResult_DeviceError;  // the command list was already released
+        device_lost_reported_ = true;
         HRESULT const reason = device_->GetDeviceRemovedReason();
         LPSTR error_text = nullptr;
         DWORD const result = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER, nullptr, reason,
                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT), reinterpret_cast<LPSTR>(&error_text), 0, nullptr);
+        if(dx_timing_capture_ != nullptr)
+            dx_timing_capture_->stop(); // deliver the events leading up to the device removal
         reportDREDOutput();
         if(command_list_ != nullptr)
         {
@@ -10645,6 +11105,13 @@ bool gfxIsInteropContext(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return false;  // invalid context
     return gfx->isInterop();
+}
+
+bool gfxIsDxTimingCaptureEnabled(GfxContext context)
+{
+    GfxInternal *gfx = GfxInternal::GetGfx(context);
+    if(!gfx) return false;  // invalid context
+    return gfx->isDxTimingCaptureEnabled();
 }
 
 GfxBuffer gfxCreateBuffer(GfxContext context, uint64_t size, void const *data, GfxCpuAccess cpu_access)
