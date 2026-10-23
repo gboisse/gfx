@@ -2633,6 +2633,8 @@ public:
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot add invalid opacity micromap data to a geometry object");
         if(!buffer_handles_.has_handle(index_buffer.handle))
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot add invalid opacity micromap indices to a geometry object");
+        if(index_buffer.stride != 1 && index_buffer.stride != 2 && index_buffer.stride != 4)
+            return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Opacity micromap index buffer must contain R8, R16 or R32 indices (stride of 1, 2 or 4)");
         if(!formats || !counts || !levels || !count)
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "Cannot add opacity micromap with invalid usage info to a geometry object");
         Geometry &gfx_geometry = geometries_[geometry];
@@ -2972,8 +2974,10 @@ public:
                         transition |= transitionResource(omm_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                         D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC omm_linkage = {};
                         omm_linkage.OpacityMicromapIndexBuffer.StartAddress = omm_index_buffer.resource_->GetGPUVirtualAddress() + omm_index_buffer.data_offset_;
-                        omm_linkage.OpacityMicromapIndexBuffer.StrideInBytes = sizeof(int32_t);
-                        omm_linkage.OpacityMicromapIndexFormat               = DXGI_FORMAT_R32_UINT;
+                        omm_linkage.OpacityMicromapIndexBuffer.StrideInBytes = opacity_micromap.index_buffer_.stride;
+                        omm_linkage.OpacityMicromapIndexFormat               = (opacity_micromap.index_buffer_.stride == 2
+                            ? DXGI_FORMAT_R16_UINT
+                            : (opacity_micromap.index_buffer_.stride == 1 ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R32_UINT));
                         omm_linkage.OpacityMicromapBaseLocation = 0;
                         omm_linkage.OpacityMicromapArray = omm_array.resource_->GetGPUVirtualAddress() + omm_array.data_offset_;
                         omm_links.push_back(omm_linkage);
