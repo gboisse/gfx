@@ -310,6 +310,7 @@ public:
         clearObjects<GfxMesh>();
         clearObjects<GfxMeshInstance>();
         clearObjects<GfxRenderInstance>();
+        clearObjects<GfxOpacityMicromap>();
         clearNodes();
 
         return kGfxResult_NoError;
