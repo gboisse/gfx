@@ -86,6 +86,7 @@ HWND           gfxGetWindowHandle(GfxContext context);
 
 bool gfxIsRaytracingSupported(GfxContext context);
 bool gfxIsMeshShaderSupported(GfxContext context);
+bool gfxIsOpacityMicromapSupported(GfxContext context);
 bool gfxIsInteropContext(GfxContext context);
 
 //!
@@ -213,6 +214,8 @@ GfxResult gfxGeometrySetOpaque(GfxContext context, GfxGeometry geometry, bool op
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxGeometryTrianglesUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer index_buffer, GfxBuffer vertex_buffer, uint32_t vertex_stride = 0);
 GfxResult gfxGeometryProceduralUpdate(GfxContext context, GfxGeometry geometry, GfxBuffer aabb_buffer, uint32_t aabb_stride = 0);
+
+GfxResult gfxGeometryTrianglesAddOpacityMicromap(GfxContext context, GfxGeometry triangles, GfxBuffer data_buffer, GfxBuffer index_buffer, GfxBuffer desc_buffer, uint32_t const *counts, uint32_t const *levels, D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT const *formats, uint32_t count);
 
 //!
 //! Bottom level acceleration structures.
