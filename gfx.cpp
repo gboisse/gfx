@@ -447,10 +447,9 @@ class GfxInternal
 
     struct OpacityMicromap
     {
-        GfxBuffer data_buffer_ = {};
-        GfxBuffer index_buffer_ = {};
-        GfxBuffer desc_buffer_ = {};
-        GfxBuffer omm_array_buffer_ = {};
+        GfxBuffer data_buffer_ = {};  // Original per-OMM data, an input to the OMM array build only
+        GfxBuffer index_buffer_ = {}; // OMM indices; transferred to the owning BLAS at build time (this handle is then cleared)
+        GfxBuffer desc_buffer_ = {};  // Original per-OMM descriptors, an input to the OMM array build only
         std::vector<uint32_t> counts_;
         std::vector<uint32_t> levels_;
         std::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT> formats_;
@@ -505,6 +504,13 @@ class GfxInternal
         GfxBuffer bvh_compact_size_buffer_ = {};
         GfxBuffer bvh_compact_size_readback_buffer_ = {};
         std::vector<GfxGeometry> geometries_;
+        // OMM data built for this BLAS's OMM-enabled geometries, in geometry slot order
+        struct OmmData
+        {
+            GfxBuffer index_buffer_ = {}; // The OMM index buffer, owned by the BLAS (transferred from the geometry at build time)
+            GfxBuffer array_buffer_ = {}; // The OMM array built for this geometry
+        };
+        std::vector<OmmData> omm_data_;
     };
     GfxArray<BottomLevelAccelerationStructure> bottom_level_acceleration_structures_;
     GfxHandles bottom_level_acceleration_structure_handles_;
@@ -2709,6 +2715,13 @@ public:
         BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blas];
         gfx_blas.geometries_.erase(std::remove(gfx_blas.geometries_.begin(), gfx_blas.geometries_.end(), geometry), gfx_blas.geometries_.end());
         gfx_blas.state_ = BottomLevelAccelerationStructure::kState_NeedBuild;
+        // Removing a geometry can shift the OMM data slots; drop them all so the OMM data is rebuilt with the new slot layout
+        for(auto &omm_data : gfx_blas.omm_data_)
+        {
+            destroyBuffer(omm_data.index_buffer_);
+            destroyBuffer(omm_data.array_buffer_);
+        }
+        gfx_blas.omm_data_.clear();
         return kGfxResult_NoError;
     }
 
@@ -2800,7 +2813,6 @@ public:
             return kGfxResult_InvalidOperation; // avoid spamming console output
         if(blases == nullptr || (!update && flags == nullptr))
             return kGfxResult_InvalidParameter;
-        std::vector<OpacityMicromap*> omm_to_build;
         size_t omm_geometries_count = 0; // Count how many triangle geometries will use opacity micromaps
         for(uint32_t i = 0; i < blas_count; ++i)
         {
@@ -2828,9 +2840,6 @@ public:
                     if(isOpacityMicromapSupported() && triangles.opacity_micromap_ != nullptr)
                     {
                         ++omm_geometries_count;
-                        // Queue the build of Opacity Micromap if it has not yet been built
-                        if(!triangles.opacity_micromap_->omm_array_buffer_)
-                            omm_to_build.push_back(triangles.opacity_micromap_);
                     }
                 }
                 else if(gfx_geometry.type_ == Geometry::kType_Procedural)
@@ -2852,75 +2861,96 @@ public:
         uint64_t scratch_size = 0u;
         bool transition = false;
         // Build opacity micromaps first, if there any
-        if(!omm_to_build.empty())
+        if(omm_geometries_count > 0)
         {
-            for(size_t i = 0; i < omm_to_build.size(); ++i)
+            for(uint32_t i = 0; i < blas_count; ++i)
             {
-                OpacityMicromap &opacity_micromap = *omm_to_build[i];
-                std::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_HISTOGRAM_ENTRY> histogram;
-                histogram.reserve(opacity_micromap.counts_.size());
-                for(uint32_t j = 0; j < opacity_micromap.counts_.size(); ++j)
+                BottomLevelAccelerationStructure &gfx_blas = bottom_level_acceleration_structures_[blases[i]];
+                size_t omm_array_index = 0;
+                for(GfxGeometry const &geometry : gfx_blas.geometries_)
                 {
-                    D3D12_RAYTRACING_OPACITY_MICROMAP_HISTOGRAM_ENTRY entry = {};
-                    entry.Count = opacity_micromap.counts_[j];
-                    entry.SubdivisionLevel = opacity_micromap.levels_[j];
-                    entry.Format = opacity_micromap.formats_[j];
-                    histogram.push_back(entry);
+                    Geometry &gfx_geometry = geometries_[geometry];
+                    if(gfx_geometry.type_ != Geometry::kType_Triangles || !isOpacityMicromapSupported()
+                        || gfx_geometry.data_.triangles_.opacity_micromap_ == nullptr)
+                        continue;
+                    size_t const slot = omm_array_index++;
+                    OpacityMicromap const &opacity_micromap = *gfx_geometry.data_.triangles_.opacity_micromap_;
+                    // Ensure the OMM data slot for this geometry exists (the build loop below uses it to find the array)
+                    while(gfx_blas.omm_data_.size() <= slot)
+                        gfx_blas.omm_data_.emplace_back();
+                    BottomLevelAccelerationStructure::OmmData &omm_data = gfx_blas.omm_data_[slot];
+                    // Transfer ownership of the OMM index buffer to the BLAS, as the runtime linkage references it and
+                    // it must outlive the geometry (static geometries are destroyed during BLAS compaction)
+                    if(opacity_micromap.index_buffer_.handle == 0)
+                        continue; // The index buffer has already been transferred to the BLAS slot; nothing to do
+                    if(omm_data.index_buffer_.handle != opacity_micromap.index_buffer_.handle)
+                    {
+                        destroyBuffer(omm_data.index_buffer_); // release the index buffer owned by the slot for the previous geometry, if any
+                        omm_data.index_buffer_ = opacity_micromap.index_buffer_;
+                        gfx_geometry.data_.triangles_.opacity_micromap_->index_buffer_ = {}; // the BLAS owns it now
+                    }
+                    GfxBuffer &omm_array = omm_data.array_buffer_;
+                    if(omm_array.handle)
+                        continue; // The OMM array has already been built; reuse it
+                    std::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_HISTOGRAM_ENTRY> histogram;
+                    histogram.reserve(opacity_micromap.counts_.size());
+                    for(uint32_t j = 0; j < opacity_micromap.counts_.size(); ++j)
+                    {
+                        D3D12_RAYTRACING_OPACITY_MICROMAP_HISTOGRAM_ENTRY entry = {};
+                        entry.Count = opacity_micromap.counts_[j];
+                        entry.SubdivisionLevel = opacity_micromap.levels_[j];
+                        entry.Format = opacity_micromap.formats_[j];
+                        histogram.push_back(entry);
+                    }
+                    Buffer &gfx_omm_data_buffer = buffers_[opacity_micromap.data_buffer_];
+                    Buffer &gfx_omm_desc_buffer = buffers_[opacity_micromap.desc_buffer_];
+                    // The OMM data and per-OMM descriptor buffers are read by the builder
+                    transition |= transitionResource(gfx_omm_data_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+                    transition |= transitionResource(gfx_omm_desc_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+                    if(transition)
+                        submitPipelineBarriers();
+                    // Create input descriptor
+                    D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_DESC omm_array_desc = {};
+                    omm_array_desc.NumOmmHistogramEntries = static_cast<UINT>(histogram.size());
+                    omm_array_desc.pOmmHistogram = histogram.data();
+                    omm_array_desc.InputBuffer = gfx_omm_data_buffer.resource_->GetGPUVirtualAddress() + gfx_omm_data_buffer.data_offset_;
+                    GFX_ASSERT((omm_array_desc.InputBuffer % D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_BYTE_ALIGNMENT) == 0);
+                    omm_array_desc.PerOmmDescs.StartAddress = gfx_omm_desc_buffer.resource_->GetGPUVirtualAddress() + gfx_omm_desc_buffer.data_offset_;
+                    omm_array_desc.PerOmmDescs.StrideInBytes = sizeof(D3D12_RAYTRACING_OPACITY_MICROMAP_DESC);
+                    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS omm_build_inputs = {};
+                    omm_build_inputs.Type  = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY;
+                    omm_build_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
+                    omm_build_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
+                    // According to DXR Functional Spec v1.48, Opacity Micromaps must be build one by one
+                    omm_build_inputs.NumDescs = 1;
+                    omm_build_inputs.pOpacityMicromapArrayDesc = &omm_array_desc;
+                    D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO omm_prebuild_info = {};
+                    dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&omm_build_inputs, &omm_prebuild_info);
+                    uint64_t const     data_size          = omm_prebuild_info.ResultDataMaxSizeInBytes;
+                    // Allocate omm array
+                    if(data_size > omm_array.size)
+                    {
+                        destroyBuffer(omm_array);
+                        omm_array = createBuffer(data_size, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
+                        if(!omm_array)
+                            return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create opacity micromap array buffer");
+                    }
+                    Buffer const &gfx_omm_array = buffers_[omm_array];
+                    GFX_TRY(allocateRaytracingScratch(omm_prebuild_info.ScratchDataSizeInBytes)); // ensure scratch is large enough
+                    Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
+                    if(transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
+                        submitPipelineBarriers(); // ensure scratch is not in use
+                    D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC omm_build_desc = {};
+                    omm_build_desc.Inputs = omm_build_inputs;
+                    omm_build_desc.DestAccelerationStructureData = gfx_omm_array.resource_->GetGPUVirtualAddress() + gfx_omm_array.data_offset_;
+                    omm_build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
+                    dxr_command_list_->BuildRaytracingAccelerationStructure(&omm_build_desc, 0, nullptr);
+                    // BLAS must not use OMM array before its build has completed
+                    D3D12_RESOURCE_BARRIER barrier = {};
+                    barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
+                    barrier.UAV.pResource = gfx_omm_array.resource_;
+                    resource_barriers_.push_back(barrier);
                 }
-                Buffer &gfx_omm_data_buffer = buffers_[opacity_micromap.data_buffer_];
-                Buffer &gfx_omm_desc_buffer = buffers_[opacity_micromap.desc_buffer_];
-                // The OMM data and per-OMM descriptor buffers are read by the builder
-                transition |= transitionResource(gfx_omm_data_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-                transition |= transitionResource(gfx_omm_desc_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-                if(transition)
-                    submitPipelineBarriers();
-                // Create input descriptor
-                D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_DESC omm_array_desc = {};
-                omm_array_desc.NumOmmHistogramEntries = static_cast<UINT>(histogram.size());
-                omm_array_desc.pOmmHistogram = histogram.data();
-                omm_array_desc.InputBuffer = gfx_omm_data_buffer.resource_->GetGPUVirtualAddress() + gfx_omm_data_buffer.data_offset_;
-                omm_array_desc.PerOmmDescs.StartAddress = gfx_omm_desc_buffer.resource_->GetGPUVirtualAddress() + gfx_omm_desc_buffer.data_offset_;
-                omm_array_desc.PerOmmDescs.StrideInBytes = sizeof(D3D12_RAYTRACING_OPACITY_MICROMAP_DESC);
-                D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_INPUTS omm_build_inputs = {};
-                omm_build_inputs.Type  = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_TYPE_OPACITY_MICROMAP_ARRAY;
-                omm_build_inputs.Flags = D3D12_RAYTRACING_ACCELERATION_STRUCTURE_BUILD_FLAG_PREFER_FAST_TRACE;
-                omm_build_inputs.DescsLayout = D3D12_ELEMENTS_LAYOUT_ARRAY;
-                // According to DXR Functional Spec v1.48, Opacity Micromaps must be build one by one
-                omm_build_inputs.NumDescs = 1;
-                omm_build_inputs.pOpacityMicromapArrayDesc = &omm_array_desc;
-                D3D12_RAYTRACING_ACCELERATION_STRUCTURE_PREBUILD_INFO omm_prebuild_info = {};
-                dxr_device_->GetRaytracingAccelerationStructurePrebuildInfo(&omm_build_inputs, &omm_prebuild_info);
-                // WARNING: temporary workaround.
-                // We make the OMM array buffer at least 65536 bytes (64 KiB) despite the spec
-                // alignment being 128 (D3D12_RAYTRACING_OPACITY_MICROMAP_ARRAY_BYTE_ALIGNMENT).
-                // For some unknown reason this fixes a device lost.
-                // Temporary workaround — investigate and drop back to 128 once the root cause is known.
-                constexpr uint64_t omm_byte_alignment = 65536;
-                uint64_t const data_size = GFX_ALIGN(omm_prebuild_info.ResultDataMaxSizeInBytes, omm_byte_alignment);
-                // Allocate omm array
-                GfxBuffer &omm_array = opacity_micromap.omm_array_buffer_;
-                if(data_size > omm_array.size)
-                {
-                    destroyBuffer(omm_array);
-                    omm_array = createBuffer(data_size, nullptr, kGfxCpuAccess_None, D3D12_RESOURCE_STATE_RAYTRACING_ACCELERATION_STRUCTURE);
-                    if(!omm_array)
-                        return GFX_SET_ERROR(kGfxResult_OutOfMemory, "Unable to create opacity micromap array buffer");
-                }
-                Buffer const &gfx_omm_array = buffers_[omm_array];
-                GFX_TRY(allocateRaytracingScratch(omm_prebuild_info.ScratchDataSizeInBytes)); // ensure scratch is large enough
-                Buffer &gfx_scratch_buffer = buffers_[raytracing_scratch_buffer_];
-                if(transitionResource(gfx_scratch_buffer, D3D12_RESOURCE_STATE_UNORDERED_ACCESS))
-                    submitPipelineBarriers(); // ensure scratch is not in use
-                D3D12_BUILD_RAYTRACING_ACCELERATION_STRUCTURE_DESC omm_build_desc = {};
-                omm_build_desc.Inputs = omm_build_inputs;
-                omm_build_desc.DestAccelerationStructureData = gfx_omm_array.resource_->GetGPUVirtualAddress() + gfx_omm_array.data_offset_;
-                omm_build_desc.ScratchAccelerationStructureData = gfx_scratch_buffer.resource_->GetGPUVirtualAddress() + gfx_scratch_buffer.data_offset_;
-                dxr_command_list_->BuildRaytracingAccelerationStructure(&omm_build_desc, 0, nullptr);
-                // BLAS must not use OMM array before its build has completed
-                D3D12_RESOURCE_BARRIER barrier = {};
-                barrier.Type = D3D12_RESOURCE_BARRIER_TYPE_UAV;
-                barrier.UAV.pResource = gfx_omm_array.resource_;
-                resource_barriers_.push_back(barrier);
             }
             submitPipelineBarriers();
         }
@@ -2936,6 +2966,7 @@ public:
                 gfx_blas.build_flags_ = flags[i];
             std::vector<D3D12_RAYTRACING_GEOMETRY_DESC> blas_descs;
             blas_descs.reserve(gfx_blas.geometries_.size());
+            size_t omm_array_index = 0; // Tracks the OMM array slot for each OMM geometry of this BLAS
             for(size_t j = 0; j < gfx_blas.geometries_.size(); ++j)
             {
                 GfxGeometry const &geometry = gfx_blas.geometries_[j];
@@ -2967,17 +2998,17 @@ public:
                     }
                     else
                     {
-                        OpacityMicromap const &opacity_micromap = *triangles.opacity_micromap_;
-                        Buffer &omm_index_buffer = buffers_[opacity_micromap.index_buffer_];
-                        Buffer const &omm_array = buffers_[opacity_micromap.omm_array_buffer_];
+                        BottomLevelAccelerationStructure::OmmData const &omm_data = gfx_blas.omm_data_[omm_array_index++];
+                        Buffer &omm_index_buffer = buffers_[omm_data.index_buffer_];
+                        Buffer const &omm_array = buffers_[omm_data.array_buffer_];
                         // The OMM index buffer is read as acceleration structure geometry index data
                         transition |= transitionResource(omm_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                         D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC omm_linkage = {};
                         omm_linkage.OpacityMicromapIndexBuffer.StartAddress = omm_index_buffer.resource_->GetGPUVirtualAddress() + omm_index_buffer.data_offset_;
-                        omm_linkage.OpacityMicromapIndexBuffer.StrideInBytes = opacity_micromap.index_buffer_.stride;
-                        omm_linkage.OpacityMicromapIndexFormat               = (opacity_micromap.index_buffer_.stride == 2
+                        omm_linkage.OpacityMicromapIndexBuffer.StrideInBytes = omm_data.index_buffer_.stride;
+                        omm_linkage.OpacityMicromapIndexFormat               = (omm_data.index_buffer_.stride == 2
                             ? DXGI_FORMAT_R16_UINT
-                            : (opacity_micromap.index_buffer_.stride == 1 ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R32_UINT));
+                            : (omm_data.index_buffer_.stride == 1 ? DXGI_FORMAT_R8_UINT : DXGI_FORMAT_R32_UINT));
                         omm_linkage.OpacityMicromapBaseLocation = 0;
                         omm_linkage.OpacityMicromapArray = omm_array.resource_->GetGPUVirtualAddress() + omm_array.data_offset_;
                         omm_links.push_back(omm_linkage);
@@ -6522,7 +6553,6 @@ private:
         destroyBuffer(opacity_micromap.data_buffer_);
         destroyBuffer(opacity_micromap.index_buffer_);
         destroyBuffer(opacity_micromap.desc_buffer_);
-        destroyBuffer(opacity_micromap.omm_array_buffer_);
     }
 
     void collect(Geometry const &geometry)
@@ -6553,6 +6583,11 @@ private:
         destroyBuffer(blas.bvh_buffer_);
         destroyBuffer(blas.bvh_compact_size_buffer_);
         destroyBuffer(blas.bvh_compact_size_readback_buffer_);
+        for(auto const &omm_data : blas.omm_data_)
+        {
+            destroyBuffer(omm_data.index_buffer_);
+            destroyBuffer(omm_data.array_buffer_);
+        }
     }
 
     void collect(TopLevelAccelerationStructureInstance const &)
