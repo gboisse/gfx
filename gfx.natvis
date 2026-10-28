@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<AutoVisualizer xmlns="http://schemas.microsoft.com/vstudio/debugger/natvis/2010">
+
+  <Type Name="GfxArray&lt;*&gt;">
+    <DisplayString>size={size_}, capacity={capacity_}</DisplayString>
+    <Expand>
+      <Item Name="[size]">size_</Item>
+      <Item Name="[capacity]">capacity_</Item>
+      <IndexListItems>
+        <Size>size_</Size>
+        <ValueNode>* (data_ + indices_[$i])</ValueNode>
+      </IndexListItems>
+    </Expand>
+  </Type>
+
+  <Type Name="GfxBottomLevelAccelerationStructure">
+    <DisplayString Condition="handle == 0">null</DisplayString>
+    <DisplayString Condition="handle != 0">{name,s}, [index {handle &amp; 0xffffffff}]</DisplayString>
+    <Expand>
+      <Item Name="[name]">name</Item>
+      <Item Name="[handle]">handle</Item>
+      <Item Name="[index]" Condition="handle != 0">handle &amp; 0xffffffff</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="GfxBuffer">
+    <DisplayString Condition="handle == 0">null</DisplayString>
+    <DisplayString Condition="handle != 0 &amp;&amp; name[0] == 0">size={size}, stride={stride}, cpu={cpu_access} [index {handle &amp; 0xffffffff}]</DisplayString>
+    <DisplayString Condition="handle != 0 &amp;&amp; name[0] != 0">{name,s}, size={size}, stride={stride}, cpu={cpu_access} [index {handle &amp; 0xffffffff}]</DisplayString>
+    <Expand>
+      <Item Name="[name]">name</Item>
+      <Item Name="[size]">size</Item>
+      <Item Name="[stride]">stride</Item>
+      <Item Name="[cpu_access]">cpu_access</Item>
+      <Item Name="[handle]">handle</Item>
+      <Item Name="[index]" Condition="handle != 0">handle &amp; 0xffffffff</Item>
+    </Expand>
+  </Type>
+
+  <Type Name="GfxTexture">
+    <DisplayString Condition="handle == 0">null</DisplayString>
+    <DisplayString Condition="handle != 0 &amp;&amp; type == 0 &amp;&amp; name[0] == 0">size={width}x{height}, format={format} [index {handle &amp; 0xffffffff}]</DisplayString>
+    <DisplayString Condition="handle != 0 &amp;&amp; type == 0 &amp;&amp; name[0] != 0">{name,s}, size={width}x{height}, format={format} [index {handle &amp; 0xffffffff}]</DisplayString>
+    <DisplayString Condition="handle != 0 &amp;&amp; type != 0 &amp;&amp; name[0] == 0">size={width}x{height}x{depth}, type={type}, format={format} [index {handle &amp; 0xffffffff}]</DisplayString>
+    <DisplayString Condition="handle != 0 &amp;&amp; type != 0 &amp;&amp; name[0] != 0">{name,s}, size={width}x{height}x{depth}, type={type}, format={format} [index {handle &amp; 0xffffffff}]</DisplayString>
+    <Expand>
+      <Item Name="[name]">name</Item>
+      <Item Name="[width]">width</Item>
+      <Item Name="[height]">height</Item>
+      <Item Name="[depth]">depth</Item>
+      <Item Name="[type]">type</Item>
+      <Item Name="[format]">format</Item>
+      <Item Name="[mip_levels]">mip_levels</Item>
+      <Item Name="[handle]">handle</Item>
+      <Item Name="[index]" Condition="handle != 0">handle &amp; 0xffffffff</Item>
+    </Expand>
+  </Type>
+
+</AutoVisualizer>
