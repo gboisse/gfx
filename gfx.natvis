@@ -23,6 +23,15 @@
     </Expand>
   </Type>
 
+  <Type Name="GfxScene">
+    <DisplayString Condition="handle == 0">null</DisplayString>
+    <DisplayString Condition="handle != 0">handle={handle}, meshes={(*(GfxSceneInternal *)handle).meshes_.size_}, mesh_instances={(*(GfxSceneInternal *)handle).mesh_instances_.size_}, render_instances={(*(GfxSceneInternal *)handle).render_instances_.size_}</DisplayString>
+    <Expand>
+      <Item Name="[handle]">handle</Item>
+      <Item Name="[internal]">*(GfxSceneInternal *)handle</Item>
+    </Expand>
+  </Type>
+
   <Type Name="GfxBuffer">
     <DisplayString Condition="handle == 0">null</DisplayString>
     <DisplayString Condition="handle != 0 &amp;&amp; name[0] == 0">size={size}, stride={stride}, cpu={cpu_access} [index {handle &amp; 0xffffffff}]</DisplayString>
