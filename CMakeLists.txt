@@ -115,7 +115,7 @@ endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 set(GFX_AGILITY_VERSION 619)
-set(GFX_AGILITY_MICRO_VERSION 1)
+set(GFX_AGILITY_MICRO_VERSION 5)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
@@ -141,6 +141,37 @@ else()
     find_package(directx-headers CONFIG REQUIRED)
     target_link_libraries(gfx PRIVATE Microsoft::DirectX-Headers Microsoft::DirectX12-Agility)
 endif()
+
+set(GFX_DXTIMING_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/DxTimingCaptureLibrary")
+FetchContent_Declare(
+    DxTimingCaptureLibrary
+    URL            "https://github.com/microsoft/DxTimingCaptureLibrary/archive/72bd2b18553493aa9850e434caf71bfa18952aac.zip"
+    SOURCE_DIR     "${GFX_DXTIMING_PATH}"
+)
+FetchContent_MakeAvailable(DxTimingCaptureLibrary)
+# The library provides no CMake target, and is built separately as its decoder relies on exceptions
+add_library(DxTimingCaptureLibrary STATIC
+    "${GFX_DXTIMING_PATH}/lib/AllocationTracker.cpp"
+    "${GFX_DXTIMING_PATH}/lib/D3D12ObjectProcessor.cpp"
+    "${GFX_DXTIMING_PATH}/lib/DxTimingCaptureEventHandler.cpp"
+    "${GFX_DXTIMING_PATH}/lib/PixEventDecoderStub.cpp"
+)
+target_compile_features(DxTimingCaptureLibrary PUBLIC cxx_std_20)
+target_compile_definitions(DxTimingCaptureLibrary PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN UNICODE _UNICODE)
+target_include_directories(DxTimingCaptureLibrary SYSTEM PUBLIC
+    "${GFX_DXTIMING_PATH}/include"
+    "${GFX_DXTIMING_PATH}/third_party/PixEventDecoder/include"
+    "${GFX_DXTIMING_PATH}/third_party/dxgk"
+    "${GFX_DXTIMING_PATH}/third_party/directstorage"
+)
+if(NOT DirectX12-Agility_FOUND)
+    target_link_libraries(DxTimingCaptureLibrary PUBLIC D3D12Core)
+else()
+    target_include_directories(DxTimingCaptureLibrary SYSTEM PUBLIC "${DirectX12-Agility_DIR}/../../include/directx")
+    target_link_libraries(DxTimingCaptureLibrary PUBLIC Microsoft::DirectX-Headers)
+endif()
+set_target_properties(DxTimingCaptureLibrary PROPERTIES FOLDER "${GFX_TP_FOLDER}")
+target_link_libraries(gfx PRIVATE DxTimingCaptureLibrary)
 
 set(GFX_D3D12MA_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/D3D12MemoryAllocator/")
 if(NOT DirectX12-Agility_FOUND)

@@ -125,7 +125,6 @@ float3 YCoCgToRGB(in float3 yCoCg)
         yCoCg.x - yCoCg.y - yCoCg.z);
 }
 
-// https://en.wikipedia.org/wiki/Unsharp_masking
 float3 ApplySharpening(in float3 center, in float3 top, in float3 left, in float3 right, in float3 bottom)
 {
     float3 result = RGBToYCoCg(center);

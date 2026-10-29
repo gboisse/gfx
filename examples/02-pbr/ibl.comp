@@ -38,7 +38,6 @@ RWTexture2DArray<float4> g_EnvironmentBuffer;
 
 SamplerState g_LinearSampler;
 
-// https://en.wikipedia.org/wiki/Equirectangular_projection
 float2 SampleSphericalMap(in float3 rd)
 {
     return float2(atan2(rd.z, rd.x) / (2.0f * PI) + 0.5f, 1.0f - acos(rd.y) / PI);
