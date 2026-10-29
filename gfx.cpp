@@ -3413,35 +3413,30 @@ public:
                 Geometry const &gfx_geometry = geometries_[geometry];
                 if(gfx_geometry.type_ == Geometry::kType_Triangles)
                 {
-                    auto const &triangles = gfx_geometry.data_.triangles_;
-                    if(!triangles.opacity_micromap_)
+                    D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
+                    desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
+                    if(gfx_geometry.opaque_)
+                        desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
+                    Buffer &gfx_vertex_buffer = buffers_[gfx_geometry.data_.triangles_.vertex_buffer_];
+                    Buffer *gfx_index_buffer = gfx_geometry.data_.triangles_.index_stride_ != 0 ? &buffers_[gfx_geometry.data_.triangles_.index_buffer_] : nullptr;
+                    if(gfx_index_buffer != nullptr)
                     {
-                        D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
-                        desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_TRIANGLES;
-                        if(gfx_geometry.opaque_)
-                            desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
-                        Buffer &gfx_vertex_buffer = buffers_[triangles.vertex_buffer_];
-                        Buffer *gfx_index_buffer = triangles.index_stride_ != 0 ? &buffers_[triangles.index_buffer_] : nullptr;
-                        if(gfx_index_buffer != nullptr)
-                        {
-                            desc.Triangles.IndexFormat = triangles.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
-                            desc.Triangles.IndexCount = (uint32_t)(triangles.index_buffer_.size / triangles.index_stride_);
-                            desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
-                            transition |= transitionResource(*gfx_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-                        }
-                        desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-                        desc.Triangles.VertexCount = (uint32_t)(triangles.vertex_buffer_.size / triangles.vertex_stride_);
-                        desc.Triangles.VertexBuffer.StartAddress = gfx_vertex_buffer.resource_->GetGPUVirtualAddress() + gfx_vertex_buffer.data_offset_;
-                        desc.Triangles.VertexBuffer.StrideInBytes = triangles.vertex_stride_;
-                        transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-                        blas_descs.push_back(desc);
+                        desc.Triangles.IndexFormat = gfx_geometry.data_.triangles_.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
+                        desc.Triangles.IndexCount = (uint32_t)(gfx_geometry.data_.triangles_.index_buffer_.size / gfx_geometry.data_.triangles_.index_stride_);
+                        desc.Triangles.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
+                        transition |= transitionResource(*gfx_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                     }
-                    else
+                    desc.Triangles.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
+                    desc.Triangles.VertexCount = (uint32_t)(gfx_geometry.data_.triangles_.vertex_buffer_.size / gfx_geometry.data_.triangles_.vertex_stride_);
+                    desc.Triangles.VertexBuffer.StartAddress = gfx_vertex_buffer.resource_->GetGPUVirtualAddress() + gfx_vertex_buffer.data_offset_;
+                    desc.Triangles.VertexBuffer.StrideInBytes = gfx_geometry.data_.triangles_.vertex_stride_;
+                    transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
+
+                    if(gfx_geometry.data_.triangles_.opacity_micromap_)
                     {
                         BottomLevelAccelerationStructure::OmmData const &omm_data = gfx_blas.omm_data_[omm_array_index++];
                         Buffer &omm_index_buffer = buffers_[omm_data.index_buffer_];
                         Buffer const &omm_array = buffers_[omm_data.array_buffer_];
-                        // The OMM index buffer is read as acceleration structure geometry index data
                         transition |= transitionResource(omm_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
                         D3D12_RAYTRACING_GEOMETRY_OMM_LINKAGE_DESC omm_linkage = {};
                         omm_linkage.OpacityMicromapIndexBuffer.StartAddress = omm_index_buffer.resource_->GetGPUVirtualAddress() + omm_index_buffer.data_offset_;
@@ -3452,30 +3447,13 @@ public:
                         omm_linkage.OpacityMicromapBaseLocation = 0;
                         omm_linkage.OpacityMicromapArray = omm_array.resource_->GetGPUVirtualAddress() + omm_array.data_offset_;
                         omm_links.push_back(omm_linkage);
-                        D3D12_RAYTRACING_GEOMETRY_TRIANGLES_DESC triangles_desc = {};
-                        Buffer &gfx_vertex_buffer = buffers_[triangles.vertex_buffer_];
-                        Buffer *gfx_index_buffer = triangles.index_stride_ != 0 ? &buffers_[triangles.index_buffer_] : nullptr;
-                        if(gfx_index_buffer != nullptr)
-                        {
-                            triangles_desc.IndexFormat = triangles.index_stride_ == 2 ? DXGI_FORMAT_R16_UINT : DXGI_FORMAT_R32_UINT;
-                            triangles_desc.IndexCount = (uint32_t)(triangles.index_buffer_.size / triangles.index_stride_);
-                            triangles_desc.IndexBuffer = gfx_index_buffer->resource_->GetGPUVirtualAddress() + gfx_index_buffer->data_offset_;
-                            transition |= transitionResource(*gfx_index_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-                        }
-                        triangles_desc.VertexFormat = DXGI_FORMAT_R32G32B32_FLOAT;
-                        triangles_desc.VertexCount = (uint32_t)(triangles.vertex_buffer_.size / triangles.vertex_stride_);
-                        triangles_desc.VertexBuffer.StartAddress = gfx_vertex_buffer.resource_->GetGPUVirtualAddress() + gfx_vertex_buffer.data_offset_;
-                        triangles_desc.VertexBuffer.StrideInBytes = triangles.vertex_stride_;
-                        transition |= transitionResource(gfx_vertex_buffer, D3D12_RESOURCE_STATE_NON_PIXEL_SHADER_RESOURCE, kTransitionType_Implicit);
-                        omm_triangles_descs.push_back(triangles_desc);
-                        D3D12_RAYTRACING_GEOMETRY_DESC desc = {};
+                        omm_triangles_descs.push_back(desc.Triangles);
+
                         desc.Type = D3D12_RAYTRACING_GEOMETRY_TYPE_OMM_TRIANGLES;
-                        if(gfx_geometry.opaque_)
-                            desc.Flags |= D3D12_RAYTRACING_GEOMETRY_FLAG_OPAQUE;
                         desc.OmmTriangles.pTriangles = &omm_triangles_descs.back();
                         desc.OmmTriangles.pOmmLinkage = &omm_links.back();
-                        blas_descs.push_back(desc);
                     }
+                    blas_descs.push_back(desc);
                 }
                 else if(gfx_geometry.type_ == Geometry::kType_Procedural)
                 {
