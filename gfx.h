@@ -67,6 +67,7 @@ bool      gfxContextIsValid(GfxContext context);
 
 std::vector<std::string> gfxGetAdapterNames();  // ordered from highest to lowest performance, i.e., the order in which adapters are tried when creating a context without one
 IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name);    // finds the adapter with that name (case-insensitive), or else the first one whose name contains it; returns nullptr if none, otherwise must be released by the caller
+std::string gfxGetPrimaryAdapterName();    // name of the adapter driving the primary display (one of those listed by gfxGetAdapterNames()), or an empty string if no adapter has an output on the primary monitor (e.g., a headless session)
 
 uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);

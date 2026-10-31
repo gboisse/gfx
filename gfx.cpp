@@ -1672,6 +1672,21 @@ public:
         return adapter_name;
     }
 
+    // Returns true if one of the adapter's outputs drives the primary display monitor.
+    static bool IsPrimaryAdapter(IDXGIAdapter1 *adapter)
+    {
+        IDXGIOutput *output = nullptr;
+        for(UINT output_i = 0; adapter->EnumOutputs(output_i, &output) != DXGI_ERROR_NOT_FOUND; ++output_i)
+        {
+            DXGI_OUTPUT_DESC output_desc = {};
+            MONITORINFO monitor_info = {}; monitor_info.cbSize = sizeof(monitor_info);
+            bool const is_primary = SUCCEEDED(output->GetDesc(&output_desc)) && GetMonitorInfoW(output_desc.Monitor, &monitor_info) != 0 && (monitor_info.dwFlags & MONITORINFOF_PRIMARY) != 0;
+            output->Release();
+            if(is_primary) return true;
+        }
+        return false;
+    }
+
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != GFX_AGILITY_VERSION)
@@ -11119,6 +11134,28 @@ IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name)
         if(adapters[i] != nullptr && adapters[i] != adapter)
             adapters[i]->Release();
     return adapter;
+}
+
+std::string gfxGetPrimaryAdapterName()
+{
+    std::string primary_adapter_name;
+    IDXGIFactory1 *factory = nullptr;
+    if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+    {
+        GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
+        return primary_adapter_name;
+    }
+    IDXGIAdapter1 *adapters[8] = {};
+    GfxInternal::EnumAdapters(factory, adapters);
+    factory->Release();
+    for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+        if(adapters[i] != nullptr)
+        {
+            if(primary_adapter_name.empty() && GfxInternal::IsPrimaryAdapter(adapters[i]))
+                primary_adapter_name = GfxInternal::GetAdapterName(adapters[i]);
+            adapters[i]->Release();
+        }
+    return primary_adapter_name;
 }
 
 uint32_t gfxGetBackBufferWidth(GfxContext context)
