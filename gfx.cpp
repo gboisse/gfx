@@ -1661,6 +1661,17 @@ public:
         }
     }
 
+    // Gets the name of the adapter as a UTF-8 string.
+    static std::string GetAdapterName(IDXGIAdapter1 *adapter)
+    {
+        DXGI_ADAPTER_DESC1 adapter_desc = {};
+        adapter->GetDesc1(&adapter_desc);
+        char adapter_name[3 * ARRAYSIZE(adapter_desc.Description) + 1] = {};
+        WideCharToMultiByte(CP_UTF8, 0, adapter_desc.Description, (int32_t)wcsnlen(adapter_desc.Description, ARRAYSIZE(adapter_desc.Description)),
+            adapter_name, sizeof(adapter_name) - 1, nullptr, nullptr);
+        return adapter_name;
+    }
+
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != GFX_AGILITY_VERSION)
@@ -11043,19 +11054,17 @@ std::vector<std::string> gfxGetAdapterNames()
     std::vector<std::string> adapter_names;
     IDXGIFactory1 *factory = nullptr;
     if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+    {
+        GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
         return adapter_names;
+    }
     IDXGIAdapter1 *adapters[8] = {};
     GfxInternal::EnumAdapters(factory, adapters);
     factory->Release();
     for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
         if(adapters[i] != nullptr)
         {
-            DXGI_ADAPTER_DESC1 adapter_desc = {};
-            adapters[i]->GetDesc1(&adapter_desc);
-            char adapter_name[3 * ARRAYSIZE(adapter_desc.Description) + 1] = {};
-            WideCharToMultiByte(CP_UTF8, 0, adapter_desc.Description, (int32_t)wcsnlen(adapter_desc.Description, ARRAYSIZE(adapter_desc.Description)),
-                adapter_name, sizeof(adapter_name) - 1, nullptr, nullptr);
-            adapter_names.push_back(adapter_name);
+            adapter_names.push_back(GfxInternal::GetAdapterName(adapters[i]));
             adapters[i]->Release();
         }
     return adapter_names;
@@ -11063,19 +11072,25 @@ std::vector<std::string> gfxGetAdapterNames()
 
 IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name)
 {
-    DXGI_ADAPTER_DESC1 adapter_desc = {};
-    WCHAR name[ARRAYSIZE(adapter_desc.Description) + 1] = {};
-    if(!adapter_name) return nullptr;   // invalid param
-    int32_t const name_length = MultiByteToWideChar(CP_UTF8, 0, adapter_name, -1, name, ARRAYSIZE(name)) - 1;
-    if(name_length <= 0) return nullptr;    // empty, or longer than any adapter name
+    if(!adapter_name || !*adapter_name)
+    {
+        GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot get an adapter from an empty name");
+        return nullptr;
+    }
     IDXGIFactory1 *factory = nullptr;
     if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+    {
+        GFX_PRINT_ERROR(kGfxResult_InternalError, "Unable to create DXGI factory");
         return nullptr;
+    }
     IDXGIAdapter1 *adapters[8] = {};
     GfxInternal::EnumAdapters(factory, adapters);
     factory->Release();
+    DXGI_ADAPTER_DESC1 adapter_desc = {};
+    WCHAR name[ARRAYSIZE(adapter_desc.Description) + 1] = {};
+    int32_t const name_length = MultiByteToWideChar(CP_UTF8, 0, adapter_name, -1, name, ARRAYSIZE(name)) - 1;    // fails if longer than any adapter name
     IDXGIAdapter1 *adapter = nullptr;
-    for(uint32_t pass = 0; pass < 2 && !adapter; ++pass)    // look for an exact match first, as an adapter name may be contained in another one
+    for(uint32_t pass = 0; pass < 2 && name_length > 0 && !adapter; ++pass)    // look for an exact match first, as an adapter name may be contained in another one
         for(uint32_t i = 0; i < ARRAYSIZE(adapters) && !adapter; ++i)
             if(adapters[i] != nullptr)
             {
@@ -11085,6 +11100,14 @@ IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name)
                              : FindStringOrdinal(FIND_FROMSTART, adapter_desc.Description, description_length, name, name_length, TRUE) >= 0)
                     adapter = adapters[i];
             }
+    if(!adapter)
+    {
+        std::string adapter_names;
+        for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+            if(adapters[i] != nullptr)
+                adapter_names += (adapter_names.empty() ? "`" : ", `") + GfxInternal::GetAdapterName(adapters[i]) + "'";
+        GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot find an adapter matching `%s', available adapters are: %s", adapter_name, adapter_names.empty() ? "none" : adapter_names.c_str());
+    }
     for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
         if(adapters[i] != nullptr && adapters[i] != adapter)
             adapters[i]->Release();
