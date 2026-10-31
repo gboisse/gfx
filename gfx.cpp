@@ -2216,6 +2216,11 @@ public:
             mem_allocator_->Release();
             mem_allocator_ = nullptr;
         }
+        if(adapter_ != nullptr)
+        {
+            adapter_->Release();
+            adapter_ = nullptr;
+        }
         if(dispatch_signature_ != nullptr)
         {
             dispatch_signature_->Release();
