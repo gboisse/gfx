@@ -1700,7 +1700,9 @@ public:
             IDXGIFactory4 *factory4;
             if(!SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory4))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create DXGIFactory4");
-            if(!SUCCEEDED(factory4->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_))))
+            HRESULT const hr = factory4->EnumAdapterByLuid(desc.AdapterLuid, IID_PPV_ARGS(&adapter_));
+            factory4->Release();
+            if(!SUCCEEDED(hr))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "An invalid adapter was supplied");
             if(!SUCCEEDED(D3D12CreateDevice(adapter_, D3D_FEATURE_LEVEL_12_1, IID_PPV_ARGS(&device_))))
                 return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to create D3D12 device");
