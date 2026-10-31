@@ -29,6 +29,8 @@ SOFTWARE.
 #endif
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <string>   // std::string
+#include <vector>   // std::vector
 #include "gfx_core.h"
 
 
@@ -62,6 +64,9 @@ GfxContext gfxCreateContext(HWND window, GfxCreateContextFlags flags = 0, IDXGIA
 GfxContext gfxCreateContext(uint32_t width, uint32_t height, GfxCreateContextFlags flags, IDXGIAdapter *adapter = nullptr);
 GfxResult gfxDestroyContext(GfxContext context);
 bool      gfxContextIsValid(GfxContext context);
+
+std::vector<std::string> gfxGetAdapterNames();  // ordered from highest to lowest performance, i.e., the order in which adapters are tried when creating a context without one
+IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name);    // finds the adapter with that name (case-insensitive), or else the first one whose name contains it; returns nullptr if none, otherwise must be released by the caller
 
 uint32_t gfxGetBackBufferWidth(GfxContext context);
 uint32_t gfxGetBackBufferHeight(GfxContext context);

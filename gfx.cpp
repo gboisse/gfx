@@ -1600,6 +1600,67 @@ public:
             dx_timing_capture_ = nullptr;
     }
 
+    // Enumerates the adapters from highest to lowest performance; the adapters must be released by the caller.
+    template<uint32_t ADAPTER_COUNT>
+    static void EnumAdapters(IDXGIFactory1 *factory, IDXGIAdapter1 *(&adapters)[ADAPTER_COUNT])
+    {
+        IDXGIFactory6 *factory6;
+        if(SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory6))))
+        {
+            for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+            {
+                IDXGIAdapter1 *adapter1 = nullptr;
+                if(!SUCCEEDED(factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter1))))
+                    break;
+                adapters[i] = adapter1;
+            }
+            factory6->Release();
+        }
+        else
+        {
+            DXGI_ADAPTER_DESC1 adapter_desc = {};
+            uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
+            DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
+            for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+            {
+                IDXGIAdapter1 *adapter1 = nullptr;
+                if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
+                    break;
+                uint32_t j, adapter_score;
+                adapter1->GetDesc1(&adapter_desc);
+                if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
+                    adapter_score = 0;
+                else
+                    switch(adapter_desc.VendorId)
+                    {
+                    case 0x1002u:   // AMD
+                        adapter_score = 2;
+                        break;
+                    case 0x10DEu:   // NVIDIA
+                        adapter_score = 2;
+                        break;
+                    default:
+                        adapter_score = 1;
+                        break;
+                    }
+                for(j = 0; j < i; ++j)
+                    if(adapter_score > adapter_scores[j] ||
+                       adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory ||
+                       adapter_desc.SharedSystemMemory > adapter_descs[j].SharedSystemMemory)
+                        break;
+                for(uint32_t k = i; k > j; --k)
+                {
+                    adapters[k] = adapters[k - 1];
+                    adapter_descs[k] = adapter_descs[k - 1];
+                    adapter_scores[k] = adapter_scores[k - 1];
+                }
+                adapters[j] = adapter1;
+                adapter_descs[j] = adapter_desc;
+                adapter_scores[j] = adapter_score;
+            }
+        }
+    }
+
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != GFX_AGILITY_VERSION)
@@ -1642,61 +1703,8 @@ public:
         }
         else
         {
-            IDXGIFactory6 *factory6;
             IDXGIAdapter1 *adapters[8] = {};
-            if(SUCCEEDED(factory->QueryInterface(IID_PPV_ARGS(&factory6))))
-            {
-                for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
-                {
-                    IDXGIAdapter1 *adapter1 = nullptr;
-                    if(!SUCCEEDED(factory6->EnumAdapterByGpuPreference(i, DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE, IID_PPV_ARGS(&adapter1))))
-                        break;
-                    adapters[i] = adapter1;
-                }
-            }
-            else
-            {
-                DXGI_ADAPTER_DESC1 adapter_desc = {};
-                uint32_t adapter_scores[ARRAYSIZE(adapters)] = {};
-                DXGI_ADAPTER_DESC1 adapter_descs[ARRAYSIZE(adapters)] = {};
-                for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
-                {
-                    IDXGIAdapter1 *adapter1 = nullptr;
-                    if(!SUCCEEDED(factory->EnumAdapters1(i, &adapter1)))
-                        break;
-                    uint32_t j, adapter_score;
-                    adapter1->GetDesc1(&adapter_desc);
-                    if((adapter_desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0)
-                        adapter_score = 0;
-                    else
-                        switch(adapter_desc.VendorId)
-                        {
-                        case 0x1002u:   // AMD
-                            adapter_score = 2;
-                            break;
-                        case 0x10DEu:   // NVIDIA
-                            adapter_score = 2;
-                            break;
-                        default:
-                            adapter_score = 1;
-                            break;
-                        }
-                    for(j = 0; j < i; ++j)
-                        if(adapter_score > adapter_scores[j] ||
-                           adapter_desc.DedicatedVideoMemory > adapter_descs[j].DedicatedVideoMemory ||
-                           adapter_desc.SharedSystemMemory > adapter_descs[j].SharedSystemMemory)
-                            break;
-                    for(uint32_t k = i; k > j; --k)
-                    {
-                        adapters[k] = adapters[k - 1];
-                        adapter_descs[k] = adapter_descs[k - 1];
-                        adapter_scores[k] = adapter_scores[k - 1];
-                    }
-                    adapters[j] = adapter1;
-                    adapter_descs[j] = adapter_desc;
-                    adapter_scores[j] = adapter_score;
-                }
-            }
+            EnumAdapters(factory, adapters);
 
             struct DXGIAdapterReleaser
             {
@@ -11028,6 +11036,59 @@ bool gfxContextIsValid(GfxContext context)
     GfxInternal *gfx = GfxInternal::GetGfx(context);
     if(!gfx) return false;
     return gfx->isValid();
+}
+
+std::vector<std::string> gfxGetAdapterNames()
+{
+    std::vector<std::string> adapter_names;
+    IDXGIFactory1 *factory = nullptr;
+    if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+        return adapter_names;
+    IDXGIAdapter1 *adapters[8] = {};
+    GfxInternal::EnumAdapters(factory, adapters);
+    factory->Release();
+    for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+        if(adapters[i] != nullptr)
+        {
+            DXGI_ADAPTER_DESC1 adapter_desc = {};
+            adapters[i]->GetDesc1(&adapter_desc);
+            char adapter_name[3 * ARRAYSIZE(adapter_desc.Description) + 1] = {};
+            WideCharToMultiByte(CP_UTF8, 0, adapter_desc.Description, (int32_t)wcsnlen(adapter_desc.Description, ARRAYSIZE(adapter_desc.Description)),
+                adapter_name, sizeof(adapter_name) - 1, nullptr, nullptr);
+            adapter_names.push_back(adapter_name);
+            adapters[i]->Release();
+        }
+    return adapter_names;
+}
+
+IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name)
+{
+    DXGI_ADAPTER_DESC1 adapter_desc = {};
+    WCHAR name[ARRAYSIZE(adapter_desc.Description) + 1] = {};
+    if(!adapter_name) return nullptr;   // invalid param
+    int32_t const name_length = MultiByteToWideChar(CP_UTF8, 0, adapter_name, -1, name, ARRAYSIZE(name)) - 1;
+    if(name_length <= 0) return nullptr;    // empty, or longer than any adapter name
+    IDXGIFactory1 *factory = nullptr;
+    if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
+        return nullptr;
+    IDXGIAdapter1 *adapters[8] = {};
+    GfxInternal::EnumAdapters(factory, adapters);
+    factory->Release();
+    IDXGIAdapter1 *adapter = nullptr;
+    for(uint32_t pass = 0; pass < 2 && !adapter; ++pass)    // look for an exact match first, as an adapter name may be contained in another one
+        for(uint32_t i = 0; i < ARRAYSIZE(adapters) && !adapter; ++i)
+            if(adapters[i] != nullptr)
+            {
+                adapters[i]->GetDesc1(&adapter_desc);
+                int32_t const description_length = (int32_t)wcsnlen(adapter_desc.Description, ARRAYSIZE(adapter_desc.Description));
+                if(pass == 0 ? CompareStringOrdinal(adapter_desc.Description, description_length, name, name_length, TRUE) == CSTR_EQUAL
+                             : FindStringOrdinal(FIND_FROMSTART, adapter_desc.Description, description_length, name, name_length, TRUE) >= 0)
+                    adapter = adapters[i];
+            }
+    for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+        if(adapters[i] != nullptr && adapters[i] != adapter)
+            adapters[i]->Release();
+    return adapter;
 }
 
 uint32_t gfxGetBackBufferWidth(GfxContext context)
