@@ -1672,6 +1672,58 @@ public:
         return adapter_name;
     }
 
+    // Gets a unique identifier for the adapter, derived from its LUID and formatted as an uppercase
+    // hexadecimal string. It disambiguates identically named adapters and selects one with a `#<id>'
+    // name. The LUID is unique per adapter and consistent across processes while the system is running,
+    // but is not guaranteed to persist across a reboot or a change of hardware.
+    static std::string GetAdapterId(IDXGIAdapter1 *adapter)
+    {
+        DXGI_ADAPTER_DESC1 adapter_desc = {};
+        adapter->GetDesc1(&adapter_desc);
+        uint64_t const luid = ((uint64_t)(uint32_t)adapter_desc.AdapterLuid.HighPart << 32) | (uint32_t)adapter_desc.AdapterLuid.LowPart;
+        char adapter_id[17] = {};
+        snprintf(adapter_id, sizeof(adapter_id), "%llX", (unsigned long long)luid);
+        return adapter_id;
+    }
+
+    // Converts a UTF-8 string to a wide string.
+    static std::wstring Utf8ToWide(std::string const &utf8)
+    {
+        if(utf8.empty())
+            return std::wstring();
+        int32_t const length = MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int32_t)utf8.size(), nullptr, 0);
+        std::wstring wide((size_t)length, L'\0');
+        MultiByteToWideChar(CP_UTF8, 0, utf8.c_str(), (int32_t)utf8.size(), wide.data(), length);
+        return wide;
+    }
+
+    // Gets the UTF-8 names of the non-null adapters, in order. A name shared by more than one adapter
+    // has ` (#<id>)' appended (see GetAdapterId()) so that every returned name is unique and can be
+    // matched exactly, e.g., by GetAdapterByName().
+    template<uint32_t ADAPTER_COUNT>
+    static std::vector<std::string> GetAdapterNames(IDXGIAdapter1 *(&adapters)[ADAPTER_COUNT])
+    {
+        std::vector<IDXGIAdapter1 *> list;
+        std::vector<std::string> names;
+        for(uint32_t i = 0; i < ADAPTER_COUNT; ++i)
+            if(adapters[i] != nullptr)
+            {
+                list.push_back(adapters[i]);
+                names.push_back(GetAdapterName(adapters[i]));
+            }
+        std::vector<std::string> const base_names = names;
+        for(size_t i = 0; i < names.size(); ++i)
+        {
+            uint32_t count = 0;
+            for(size_t j = 0; j < base_names.size(); ++j)
+                if(base_names[j] == base_names[i])
+                    ++count;
+            if(count > 1)
+                names[i] += " (#" + GetAdapterId(list[i]) + ")";
+        }
+        return names;
+    }
+
     // Returns true if one of the adapter's outputs drives the primary display monitor.
     static bool IsPrimaryAdapter(IDXGIAdapter1 *adapter)
     {
@@ -11083,12 +11135,10 @@ std::vector<std::string> gfxGetAdapterNames()
     IDXGIAdapter1 *adapters[8] = {};
     GfxInternal::EnumAdapters(factory, adapters);
     factory->Release();
+    adapter_names = GfxInternal::GetAdapterNames(adapters);
     for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
         if(adapters[i] != nullptr)
-        {
-            adapter_names.push_back(GfxInternal::GetAdapterName(adapters[i]));
             adapters[i]->Release();
-        }
     return adapter_names;
 }
 
@@ -11108,31 +11158,47 @@ IDXGIAdapter *gfxGetAdapterByName(char const *adapter_name)
     IDXGIAdapter1 *adapters[8] = {};
     GfxInternal::EnumAdapters(factory, adapters);
     factory->Release();
-    DXGI_ADAPTER_DESC1 adapter_desc = {};
-    WCHAR name[ARRAYSIZE(adapter_desc.Description) + 1] = {};
-    int32_t const name_length = MultiByteToWideChar(CP_UTF8, 0, adapter_name, -1, name, ARRAYSIZE(name)) - 1;    // fails if longer than any adapter name
     IDXGIAdapter1 *adapter = nullptr;
-    for(uint32_t pass = 0; pass < 2 && name_length > 0 && !adapter; ++pass)    // look for an exact match first, as an adapter name may be contained in another one
-        for(uint32_t i = 0; i < ARRAYSIZE(adapters) && !adapter; ++i)
-            if(adapters[i] != nullptr)
+    // Collect the non-null adapters together with their (disambiguated) names; names[i] is the name of list[i].
+    std::vector<IDXGIAdapter1 *> list;
+    for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+        if(adapters[i] != nullptr)
+            list.push_back(adapters[i]);
+    std::vector<std::string> const names = GfxInternal::GetAdapterNames(adapters);
+    if(adapter_name[0] == '#')
+    {
+        // Select by adapter id (its LUID in hex, see GfxInternal::GetAdapterId()), matching exactly and ignoring case.
+        std::wstring const query_id = GfxInternal::Utf8ToWide(adapter_name + 1);
+        for(size_t i = 0; i < list.size() && !adapter; ++i)
+        {
+            std::wstring const id = GfxInternal::Utf8ToWide(GfxInternal::GetAdapterId(list[i]));
+            if(!query_id.empty() && CompareStringOrdinal(id.c_str(), (int32_t)id.size(), query_id.c_str(), (int32_t)query_id.size(), TRUE) == CSTR_EQUAL)
+                adapter = list[i];
+        }
+    }
+    else
+    {
+        // Match against the adapter names, looking for an exact match first, as an adapter name may be contained in another one, then a substring.
+        std::wstring const query = GfxInternal::Utf8ToWide(adapter_name);
+        for(uint32_t pass = 0; pass < 2 && !query.empty() && !adapter; ++pass)
+            for(size_t i = 0; i < list.size() && !adapter; ++i)
             {
-                adapters[i]->GetDesc1(&adapter_desc);
-                int32_t const description_length = (int32_t)wcsnlen(adapter_desc.Description, ARRAYSIZE(adapter_desc.Description));
-                if(pass == 0 ? CompareStringOrdinal(adapter_desc.Description, description_length, name, name_length, TRUE) == CSTR_EQUAL
-                             : FindStringOrdinal(FIND_FROMSTART, adapter_desc.Description, description_length, name, name_length, TRUE) >= 0)
-                    adapter = adapters[i];
+                std::wstring const name = GfxInternal::Utf8ToWide(names[i]);
+                if(pass == 0 ? CompareStringOrdinal(name.c_str(), (int32_t)name.size(), query.c_str(), (int32_t)query.size(), TRUE) == CSTR_EQUAL
+                             : FindStringOrdinal(FIND_FROMSTART, name.c_str(), (int32_t)name.size(), query.c_str(), (int32_t)query.size(), TRUE) >= 0)
+                    adapter = list[i];
             }
+    }
     if(!adapter)
     {
         std::string adapter_names;
-        for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
-            if(adapters[i] != nullptr)
-                adapter_names += (adapter_names.empty() ? "`" : ", `") + GfxInternal::GetAdapterName(adapters[i]) + "'";
+        for(size_t i = 0; i < names.size(); ++i)
+            adapter_names += (adapter_names.empty() ? "`" : ", `") + names[i] + "'";
         GFX_PRINT_ERROR(kGfxResult_InvalidParameter, "Cannot find an adapter matching `%s', available adapters are: %s", adapter_name, adapter_names.empty() ? "none" : adapter_names.c_str());
     }
-    for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
-        if(adapters[i] != nullptr && adapters[i] != adapter)
-            adapters[i]->Release();
+    for(size_t i = 0; i < list.size(); ++i)
+        if(list[i] != adapter)
+            list[i]->Release();
     return adapter;
 }
 
@@ -11148,11 +11214,13 @@ std::string gfxGetPrimaryAdapterName()
     IDXGIAdapter1 *adapters[8] = {};
     GfxInternal::EnumAdapters(factory, adapters);
     factory->Release();
-    for(uint32_t i = 0; i < ARRAYSIZE(adapters); ++i)
+    std::vector<std::string> const adapter_names = GfxInternal::GetAdapterNames(adapters);
+    for(uint32_t i = 0, adapter_index = 0; i < ARRAYSIZE(adapters); ++i)
         if(adapters[i] != nullptr)
         {
             if(primary_adapter_name.empty() && GfxInternal::IsPrimaryAdapter(adapters[i]))
-                primary_adapter_name = GfxInternal::GetAdapterName(adapters[i]);
+                primary_adapter_name = adapter_names[adapter_index];
+            ++adapter_index;
             adapters[i]->Release();
         }
     return primary_adapter_name;
