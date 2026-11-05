@@ -10,7 +10,11 @@ set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 add_library(gfx STATIC)
 
-target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_internal_types.h gfx_window.h gfx_core.cpp gfx_internal_types.cpp gfx.cpp gfx_window.cpp)
+target_sources(gfx PRIVATE gfx.h gfx_core.h gfx_internal_types.h gfx_window.h gfx_core.cpp gfx_internal_types.cpp gfx.cpp gfx_window.cpp gfx.natvis)
+
+if(MSVC)
+    target_link_options(gfx PUBLIC "/NATVIS:${CMAKE_CURRENT_SOURCE_DIR}/gfx.natvis")
+endif()
 if(GFX_ENABLE_GUI)
     target_sources(gfx PRIVATE gfx_imgui.h gfx_imgui.cpp)
 endif()
