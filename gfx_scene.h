@@ -371,6 +371,30 @@ inline bool gfxMaterialIsEmissive(GfxMaterial const &material)
 }
 
 //!
+//! Opacity Micromap object.
+//!
+
+struct GfxOpacityMicromap
+{
+    std::vector<uint8_t> data;
+    std::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_DESC> descs;
+    std::vector<uint32_t> usageCounts;
+    std::vector<uint32_t> usageLevels;
+    std::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT> usageFormats;
+};
+
+GfxRef<GfxOpacityMicromap> gfxSceneCreateOpacityMicromap(GfxScene scene);
+GfxResult gfxSceneDestroyOpacityMicromap(GfxScene scene, uint64_t omm_handle);
+GfxResult gfxSceneDestroyAllOpacityMicromaps(GfxScene scene);
+
+uint32_t gfxSceneGetOpacityMicromapCount(GfxScene scene);
+GfxOpacityMicromap const *gfxSceneGetOpacityMicromaps(GfxScene scene);
+GfxOpacityMicromap *gfxSceneGetOpacityMicromap(GfxScene scene, uint64_t omm_handle);
+GfxRef<GfxOpacityMicromap> gfxSceneGetOpacityMicromapHandle(GfxScene scene, uint32_t omm_index);
+GfxMetadata const &gfxSceneGetOpacityMicromapMetadata(GfxScene scene, uint64_t omm_handle);
+bool gfxSceneSetOpacityMicromapMetadata(GfxScene scene, uint64_t omm_handle, GfxMetadata const &metadata);
+
+//!
 //! Mesh object.
 //!
 
@@ -416,10 +440,12 @@ bool gfxSceneSetMeshMetadata(GfxScene scene, uint64_t mesh_handle, GfxMetadata c
 
 struct GfxMeshInstance
 {
-    GfxConstRef<GfxMesh>     mesh;
-    GfxConstRef<GfxMaterial> material;
-    GfxConstRef<GfxSkin>     skin;
-    std::vector<float>       weights;
+    GfxConstRef<GfxMesh>             mesh;
+    GfxConstRef<GfxMaterial>         material;
+    GfxConstRef<GfxSkin>             skin;
+    GfxConstRef<GfxOpacityMicromap>  opacityMicromap;
+    std::vector<float>               weights;
+    std::vector<int>                 opacityMicromapIndices;
 };
 
 GfxRef<GfxMeshInstance> gfxSceneCreateMeshInstance(GfxScene scene);
@@ -520,6 +546,13 @@ template<> inline GfxRenderInstance *gfxSceneGetObject<GfxRenderInstance>(GfxSce
 template<> inline GfxRef<GfxRenderInstance> gfxSceneGetObjectHandle<GfxRenderInstance>(GfxScene scene, uint32_t object_index) { return gfxSceneGetRenderInstanceHandle(scene, object_index); }
 template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxRenderInstance>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetRenderInstanceMetadata(scene, object_handle); }
 template<> inline bool gfxSceneSetObjectMetadata<GfxRenderInstance>(GfxScene scene, uint64_t object_handle, GfxMetadata const &metadata) { return gfxSceneSetRenderInstanceMetadata(scene, object_handle, metadata); }
+
+template<> inline uint32_t gfxSceneGetObjectCount<GfxOpacityMicromap>(GfxScene scene) { return gfxSceneGetOpacityMicromapCount(scene); }
+template<> inline GfxOpacityMicromap const *gfxSceneGetObjects<GfxOpacityMicromap>(GfxScene scene) { return gfxSceneGetOpacityMicromaps(scene); }
+template<> inline GfxOpacityMicromap *gfxSceneGetObject<GfxOpacityMicromap>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetOpacityMicromap(scene, object_handle); }
+template<> inline GfxRef<GfxOpacityMicromap> gfxSceneGetObjectHandle<GfxOpacityMicromap>(GfxScene scene, uint32_t object_index) { return gfxSceneGetOpacityMicromapHandle(scene, object_index); }
+template<> inline GfxMetadata const &gfxSceneGetObjectMetadata<GfxOpacityMicromap>(GfxScene scene, uint64_t object_handle) { return gfxSceneGetOpacityMicromapMetadata(scene, object_handle); }
+template<> inline bool gfxSceneSetObjectMetadata<GfxOpacityMicromap>(GfxScene scene, uint64_t object_handle, GfxMetadata const &metadata) { return gfxSceneSetOpacityMicromapMetadata(scene, object_handle, metadata); }
 
 template<typename TYPE> uint32_t gfxSceneGetObjectCount(GfxScene) { static_assert(std::is_void_v<TYPE>, "Cannot get object count for unsupported object type"); }
 template<typename TYPE> TYPE const *gfxSceneGetObjects(GfxScene) { static_assert(std::is_void_v<TYPE>, "Cannot get object list for unsupported object type"); }
