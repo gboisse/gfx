@@ -1615,6 +1615,12 @@ public:
                 if((flags & kGfxCreateContextFlag_EnableGPUBasedValidation) != 0)
                     debug_controller->SetEnableGPUBasedValidation(true);
                 debug_controller->SetEnableSynchronizedCommandQueueValidation(true);
+                ID3D12Debug7 *debug_controller7 = nullptr;
+                if(SUCCEEDED(debug_controller->QueryInterface(IID_PPV_ARGS(&debug_controller7))))
+                {
+                    debug_controller7->SetEnableDriverReportedMessages(true);   // the driver reports issues found by its own validation through the info queue
+                    debug_controller7->Release();
+                }
                 debug_controller->Release();
             }
         }
