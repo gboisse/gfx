@@ -1737,6 +1737,12 @@ public:
             ID3D12InfoQueue1 *debug_callback = nullptr;
             if(SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&debug_callback))))
             {
+                // Every CheckFeatureSupport() call, including the ones made by dependencies, is reported as superseded by CheckFeatureSupport1()
+                D3D12_MESSAGE_ID deny_ids[] = { D3D12_MESSAGE_ID_DEPRECATED_API };
+                D3D12_INFO_QUEUE_FILTER filter = {};
+                filter.DenyList.NumIDs = ARRAYSIZE(deny_ids);
+                filter.DenyList.pIDList = deny_ids;
+                debug_callback->PushStorageFilter(&filter);
                 DWORD cookie = 0;
                 D3D12MessageFunc callback = [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity,
                                                D3D12_MESSAGE_ID, LPCSTR description, void *)
