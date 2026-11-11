@@ -1609,7 +1609,7 @@ public:
         D3D12_FEATURE_DATA_DUMP_FILE dump_file_support = {};
         if(!SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&dump_file))))
             GFX_PRINT_WARNING("Unable to get D3D12 dump file interface, no DirectX dump file will be retained on device loss");
-        else if(!SUCCEEDED(device_->CheckFeatureSupport(D3D12_FEATURE_DUMP_FILE, &dump_file_support, sizeof(dump_file_support))) || !dump_file_support.SupportedByOS)
+        else if(!SUCCEEDED(device_->CheckFeatureSupport1(D3D12_FEATURE_DUMP_FILE, &dump_file_support, sizeof(dump_file_support), D3D12_SDK_VERSION)) || !dump_file_support.SupportedByOS)
             GFX_PRINT_WARNING("DirectX dump files are not supported by this version of Windows, none will be written on device loss");
         else
         {
@@ -1640,7 +1640,7 @@ public:
         // in the dump files, as well as in RGP and RGD captures on AMD hardware
         ID3D12DeviceTools2 *device_tools = nullptr;
         D3D12_FEATURE_DATA_USER_DEFINED_ANNOTATION annotation_support = {};
-        if(!SUCCEEDED(device_->CheckFeatureSupport(D3D12_FEATURE_USER_DEFINED_ANNOTATION, &annotation_support, sizeof(annotation_support))) ||
+        if(!SUCCEEDED(device_->CheckFeatureSupport1(D3D12_FEATURE_USER_DEFINED_ANNOTATION, &annotation_support, sizeof(annotation_support), D3D12_SDK_VERSION)) ||
            !annotation_support.Supported || !SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&device_tools))))
             return; // the driver does not support extended PIX markers
         if(SUCCEEDED(device_tools->SetUserDefinedAnnotationMode(D3D12_USER_DEFINED_ANNOTATION_MODE_DRIVER_RETAIL)))
