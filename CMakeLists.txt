@@ -118,8 +118,8 @@ else()
 endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
-set(GFX_AGILITY_VERSION 619)
-set(GFX_AGILITY_MICRO_VERSION 5)
+set(GFX_AGILITY_VERSION 620)
+set(GFX_AGILITY_MICRO_VERSION 2)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
@@ -153,6 +153,13 @@ FetchContent_Declare(
     SOURCE_DIR     "${GFX_DXTIMING_PATH}"
 )
 FetchContent_MakeAvailable(DxTimingCaptureLibrary)
+# Retail Agility SDKs also define D3D12_PREVIEW_SDK_VERSION, which the library takes to mean preview headers that
+# declare the linear algebra marker, so drop that marker from the decoded ones
+file(READ "${GFX_DXTIMING_PATH}/include/DxTimingCaptureLibrary/MarkerOp.h" DXTIMING_MARKER_OP_CONTENTS)
+string(REGEX REPLACE "[ \t]*macro\\(ConvertLinearAlgebraMatrix[^\n]*\n" "" DXTIMING_MARKER_OP_PATCHED "${DXTIMING_MARKER_OP_CONTENTS}")
+if(NOT "${DXTIMING_MARKER_OP_PATCHED}" STREQUAL "${DXTIMING_MARKER_OP_CONTENTS}")
+    file(WRITE "${GFX_DXTIMING_PATH}/include/DxTimingCaptureLibrary/MarkerOp.h" "${DXTIMING_MARKER_OP_PATCHED}")
+endif()
 # The library provides no CMake target, and is built separately as its decoder relies on exceptions
 add_library(DxTimingCaptureLibrary STATIC
     "${GFX_DXTIMING_PATH}/lib/AllocationTracker.cpp"
@@ -184,7 +191,7 @@ endif()
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v3.0.1
+    GIT_TAG        v3.3.0
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
     FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
 )
