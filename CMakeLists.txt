@@ -191,7 +191,7 @@ endif()
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v3.0.1
+    GIT_TAG        v3.3.0
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
     FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
 )
