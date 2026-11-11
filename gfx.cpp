@@ -518,7 +518,7 @@ class GfxInternal
     uint32_t window_height_ = 0;
     uint32_t max_frames_in_flight_ = 0;
 
-    ID3D12Device *device_ = nullptr;
+    ID3D12Device16 *device_ = nullptr;
     IDXGIAdapter1 *adapter_ = nullptr;
     ID3D12Device5 *dxr_device_ = nullptr;
     ID3D12Device2 *mesh_device_ = nullptr;
@@ -1791,12 +1791,6 @@ public:
             ID3D12InfoQueue1 *debug_callback = nullptr;
             if(SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&debug_callback))))
             {
-                // Every CheckFeatureSupport() call, including the ones made by dependencies, is reported as superseded by CheckFeatureSupport1()
-                D3D12_MESSAGE_ID deny_ids[] = { D3D12_MESSAGE_ID_DEPRECATED_API };
-                D3D12_INFO_QUEUE_FILTER filter = {};
-                filter.DenyList.NumIDs = ARRAYSIZE(deny_ids);
-                filter.DenyList.pIDList = deny_ids;
-                debug_callback->PushStorageFilter(&filter);
                 DWORD cookie = 0;
                 D3D12MessageFunc callback = [](D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_SEVERITY severity,
                                                D3D12_MESSAGE_ID, LPCSTR description, void *)
@@ -1866,7 +1860,7 @@ public:
 
     GfxResult initialize(ID3D12Device *device, uint32_t max_frames_in_flight, GfxContext &context)
     {
-        if(!device)
+        if(!device || !SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&device_))))  // retains the device
             return GFX_SET_ERROR(kGfxResult_InvalidParameter, "An invalid D3D12 device was supplied");
         IDXGIFactory4 *factory = nullptr;
         if(!SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory))))
@@ -1875,12 +1869,10 @@ public:
         if(!SUCCEEDED(factory->EnumAdapterByLuid(device->GetAdapterLuid(), IID_PPV_ARGS(&adapter_))))
             return GFX_SET_ERROR(kGfxResult_InternalError, "Unable to find interop adapter");
 
-        device_ = device;
         is_interop_ = true;
         max_frames_in_flight_ = GFX_MAX(max_frames_in_flight, 1u);
         device->QueryInterface(IID_PPV_ARGS(&dxr_device_));
         device->QueryInterface(IID_PPV_ARGS(&mesh_device_));
-        device->AddRef();   // retain device
         factory->Release();
 
         D3D12_COMMAND_QUEUE_DESC
@@ -1898,12 +1890,12 @@ public:
     GfxResult initializeCommon(GfxContext &context)
     {
         D3D12_FEATURE_DATA_D3D12_OPTIONS5 rt_features = {};
-        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5));
+        device_->CheckFeatureSupport1(D3D12_FEATURE_D3D12_OPTIONS5, &rt_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS5), D3D12_SDK_VERSION);
         if(rt_features.RaytracingTier < D3D12_RAYTRACING_TIER_1_1) { if(dxr_device_ != nullptr) dxr_device_->Release(); dxr_device_ = nullptr; }
         if(dxr_device_ == nullptr && dxr_command_list_ != nullptr) { dxr_command_list_->Release(); dxr_command_list_ = nullptr; }
 
         D3D12_FEATURE_DATA_D3D12_OPTIONS7 mesh_features = {};
-        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS7, &mesh_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS7));
+        device_->CheckFeatureSupport1(D3D12_FEATURE_D3D12_OPTIONS7, &mesh_features, sizeof(D3D12_FEATURE_DATA_D3D12_OPTIONS7), D3D12_SDK_VERSION);
         if(mesh_features.MeshShaderTier < D3D12_MESH_SHADER_TIER_1) { if(mesh_device_ != nullptr) mesh_device_->Release(); mesh_device_ = nullptr; }
         if(mesh_device_ == nullptr && mesh_command_list_ != nullptr) { mesh_command_list_->Release(); mesh_command_list_ = nullptr; }
 
@@ -4479,7 +4471,7 @@ public:
         if(transition)
             submitPipelineBarriers();
         D3D12_FEATURE_DATA_D3D12_OPTIONS13 features = {};   // feature check
-        device_->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS13, &features, sizeof(features));
+        device_->CheckFeatureSupport1(D3D12_FEATURE_D3D12_OPTIONS13, &features, sizeof(features), D3D12_SDK_VERSION);
         bool unrestricted_pitch = features.UnrestrictedBufferTextureCopyPitchSupported;
         for(uint32_t mip_level = 0; mip_level < dst.mip_levels; ++mip_level)
         {

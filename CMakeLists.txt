@@ -119,7 +119,7 @@ endif()
 
 set(GFX_AGILITY_PATH "${CMAKE_CURRENT_SOURCE_DIR}/third_party/directx12-agility")
 set(GFX_AGILITY_VERSION 620)
-set(GFX_AGILITY_MICRO_VERSION 1)
+set(GFX_AGILITY_MICRO_VERSION 2)
 target_compile_definitions(gfx PRIVATE GFX_AGILITY_VERSION=${GFX_AGILITY_VERSION})
 FetchContent_Declare(
     DirectX12-Agility
@@ -191,7 +191,7 @@ endif()
 FetchContent_Declare(
     D3D12MemoryAllocator
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/D3D12MemoryAllocator.git
-    GIT_TAG        v3.0.1
+    GIT_TAG        v3.3.0
     SOURCE_DIR     "${GFX_D3D12MA_PATH}"
     FIND_PACKAGE_ARGS NAMES D3D12MemoryAllocator
 )
