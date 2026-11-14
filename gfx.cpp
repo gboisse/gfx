@@ -539,6 +539,7 @@ class GfxInternal
     bool cache_shaders_ = false;
     bool experimental_shaders_ = false;
     bool dred_enabled_ = false;
+    bool extended_pix_markers_ = false;
     bool device_lost_reported_ = false;
     std::unique_ptr<GfxDxTimingCapture> dx_timing_capture_;
     IDxcUtils *dxc_utils_ = nullptr;
@@ -1600,6 +1601,53 @@ public:
             dx_timing_capture_ = nullptr;
     }
 
+    // Must be called before any command queue or command list gets created, as only the ones created
+    // afterwards forward their PIX markers to the driver.
+    void enableDumpFiles()
+    {
+        ID3D12DeviceDumpFile *dump_file = nullptr;
+        D3D12_FEATURE_DATA_DUMP_FILE dump_file_support = {};
+        if(!SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&dump_file))))
+            GFX_PRINT_WARNING("Unable to get D3D12 dump file interface, no DirectX dump file will be retained on device loss");
+        else if(!SUCCEEDED(device_->CheckFeatureSupport1(D3D12_FEATURE_DUMP_FILE, &dump_file_support, sizeof(dump_file_support), D3D12_SDK_VERSION)) || !dump_file_support.SupportedByOS)
+            GFX_PRINT_WARNING("DirectX dump files are not supported by this version of Windows, none will be written on device loss");
+        else
+        {
+            dump_file->RetainDumpFile(true);    // dump files are otherwise deleted once the device loss is processed
+            D3D12_DUMPFILEBEGINCALLBACK const begin_callback = [](UINT64) -> UINT { return 1; }; // always write the dump file
+            // Runs on a runtime thread while the device loss is processed, so must neither reference the device nor call into D3D12
+            D3D12_DUMPFILEENDCALLBACK const end_callback = [](wchar_t const *dump_path)
+            {
+                int32_t const size = (dump_path != nullptr ? WideCharToMultiByte(CP_UTF8, 0, dump_path, -1, nullptr, 0, nullptr, nullptr) : 0);
+                if(size <= 0)
+                    return;
+                std::string path((size_t)size, '\0');
+                WideCharToMultiByte(CP_UTF8, 0, dump_path, -1, path.data(), size, nullptr, nullptr);
+                GFX_PRINTLN("DirectX dump file written to `%s'", path.c_str());
+            };
+            dump_file->SetDumpFileCallbacks(begin_callback, end_callback);
+            // Request driver data with medium overhead and event markers, falling back to no overhead on drivers that do
+            // not support it as only the highest requested overhead level is used
+            UINT const driver_options = dump_file_support.DumpFileDriverOptionsMask & (D3D12_DUMP_FILE_DRIVER_OPTION_NO_OVERHEAD |
+                D3D12_DUMP_FILE_DRIVER_OPTION_MEDIUM_OVERHEAD | D3D12_DUMP_FILE_DRIVER_OPTION_EVENT_MARKERS);
+            if(driver_options != 0 && !SUCCEEDED(dump_file->ConfigureDumpFile((D3D12_DUMP_FILE_DRIVER_OPTIONS)driver_options)))
+                GFX_PRINT_WARNING("Unable to configure DirectX dump files, they will not contain the requested driver data");
+        }
+        if(dump_file != nullptr)
+            dump_file->Release();
+
+        // Extended PIX markers forward the PIX markers and object names to the driver, so that they are included
+        // in the dump files, as well as in RGP and RGD captures on AMD hardware
+        ID3D12DeviceTools2 *device_tools = nullptr;
+        D3D12_FEATURE_DATA_USER_DEFINED_ANNOTATION annotation_support = {};
+        if(!SUCCEEDED(device_->CheckFeatureSupport1(D3D12_FEATURE_USER_DEFINED_ANNOTATION, &annotation_support, sizeof(annotation_support), D3D12_SDK_VERSION)) ||
+           !annotation_support.Supported || !SUCCEEDED(device_->QueryInterface(IID_PPV_ARGS(&device_tools))))
+            return; // the driver does not support extended PIX markers
+        if(SUCCEEDED(device_tools->SetUserDefinedAnnotationMode(D3D12_USER_DEFINED_ANNOTATION_MODE_DRIVER_RETAIL)))
+            extended_pix_markers_ = true;
+        device_tools->Release();
+    }
+
     GfxResult initializeDevice(GfxCreateContextFlags flags, IDXGIAdapter *adapter, IDXGIFactory1 *factory)
     {
         if(GetD3D12SDKVersion() != GFX_AGILITY_VERSION)
@@ -1759,6 +1807,9 @@ public:
                 debug_callback->Release();
             }
         }
+
+        if((flags & kGfxCreateContextFlag_EnableDRED) != 0)
+            enableDumpFiles();
 
         D3D12_COMMAND_QUEUE_DESC
         queue_desc      = {};
@@ -5148,12 +5199,38 @@ public:
         return kGfxResult_NoError;
     }
 
+    // The patched PIX header also pushes the markers through the RGP marker extension; hide it while the driver
+    // receives the markers with extended PIX markers, as RGP and RGD captures would otherwise show them twice.
+    class AmdMarkerExtensionBypass
+    {
+        GFX_NON_COPYABLE(AmdMarkerExtensionBypass);
+        bool const bypass_;
+        IAmdExtD3DDevice1 *const amd_ext_device_;
+        bool const check_amd_driver_;
+
+    public:
+        AmdMarkerExtensionBypass(bool bypass) : bypass_(bypass), amd_ext_device_(tls_pAmdExtDeviceObject), check_amd_driver_(tls_checkAmdDriver)
+        {
+            if(!bypass_) return;
+            tls_pAmdExtDeviceObject = nullptr;
+            tls_checkAmdDriver = false;
+        }
+
+        ~AmdMarkerExtensionBypass()
+        {
+            if(!bypass_) return;
+            tls_pAmdExtDeviceObject = amd_ext_device_;
+            tls_checkAmdDriver = check_amd_driver_;
+        }
+    };
+
     GfxResult encodeBeginEvent(uint64_t color, char const *format, va_list args)
     {
         char buffer[4096];
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
         vsnprintf(buffer, sizeof(buffer), format, args);
+        AmdMarkerExtensionBypass const amd_ext_bypass(extended_pix_markers_);
         IAmdExtD3DDevice1 *amd_ext_device = tls_pAmdExtDeviceObject;
         PIXBeginEvent(command_list_, color, buffer);
         if(amd_ext_device == nullptr && tls_pAmdExtDeviceObject != nullptr)
@@ -5165,6 +5242,7 @@ public:
     {
         if(command_list_ == nullptr)
             return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Cannot encode without a valid command list");
+        AmdMarkerExtensionBypass const amd_ext_bypass(extended_pix_markers_);
         IAmdExtD3DDevice1 *amd_ext_device = tls_pAmdExtDeviceObject;
         PIXEndEvent(command_list_);
         if(amd_ext_device == nullptr && tls_pAmdExtDeviceObject != nullptr)
