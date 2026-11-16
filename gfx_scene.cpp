@@ -28,6 +28,8 @@ SOFTWARE.
 #include <map>
 #include <set>
 #include <functional>
+#include <ranges>
+#include <charconv>
 #include <ios>
 #include <fstream>
 #include <tiny_obj_loader.h>   // obj loader
@@ -183,6 +185,11 @@ class GfxSceneInternal
     GfxArray<GfxMetadata> render_instance_metadata_;
     GfxHandles render_instance_handles_;
 
+    GfxArray<GfxOpacityMicromap> opacity_micromaps_;
+    GfxArray<uint64_t> opacity_micromap_refs_;
+    GfxArray<GfxMetadata> opacity_micromap_metadata_;
+    GfxHandles opacity_micromap_handles_;
+
     template<typename TYPE> GfxArray<TYPE> &objects_();
     template<typename TYPE> GfxArray<uint64_t> &object_refs_();
     template<typename TYPE> GfxArray<GfxMetadata> &object_metadata_();
@@ -233,10 +240,15 @@ class GfxSceneInternal
     template<> inline GfxArray<GfxMetadata>& object_metadata_<GfxRenderInstance>() { return render_instance_metadata_; }
     template<> inline GfxHandles& object_handles_<GfxRenderInstance>() { return render_instance_handles_; }
 
+    template<> inline GfxArray<GfxOpacityMicromap>& objects_<GfxOpacityMicromap>() { return opacity_micromaps_; }
+    template<> inline GfxArray<uint64_t>& object_refs_<GfxOpacityMicromap>() { return opacity_micromap_refs_; }
+    template<> inline GfxArray<GfxMetadata>& object_metadata_<GfxOpacityMicromap>() { return opacity_micromap_metadata_; }
+    template<> inline GfxHandles& object_handles_<GfxOpacityMicromap>() { return opacity_micromap_handles_; }
+
 public:
     GfxSceneInternal(GfxScene &scene) : gltf_node_handles_("gltf_node"), animation_handles_("animation"), skin_handles_("skin"), camera_handles_("camera")
                                       , image_handles_("image"), material_handles_("material"), mesh_handles_("mesh"), mesh_instance_handles_("mesh_instance")
-                                      , render_instance_handles_("render_instance")
+                                      , render_instance_handles_("render_instance"), opacity_micromap_handles_("opacity_micromap")
                                       { scene.handle = reinterpret_cast<uint64_t>(this); }
     ~GfxSceneInternal() { terminate(); }
 
@@ -298,6 +310,7 @@ public:
         clearObjects<GfxMesh>();
         clearObjects<GfxMeshInstance>();
         clearObjects<GfxRenderInstance>();
+        clearObjects<GfxOpacityMicromap>();
         clearNodes();
 
         return kGfxResult_NoError;
@@ -1226,6 +1239,236 @@ private:
 #endif //! NDEBUG
         if(gltf_model->scenes_count == 0)
             return kGfxResult_NoError;  // nothing needs loading
+        std::map<size_t, GfxConstRef<GfxOpacityMicromap>> opacityMicromaps;
+        for(uint64_t ext = 0; ext < gltf_model->data_extensions_count; ++ext)
+        {
+            cgltf_extension const &gltf_extension = gltf_model->data_extensions[ext];
+            if(strcmp(gltf_extension.name, "EXT_mesh_opacity_micromap") == 0)
+            {
+                struct Micromap
+                {
+                    uint32_t data = 0;
+                    uint32_t triangles = 0;
+                    std::vector<uint32_t> usageCounts;
+                    std::vector<uint32_t> usageLevels;
+                    std::vector<uint32_t> usageFormats;
+                };
+                class OpacityMicromapExtParser
+                {
+                public:
+                    OpacityMicromapExtParser(std::string_view json, std::span<jsmntok_t> tokens) noexcept : json(json), tokens(tokens) {}
+
+                    std::vector<Micromap> parseExtension() const noexcept
+                    {
+                        jsmntok_t const *root = getToken(0);
+                        if(!root)
+                        {
+                            GFX_ASSERTMSG(false, "Invalid opacity micromap extension object");
+                            return {};
+                        }
+                        std::vector<Micromap> micromaps;
+                        int token = 1;
+                        for(int i = 0; i < root->size; ++i)
+                        {
+                            int const keyToken = token;
+                            int const valueToken = skipToken(keyToken);
+                            std::string_view key = getString(keyToken);
+                            if(key == "micromaps")
+                            {
+                                if(!isArray(valueToken))
+                                {
+                                    GFX_ASSERTMSG(false, "Invalid opacity micromap extension object");
+                                    return {};
+                                }
+                                jsmntok_t const *jsonArray = getToken(valueToken);
+                                micromaps.reserve(jsonArray->size);
+                                int elementToken = valueToken + 1;
+                                for(int j = 0; j < jsonArray->size; ++j)
+                                {
+                                    micromaps.push_back(parseMicromap(elementToken));
+                                    elementToken = skipToken(elementToken);
+                                }
+                            }
+                            token = skipToken(valueToken);
+                        }
+                        return micromaps;
+                    }
+
+                private:
+                    bool isObject(int index) const noexcept
+                    {
+                        jsmntok_t const *token = getToken(index);
+                        return token && token->type == JSMN_OBJECT;
+                    }
+
+                    bool isArray(int index) const noexcept
+                    {
+                        jsmntok_t const *token = getToken(index);
+                        return token && token->type == JSMN_ARRAY;
+                    }
+
+                    std::string_view getString(int tokenIndex) const noexcept
+                    {
+                        jsmntok_t const *token = getToken(tokenIndex);
+                        if(!token || token->type != JSMN_STRING)
+                        {
+                            GFX_ASSERTMSG(false, "Expected json string");
+                            return {};
+                        }
+                        return json.substr(token->start, token->end - token->start);
+                    }
+
+                    uint32_t getValue(int tokenIndex) const noexcept
+                    {
+                        jsmntok_t const *token = getToken(tokenIndex);
+                        if(!token || token->type != JSMN_PRIMITIVE)
+                        {
+                            GFX_ASSERTMSG(false, "Expected json primitive");
+                            return std::numeric_limits<uint32_t>::max();
+                        }
+                        char const *begin = json.data() + token->start;
+                        char const *end = json.data() + token->end;
+                        uint32_t value = 0;
+                        auto [ptr, ec] = std::from_chars(begin, end, value);
+                        if(ec != std::errc() || ptr != end)
+                        {
+                            GFX_ASSERTMSG(false, "Expected unsigned integer value");
+                            return std::numeric_limits<uint32_t>::max();
+                        }
+                        return value;
+                    }
+
+                    jsmntok_t const* getToken(int tokenIndex) const noexcept
+                    {
+                        if(tokenIndex < 0 || static_cast<uint32_t>(tokenIndex) >= tokens.size())
+                        {
+                            GFX_ASSERTMSG(false, "Invalid json token index");
+                            return nullptr;
+                        }
+                        return &tokens[tokenIndex];
+                    }
+
+                    int skipToken(int index) const noexcept
+                    {
+                        jsmntok_t const *token = getToken(index);
+                        if(!token)
+                        {
+                            GFX_ASSERTMSG(false, "Invalid json token");
+                            return std::numeric_limits<int>::max();
+                        }
+                        switch(token->type)
+                        {
+                        case JSMN_PRIMITIVE:
+                        case JSMN_STRING:
+                            return index + 1;
+                        case JSMN_ARRAY:
+                        {
+                            int next = index + 1;
+                            for(int i = 0; i < token->size; ++i)
+                                next = skipToken(next);
+                            return next;
+                        }
+                        case JSMN_OBJECT:
+                        {
+                            int next = index + 1;
+                            for(int i = 0; i < token->size; ++i)
+                            {
+                                next = skipToken(next); // skip key
+                                next = skipToken(next); // skip value
+                            }
+                            return next;
+                        }
+                        }
+                        GFX_ASSERTMSG(false, "Invalid json token");
+                        return std::numeric_limits<int>::max();
+                    }
+
+                    std::vector<uint32_t> parseUintArray(int tokenIndex) const noexcept
+                    {
+                        if(!isArray(tokenIndex))
+                        {
+                            GFX_ASSERTMSG(false, "Expected json array");
+                            return {};
+                        }
+                        jsmntok_t const *jsonArray = getToken(tokenIndex);
+                        std::vector<uint32_t> values;
+                        values.reserve(jsonArray->size);
+                        int token = tokenIndex + 1;
+                        for(int i = 0; i < jsonArray->size; ++i)
+                        {
+                            values.push_back(getValue(token));
+                            token = skipToken(token);
+                        }
+                        return values;
+                    }
+
+                    Micromap parseMicromap(int tokenIndex) const noexcept
+                    {
+                        Micromap micromap = {};
+                        if(!isObject(tokenIndex))
+                        {
+                            GFX_ASSERTMSG(false, "Expected micromap object");
+                            return micromap;
+                        }
+                        jsmntok_t const *objectToken = getToken(tokenIndex);
+                        int token = tokenIndex + 1;
+                        for(int i = 0; i < objectToken->size; ++i)
+                        {
+                            int const keyToken = token;
+                            int const valueToken = skipToken(keyToken);
+                            std::string_view key = getString(keyToken);
+                            if (key == "data")
+                                micromap.data = getValue(valueToken);
+                            else if (key == "triangles")
+                                micromap.triangles = getValue(valueToken);
+                            else if (key == "usageCounts")
+                                micromap.usageCounts = parseUintArray(valueToken);
+                            else if (key == "usageLevels")
+                                micromap.usageLevels = parseUintArray(valueToken);
+                            else if (key == "usageFormats")
+                                micromap.usageFormats = parseUintArray(valueToken);
+                            token = skipToken(valueToken);
+                        }
+                        return micromap;
+                    }
+
+                    std::string_view json;
+                    std::span<jsmntok_t> tokens;
+                };
+
+                // Parse Opacity Micromaps data
+                size_t const extension_length = strlen(gltf_extension.data);
+                jsmn_parser parser;
+                jsmn_init(&parser);
+                int token_count = jsmn_parse(&parser, gltf_extension.data, extension_length, nullptr, 0);
+                if(token_count <= 0)
+                    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to parse opacity micromaps data in gltf file `%s'. ", asset_file);
+                std::vector<jsmntok_t> tokens(token_count);
+                jsmn_init(&parser);
+                token_count = jsmn_parse(&parser, gltf_extension.data, extension_length, tokens.data(), token_count);
+                if(token_count <= 0)
+                    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to parse opacity micromaps data in gltf file `%s'", asset_file);
+                OpacityMicromapExtParser const ext_parser(std::string_view(gltf_extension.data, extension_length), tokens);
+                std::vector<Micromap> micromaps = ext_parser.parseExtension();
+                for (size_t i = 0; i < micromaps.size(); ++i)
+                {
+                    Micromap &micromap = micromaps[i];
+                    GfxRef<GfxOpacityMicromap> omm = gfxSceneCreateOpacityMicromap(scene);
+                    cgltf_buffer_view const &data_view = gltf_model->buffer_views[micromap.data];
+                    uint8_t const *buffer_data = cgltf_buffer_view_data(&data_view);
+                    omm->data = std::vector<uint8_t>(buffer_data, buffer_data + data_view.size);
+                    cgltf_buffer_view const &triangles_view = gltf_model->buffer_views[micromap.triangles];
+                    auto buffer_triangles = reinterpret_cast<D3D12_RAYTRACING_OPACITY_MICROMAP_DESC const *>(cgltf_buffer_view_data(&triangles_view));
+                    omm->descs = std::vector<D3D12_RAYTRACING_OPACITY_MICROMAP_DESC>(buffer_triangles, buffer_triangles + triangles_view.size / sizeof(D3D12_RAYTRACING_OPACITY_MICROMAP_DESC));
+                    omm->usageCounts = std::move(micromap.usageCounts);
+                    omm->usageLevels = std::move(micromap.usageLevels);
+                    omm->usageFormats.reserve(micromap.usageFormats.size());
+                    for(auto usageFormat : micromap.usageFormats)
+                        omm->usageFormats.push_back(usageFormat == 1 ? D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT_OC1_2_STATE : D3D12_RAYTRACING_OPACITY_MICROMAP_FORMAT_OC1_4_STATE);
+                    opacityMicromaps[i] = omm;
+                }
+            }
+        }
         std::map<cgltf_skin const *, GfxConstRef<GfxSkin>> skins;
         for(size_t i = 0; i < gltf_model->skins_count; ++i)
         {
@@ -1655,8 +1898,14 @@ private:
             if(it != textures.end()) material.ao_map = (*it).second;
             materials[&gltf_material] = material_ref;
         }
-        typedef std::pair<GfxConstRef<GfxMesh>, GfxConstRef<GfxMaterial>> instance_pair;
-        std::map<cgltf_mesh const *, std::vector<instance_pair>> meshes;
+        struct InstanceInfo
+        {
+            GfxConstRef<GfxMesh> mesh;
+            GfxConstRef<GfxMaterial> material;
+            GfxConstRef<GfxOpacityMicromap> opacityMicromap;
+            std::vector<int> opacityMicromapIndices;
+        };
+        std::map<cgltf_mesh const *, std::vector<InstanceInfo>> meshes;
         struct MeshAccessors
         {
             cgltf_accessor const *indices;
@@ -1710,7 +1959,7 @@ private:
         for(size_t i = 0; i < gltf_model->meshes_count; ++i)
         {
             cgltf_mesh const &gltf_mesh = gltf_model->meshes[i];
-            std::vector<instance_pair> &mesh_list = meshes[&gltf_mesh];
+            std::vector<InstanceInfo> &mesh_list = meshes[&gltf_mesh];
             for(size_t j = 0; j < gltf_mesh.primitives_count; ++j)
             {
                 cgltf_primitive const &gltf_primitive = gltf_mesh.primitives[j];
@@ -1748,6 +1997,48 @@ private:
                     it = std::find_if(gltf_primitive.targets[k].attributes, target_attributes_end,
                         [&](const cgltf_attribute& x) { return x.type == cgltf_attribute_type_texcoord; });
                     accessors.targets[k].uvs = it != target_attributes_end ? it->data : nullptr;
+                }
+                GfxConstRef<GfxOpacityMicromap> opacityMicromap;
+                std::vector<int> ommIndices;
+                if(gltf_primitive.extensions_count != 0)
+                {
+                    // Extension support for pre-build Opacity Micromaps source data 
+                    for(uint64_t ext = 0; ext < gltf_primitive.extensions_count; ++ext)
+                    {
+                        if(strcmp(gltf_primitive.extensions[ext].name, "EXT_mesh_opacity_micromap") == 0)
+                        {
+                            // Need to get the root micromap index and indices accessor index out of the extension
+                            std::string json = gltf_primitive.extensions[ext].data;
+                            json.erase(
+                                remove_if(json.begin(), json.end(),
+                                    [](char c) { return (c == '\r' || c == '\t' || c == ' ' || c == '\n'); }),
+                                json.end());
+                            constexpr std::string_view micromap_tag = "\"micromap\":";
+                            if(auto pos = json.find(micromap_tag); pos != std::string::npos)
+                            {
+                                pos += micromap_tag.length();
+                                std::string clipped = json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
+                                uint64_t const micromap_index = strtoull(clipped.c_str(), nullptr, 10);
+                                auto omm_it = opacityMicromaps.find(micromap_index);
+                                if(omm_it != opacityMicromaps.end())
+                                {
+                                    opacityMicromap = omm_it->second;
+                                }
+                            }
+                            constexpr std::string_view micromap_indices_tag = "\"micromapIndices\":";
+                            if(auto pos = json.find(micromap_indices_tag); pos != std::string::npos)
+                            {
+                                pos += micromap_indices_tag.length();
+                                std::string clipped = json.substr(pos, json.find_first_not_of("0123456789", pos + 1) - pos);
+                                uint64_t const accessor_index = strtoull(clipped.c_str(), nullptr, 10);
+                                if(accessor_index >= gltf_model->accessors_count)
+                                    return GFX_SET_ERROR(kGfxResult_InvalidOperation, "Failed to parse opacity micromaps data in gltf file `%s'", asset_file);
+                                cgltf_accessor const *accessor = &gltf_model->accessors[accessor_index];
+                                ommIndices.resize(accessor->count);
+                                cgltf_accessor_unpack_indices(accessor, ommIndices.data(), sizeof(int), accessor->count);
+                            }
+                        }
+                    }
                 }
                 auto mesh_it = meshInstances.find(accessors);
                 if(mesh_it == meshInstances.end())
@@ -1861,7 +2152,7 @@ private:
                         materials.find(gltf_primitive.material);
                     if(it2 != materials.end()) material = (*it2).second;
                 }
-                mesh_list.push_back(std::make_pair(current_mesh, material));
+                mesh_list.emplace_back(current_mesh, material, opacityMicromap, std::move(ommIndices));
             }
         }
         std::map<cgltf_node const *, std::set<GfxConstRef<GfxAnimation>>> node_animations;
@@ -1972,18 +2263,21 @@ private:
             }
             if(gltf_node->mesh != nullptr)
             {
-                std::map<cgltf_mesh const *, std::vector<instance_pair>>::const_iterator const it = meshes.find(gltf_node->mesh);
+                auto const it = meshes.find(gltf_node->mesh);
                 if(it != meshes.end())
                 {
-                    mesh_instances.reserve((*it).second.size());
-                    for(size_t i = 0; i < (*it).second.size(); ++i)
+                    std::vector<InstanceInfo> const &instance_infos = it->second;
+                    mesh_instances.reserve(instance_infos.size());
+                    for(size_t i = 0; i < instance_infos.size(); ++i)
                     {
                         GfxRef<GfxMeshInstance> mesh_instance_ref = gfxSceneCreateMeshInstance(scene);
                         mesh_instances.push_back(mesh_instance_ref);
-                        GfxConstRef<GfxMesh> mesh = it->second[i].first;
+                        GfxConstRef<GfxMesh> mesh = instance_infos[i].mesh;
                         mesh_instance_ref->mesh      = mesh;
-                        mesh_instance_ref->material  = it->second[i].second;
+                        mesh_instance_ref->material  = instance_infos[i].material;
                         mesh_instance_ref->skin      = skin;
+                        mesh_instance_ref->opacityMicromap = instance_infos[i].opacityMicromap;
+                        mesh_instance_ref->opacityMicromapIndices = instance_infos[i].opacityMicromapIndices;
                         if(!mesh->morph_targets.empty())
                         {
                             if(gltf_node->weights != nullptr)
@@ -1993,8 +2287,8 @@ private:
                             else
                                 mesh_instance_ref->weights = std::vector<float>(mesh->morph_targets.size() / mesh->vertices.size(), 0.0f);
                         }
-                        GfxMetadata & mesh_instance_metadata = mesh_instance_metadata_[mesh_instance_ref];
-                        GfxMetadata const *mesh_metadata = mesh_metadata_.at(it->second[i].first);
+                        GfxMetadata &mesh_instance_metadata = mesh_instance_metadata_[mesh_instance_ref];
+                        GfxMetadata const *mesh_metadata = mesh_metadata_.at(mesh);
                         if(mesh_metadata != nullptr)
                             mesh_instance_metadata = *mesh_metadata; // set up metadata
                         else
@@ -3511,6 +3805,72 @@ bool gfxSceneSetMaterialMetadata(GfxScene scene, uint64_t material_handle, GfxMe
     GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
     if(!gfx_scene) return false;    // invalid parameter
     return gfx_scene->setObjectMetadata<GfxMaterial>(material_handle, metadata);
+}
+
+GfxRef<GfxOpacityMicromap> gfxSceneCreateOpacityMicromap(GfxScene scene)
+{
+    GfxRef<GfxOpacityMicromap> const omm_ref = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return omm_ref; // invalid parameter
+    return gfx_scene->createObject<GfxOpacityMicromap>(scene);
+}
+
+GfxResult gfxSceneDestroyOpacityMicromap(GfxScene scene, uint64_t omm_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->destroyObject<GfxOpacityMicromap>(omm_handle);
+}
+
+GfxResult gfxSceneDestroyAllOpacityMicromaps(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return kGfxResult_InvalidParameter;
+    return gfx_scene->clearObjects<GfxOpacityMicromap>();
+}
+
+uint32_t gfxSceneGetOpacityMicromapCount(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return 0;    // invalid parameter
+    return gfx_scene->getObjectCount<GfxOpacityMicromap>();
+}
+
+GfxOpacityMicromap const *gfxSceneGetOpacityMicromaps(GfxScene scene)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObjects<GfxOpacityMicromap>();
+}
+
+GfxOpacityMicromap *gfxSceneGetOpacityMicromap(GfxScene scene, uint64_t omm_handle)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return nullptr;  // invalid parameter
+    return gfx_scene->getObject<GfxOpacityMicromap>(omm_handle);
+}
+
+GfxRef<GfxOpacityMicromap> gfxSceneGetOpacityMicromapHandle(GfxScene scene, uint32_t omm_index)
+{
+    GfxRef<GfxOpacityMicromap> const omm_ref  = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return omm_ref; // invalid parameter
+    return gfx_scene->getObjectHandle<GfxOpacityMicromap>(scene, omm_index);
+}
+
+GfxMetadata const &gfxSceneGetOpacityMicromapMetadata(GfxScene scene, uint64_t omm_handle)
+{
+    static GfxMetadata const metadata = {};
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return metadata; // invalid parameter
+    return gfx_scene->getObjectMetadata<GfxOpacityMicromap>(omm_handle);
+}
+
+bool gfxSceneSetOpacityMicromapMetadata(GfxScene scene, uint64_t omm_handle, GfxMetadata const &metadata)
+{
+    GfxSceneInternal *gfx_scene = GfxSceneInternal::GetGfxScene(scene);
+    if(!gfx_scene) return false;    // invalid parameter
+    return gfx_scene->setObjectMetadata<GfxOpacityMicromap>(omm_handle, metadata);
 }
 
 GfxRef<GfxMesh> gfxSceneCreateMesh(GfxScene scene)
